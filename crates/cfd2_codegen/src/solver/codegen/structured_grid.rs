@@ -13,7 +13,8 @@
 //! order is the ascending-column band layout `[S(idx-nx), W(idx-1), diag,
 //! E(idx+1), N(idx+nx)]`: `k = 0` South, `1` West, `2` East, `3` North.
 
-use super::wgsl_ast::{Expr, Stmt, Type};
+use super::wgsl_ast::{AccessMode, Expr, Item, Stmt, Type};
+use super::wgsl_bindings::storage_var;
 use super::wgsl_dsl as dsl;
 
 fn id(s: &str) -> Expr {
@@ -97,6 +98,14 @@ pub fn structured_face_locals() -> Vec<Stmt> {
     ]
 }
 
+/// The boundary TYPE for the current structured face (`face_boundary[sfd_face_id]`,
+/// 0 interior). Kept separate from [`structured_face_locals`] because only the
+/// assembly + flux module need it (and its `face_boundary` binding); the gradient
+/// kernels do not. Parity with the unstructured `face_boundary[face_idx]`.
+pub fn structured_boundary_type() -> Expr {
+    dsl::array_access("face_boundary", id("sfd_face_id"))
+}
+
 /// A `vec2<f32>` expression from two scalar component idents.
 pub fn sfd_vec2(x: &str, y: &str) -> Expr {
     Expr::call_named("vec2<f32>", vec![id(x), id(y)])
@@ -105,6 +114,14 @@ pub fn sfd_vec2(x: &str, y: &str) -> Expr {
 /// A `Vector2(...)` struct expression from two scalar component idents.
 pub fn sfd_vector2(x: &str, y: &str) -> Expr {
     Expr::call_named("Vector2", vec![id(x), id(y)])
+}
+
+/// The structured `face_boundary` storage binding (group 0, binding 1): the
+/// boundary TYPE per `(cell, dir)` face id (`idx*4 + k`), `0` on interior faces.
+/// Emitted alongside the `grid` uniform by every structured face-gathering
+/// kernel so `sfd_boundary_type` resolves.
+pub fn structured_face_boundary_binding() -> Item {
+    storage_var("face_boundary", Type::array(Type::U32), 0, 1, AccessMode::Read)
 }
 
 /// The structured bound guard `idx >= grid.nx * grid.ny` (a `Stmt::If` returning).

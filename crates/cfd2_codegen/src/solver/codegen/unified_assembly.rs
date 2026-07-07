@@ -395,9 +395,15 @@ fn structured_face_head() -> Vec<Stmt> {
         // SlipWall (boundary_type==4) is not represented on the structured grid
         // yet; a neutral tag keeps the diffusion/convection physics on its
         // default BC path (Dirichlet/Neumann via the bc table).
-        dsl::let_expr("boundary_type", Expr::from(0u32)),
         // Per-(cell,direction) face id for the BC table lookup (sized N*4).
         dsl::let_expr("face_idx", id("idx") * 4u32 + k()),
+        // Real boundary TYPE per (cell,dir) from the structured `face_boundary`
+        // array (0 interior) — full parity with `face_boundary[face_idx]`, so the
+        // SlipWall projection (boundary_type==4) works.
+        dsl::let_expr(
+            "boundary_type",
+            dsl::array_access("face_boundary", id("face_idx")),
+        ),
     ]
 }
 

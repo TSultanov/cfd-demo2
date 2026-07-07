@@ -143,6 +143,28 @@ impl StructuredCpuSolver {
         // BC table is keyed by the per-(cell, direction) face id `idx*4 + k`.
         buffers.insert_u32("bc_kind", vec![0u32; n * 4]);
         buffers.insert_f32("bc_value", vec![0.0; n * 4]);
+        // Boundary TYPE per (cell, dir); unused by the scalar diffusion operator
+        // (no SlipWall / boundary-type flux), but the assembly reads it, so it
+        // must exist. Walls carry type 3, matching the unstructured face_boundary.
+        let mut face_boundary = vec![0u32; n * 4];
+        for j in 0..grid.ny {
+            for i in 0..grid.nx {
+                let p = j * grid.nx + i;
+                if j == 0 {
+                    face_boundary[p * 4] = 3;
+                }
+                if i == 0 {
+                    face_boundary[p * 4 + 1] = 3;
+                }
+                if i == grid.nx - 1 {
+                    face_boundary[p * 4 + 2] = 3;
+                }
+                if j == grid.ny - 1 {
+                    face_boundary[p * 4 + 3] = 3;
+                }
+            }
+        }
+        buffers.insert_u32("face_boundary", face_boundary);
 
         Ok(Self {
             grid,
@@ -746,9 +768,8 @@ impl StructuredModelSolver {
         let flux_stride = recipe.flux.map(|f| f.stride as usize).unwrap_or(1);
 
         // Group the schedule exactly like the CPU/GPU driver (ScheduleGroups):
-        // prep (Preparation, non-bc_expr) once; per-iter gradients/flux/assembly;
-        // update/recovery. bc_expr (compressible boundary closure) is not yet
-        // structured, so structured models must not schedule it.
+        // prep (Preparation, incl. the now-structured `bc_expr` expression-valued
+        // boundary closure) once; per-iter gradients/flux/assembly; update/recovery.
         let mut prep = Vec::new();
         let mut per_iter = Vec::new();
         let mut update = Vec::new();
@@ -757,15 +778,9 @@ impl StructuredModelSolver {
             let id = k.id.as_str().to_string();
             match k.phase {
                 KernelPhase::Preparation => {
-                    if id.contains("bc_expr") {
-                        // bc_expr (the expression-valued boundary closure) is
-                        // face-dispatched and not yet structured. Skip it: the
-                        // BC tables set by `set_boundaries` are used directly
-                        // (simple Dirichlet/Neumann work; the compressible
-                        // zero-gradient/characteristic extrapolation closure is
-                        // a documented structured follow-up).
-                        continue;
-                    }
+                    // `bc_expr` is cell-dispatched structured (walks each cell's 4
+                    // faces, rewriting `bc_value` from interior state on boundary
+                    // faces) — full parity with the unstructured face-dispatch.
                     prep.push(id.clone());
                 }
                 KernelPhase::Gradients | KernelPhase::FluxComputation | KernelPhase::Assembly => {
@@ -806,6 +821,10 @@ impl StructuredModelSolver {
         buffers.insert_vec2("grad_state", vec![0.0; n * state_stride * 2]);
         buffers.insert_u32("bc_kind", vec![0u32; n * 4 * s]);
         buffers.insert_f32("bc_value", vec![0.0; n * 4 * s]);
+        // Boundary TYPE per (cell, dir), matching the unstructured
+        // `face_boundary` encoding (bc_table_index: 0 interior, 1 Inlet, 2 Outlet,
+        // 3 Wall, 4 SlipWall, 5 MovingWall).
+        buffers.insert_u32("face_boundary", vec![0u32; n * 4]);
 
         let mut constants = recipe.initial_constants;
         constants.dtau = 0.0;
@@ -840,15 +859,18 @@ impl StructuredModelSolver {
         }
     }
 
-    /// Set the per-(cell,direction,unknown) BC table from a closure of the edge
-    /// and face-centre coords. `edge` is which domain edge the boundary face sits
-    /// on; the closure returns one [`BcComp`] per coupled unknown (length `s`).
-    pub fn set_boundaries<F: Fn(Edge, f64, f64) -> Vec<BcComp>>(&mut self, f: F) {
+    /// Set the per-(cell,direction) boundary TYPE + per-unknown BC table from a
+    /// closure of the edge and face-centre coords. The closure returns the
+    /// boundary type ([`GpuBoundaryType`] code: 1 Inlet, 2 Outlet, 3 Wall,
+    /// 4 SlipWall, 5 MovingWall) and one [`BcComp`] per coupled unknown (length
+    /// `s`) — full parity with the unstructured `face_boundary` + `bc_kind/value`.
+    pub fn set_boundaries<F: Fn(Edge, f64, f64) -> (u32, Vec<BcComp>)>(&mut self, f: F) {
         let (nx, ny, s) = (self.grid.nx, self.grid.ny, self.s);
         let (dx, dy) = (self.grid.dx, self.grid.dy);
         let n = self.grid.num_cells();
         let mut bc_kind = vec![0u32; n * 4 * s];
         let mut bc_value = vec![0.0f32; n * 4 * s];
+        let mut face_boundary = vec![0u32; n * 4];
         for j in 0..ny {
             for i in 0..nx {
                 let p = j * nx + i;
@@ -864,7 +886,8 @@ impl StructuredModelSolver {
                     if !is_b {
                         continue;
                     }
-                    let comps = f(edge, fx, fy);
+                    let (btype, comps) = f(edge, fx, fy);
+                    face_boundary[p * 4 + k] = btype;
                     for (c, bc) in comps.iter().enumerate().take(s) {
                         let idx = (p * 4 + k) * s + c;
                         bc_kind[idx] = bc.kind;
@@ -875,6 +898,7 @@ impl StructuredModelSolver {
         }
         self.buffers.insert_u32("bc_kind", bc_kind);
         self.buffers.insert_f32("bc_value", bc_value);
+        self.buffers.insert_u32("face_boundary", face_boundary);
     }
 
     fn build_ctx(&self) -> Ctx {
@@ -968,6 +992,29 @@ impl StructuredModelSolver {
         (0..self.grid.num_cells())
             .map(|p| st[p * self.state_stride + offset] as f64)
             .collect()
+    }
+
+    /// Run only the Preparation-phase kernels once (including the structured
+    /// expression-BC closure `bc_expr`) against the currently-seeded state — for
+    /// tests that assert what `bc_expr` writes into `bc_value` before any solve.
+    #[cfg(test)]
+    pub fn run_prep_for_test(&mut self) {
+        let n = self.grid.num_cells();
+        self.constants.dt = self.dt as f32;
+        self.constants.dt_old = self.dt as f32;
+        let ctx = self.build_ctx();
+        let ids = self.prep.clone();
+        for id in &ids {
+            self.run(id, n, &ctx);
+        }
+    }
+
+    /// Read one `bc_value` table entry for `(cell, dir, unknown)` — the structured
+    /// key is `(cell*4 + dir)*s + unknown` (parity with `set_boundaries`).
+    #[cfg(test)]
+    pub fn bc_value_at(&self, cell: usize, dir: usize, unknown: usize) -> f64 {
+        let bcv = self.buffers.f32_vec("bc_value");
+        bcv[(cell * 4 + dir) * self.s + unknown] as f64
     }
 
     /// Set the (uniform) fluid density and dynamic viscosity.
@@ -1263,11 +1310,13 @@ mod tests {
         // zero-gradient (Neumann 0) everywhere. Components: 0=Ux, 1=Uy, 2=p.
         solver.set_boundaries(|edge, _x, _y| {
             let u_wall = if matches!(edge, Edge::Top) { 1.0 } else { 0.0 };
-            vec![
+            // Top = MovingWall (5), other sides = Wall (3); velocity via bc_value.
+            let btype = if matches!(edge, Edge::Top) { 5 } else { 3 };
+            (btype, vec![
                 BcComp { kind: 1, value: u_wall }, // Ux Dirichlet
                 BcComp { kind: 1, value: 0.0 },    // Uy Dirichlet 0
                 BcComp { kind: 2, value: 0.0 },    // p Neumann 0
-            ]
+            ])
         });
 
         for _ in 0..40 {
@@ -1327,6 +1376,7 @@ mod tests {
         // zero-gradient (adiabatic).
         solver.set_boundaries(move |edge, _x, _y| {
             let u_wall = if matches!(edge, Edge::Top) { 1.0 } else { 0.0 };
+            let btype = if matches!(edge, Edge::Top) { 5 } else { 3 };
             let mut v = vec![
                 BcComp { kind: 1, value: u_wall },
                 BcComp { kind: 1, value: 0.0 },
@@ -1335,7 +1385,7 @@ mod tests {
             if s >= 4 {
                 v.push(BcComp { kind: 2, value: 0.0 }); // T Neumann 0
             }
-            v
+            (btype, v)
         });
 
         for _ in 0..30 {
@@ -1361,7 +1411,7 @@ mod tests {
     /// box with the boundaries pinned to that state must stay uniform and bounded
     /// while the full structured conserved (rho, rho_u, rho_e) central-upwind
     /// operator runs. Proves compressible SOLVES structured on CPU (the
-    /// expression-BC closure `bc_expr` is skipped — a documented follow-up).
+    /// structured expression-BC closure `bc_expr` runs in the prep phase).
     #[test]
     fn structured_compressible_uniform_box_runs() {
         use crate::solver::model::compressible_structured_model;
@@ -1390,7 +1440,7 @@ mod tests {
             if s >= 4 {
                 v.push(BcComp { kind: 1, value: e0 as f32 });
             }
-            v
+            (3, v) // Wall
         });
 
         for _ in 0..20 {
@@ -1403,6 +1453,76 @@ mod tests {
             assert!(r > 0.5 && r < 2.0, "compressible density drifted: {r}");
             assert!(re > 1.0 && re < 5.0, "compressible energy drifted: {re}");
         }
+    }
+
+    /// BC PARITY: the structured `bc_expr` closure must extrapolate outlet state
+    /// from the interior exactly as the unstructured (face-dispatched) path does.
+    /// The compressible outlet declares `rho := max(interior(rho), 1e-6)`; seed a
+    /// non-uniform interior, tag every boundary Outlet with a sentinel `bc_value`,
+    /// run the Preparation phase (which fires `bc_expr`), then assert each outlet
+    /// face's `bc_value` now equals that owner cell's interior density — proving
+    /// the cell-dispatched 4-face loop reads interior state and keys `bc_value` by
+    /// `sfd_face_id` correctly (the sentinel is overwritten).
+    #[test]
+    fn structured_bc_expr_extrapolates_outlet_from_interior() {
+        use crate::solver::model::compressible_structured_model;
+        let (nx, ny) = (8, 6);
+        let grid = StructuredGrid::new(nx, ny, 1.0, 1.0);
+        let model = compressible_structured_model().unwrap();
+        let s = model.system.unknowns_per_cell() as usize;
+        let mut solver = StructuredModelSolver::new(grid, &model, 0.01, 1).unwrap();
+        solver.set_fluid(1.0, 0.0);
+
+        // Non-uniform interior density rho(x) = 1 + 0.3 x (all > 1e-6, so the
+        // clamp is a no-op); the rest of the state kept thermodynamically sane.
+        let rho_field = |x: f64, _y: f64| 1.0 + 0.3 * x;
+        solver.set_named_field("rho", rho_field);
+        solver.set_named_field("rho_e", |_, _| 2.5);
+        solver.set_named_field("p", |_, _| 1.0);
+        solver.set_named_field("T", |_, _| 1.0);
+        if solver.field_offset("mu").is_some() {
+            solver.set_named_field("mu", |_, _| 0.0);
+        }
+
+        // Every boundary = Outlet (type 2); the rho slot seeded with a sentinel
+        // that `bc_expr` must overwrite from the interior.
+        const SENTINEL: f32 = -999.0;
+        solver.set_boundaries(move |_edge, _x, _y| {
+            let mut v = vec![
+                BcComp { kind: 0, value: SENTINEL },
+                BcComp { kind: 0, value: 0.0 },
+                BcComp { kind: 0, value: 0.0 },
+            ];
+            if s >= 4 {
+                v.push(BcComp { kind: 0, value: 0.0 });
+            }
+            (2, v) // Outlet
+        });
+
+        solver.run_prep_for_test();
+
+        // The rho coupled-unknown slot (parity with what `bc_expr` targeted).
+        let flux_layout = crate::solver::model::FluxLayout::from_system(&model.system);
+        let rho_unknown = flux_layout.offset_for("rho").expect("rho unknown") as usize;
+
+        // Right-edge cells (i = nx-1): the East face (dir 2) is an outlet.
+        let mut checked = 0;
+        for j in 0..ny {
+            let cell = j * nx + (nx - 1);
+            let (cx, _cy) = solver.grid.cell_center(cell);
+            let expected = rho_field(cx, 0.0).max(1e-6);
+            let got = solver.bc_value_at(cell, 2, rho_unknown);
+            assert!(
+                (got - expected).abs() < 1e-5,
+                "outlet rho bc mismatch at cell {cell}: got {got}, expected {expected}"
+            );
+            assert!(
+                (got - SENTINEL as f64).abs() > 1.0,
+                "bc_expr left the sentinel at cell {cell} — the closure did not run"
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, ny, "expected one outlet face per right-edge row");
     }
 
     /// Not an assertion — prints an ASCII heat map of the structured IBM solve so

@@ -23,6 +23,7 @@ use crate::solver::model::module::KernelBundleModule;
 use crate::solver::model::{FluxLayout, KernelId, ModelSpec};
 
 use cfd2_codegen::solver::codegen::bc_table::BcTable;
+use cfd2_codegen::solver::codegen::structured_grid as sg;
 use cfd2_codegen::solver::codegen::wgsl_ast::{Expr, Stmt};
 use cfd2_codegen::solver::codegen::wgsl_dsl as dsl;
 use cfd2_ir::kernel::{
@@ -136,8 +137,11 @@ fn bc_ident(field: &str, component: u32) -> String {
     format!("bcv_{}_c{}", field, component)
 }
 
-/// Lower a `BoundaryExpr` to WGSL, resolving atoms to snapshot lets.
-fn lower_expr(expr: &BoundaryExpr) -> Expr {
+/// Lower a `BoundaryExpr` to WGSL, resolving atoms to snapshot lets. On the
+/// structured path the outward face normal comes from the `sfd_*` descriptor
+/// (`sfd_normal_x/_y`) instead of a `face_normals[idx]` buffer read.
+fn lower_expr(expr: &BoundaryExpr, structured: bool) -> Expr {
+    let lower_expr = |e: &BoundaryExpr| lower_expr(e, structured);
     match expr {
         BoundaryExpr::Lit(v) => Expr::lit_f32(*v as f32),
         BoundaryExpr::Param(p) => Expr::ident("constants").field(p.name()),
@@ -154,8 +158,13 @@ fn lower_expr(expr: &BoundaryExpr) -> Expr {
         BoundaryExpr::Neg(a) => -lower_expr(a),
         BoundaryExpr::Sqrt(a) => dsl::sqrt(lower_expr(a)),
         BoundaryExpr::Normal { component } => {
-            let comp = if *component == 0 { "x" } else { "y" };
-            dsl::array_access("face_normals", Expr::ident("idx")).field(comp)
+            if structured {
+                let n = if *component == 0 { "sfd_normal_x" } else { "sfd_normal_y" };
+                Expr::ident(n)
+            } else {
+                let comp = if *component == 0 { "x" } else { "y" };
+                dsl::array_access("face_normals", Expr::ident("idx")).field(comp)
+            }
         }
         BoundaryExpr::Max(a, b) => dsl::max(lower_expr(a), lower_expr(b)),
         BoundaryExpr::Min(a, b) => dsl::min(lower_expr(a), lower_expr(b)),
@@ -185,14 +194,22 @@ fn generate_bc_expr_kernel_program(
         );
     }
 
+    let structured = model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D;
     let flux_layout = FluxLayout::from_system(&model.system);
     let coupled_stride = model.system.unknowns_per_cell();
     let state_stride = model.state_layout.stride();
 
+    // Unstructured dispatches one thread per physical face (`idx` IS the face).
+    // Structured dispatches one thread per dense cell (`idx = gj*nx+gi`), then
+    // loops its 4 faces; the bound is the cell count.
     let launch = LaunchSemantics::new(
         [64, 1, 1],
         "global_id.y * constants.stride_x + global_id.x",
-        Some("idx >= arrayLength(&face_boundary)"),
+        Some(if structured {
+            "idx >= grid.nx * grid.ny"
+        } else {
+            "idx >= arrayLength(&face_boundary)"
+        }),
     );
     // BoundaryExpr::Normal reads the face outward normal — bind `face_normals`
     // only when some declared expression actually uses it, so models without
@@ -211,34 +228,66 @@ fn generate_bc_expr_kernel_program(
         KernelBinding::new(0, 0, "state", "array<f32>", BindingAccess::ReadOnlyStorage),
         KernelBinding::new(0, 1, "constants", "Constants", BindingAccess::Uniform),
         KernelBinding::new(0, 2, "bc_value", "array<f32>", BindingAccess::ReadWriteStorage),
-        KernelBinding::new(
+    ];
+    if structured {
+        // Structured: the `grid` uniform (dims/spacing) drives all face geometry
+        // and normals by arithmetic — no `face_owner`/`face_normals` connectivity.
+        // `face_boundary` is keyed by the per-(cell,dir) `sfd_face_id`.
+        bindings.push(KernelBinding::new(
             1,
             0,
-            "face_owner",
-            "array<u32>",
-            BindingAccess::ReadOnlyStorage,
-        ),
-        KernelBinding::new(
+            "grid",
+            "StructuredGrid",
+            BindingAccess::Uniform,
+        ));
+        bindings.push(KernelBinding::new(
             1,
             1,
             "face_boundary",
             "array<u32>",
             BindingAccess::ReadOnlyStorage,
-        ),
-    ];
-    if uses_normal {
-        // Face outward normals (flat [f32;2] pairs, bound as vec2).
+        ));
+    } else {
         bindings.push(KernelBinding::new(
             1,
-            2,
-            "face_normals",
-            "array<vec2<f32>>",
+            0,
+            "face_owner",
+            "array<u32>",
             BindingAccess::ReadOnlyStorage,
         ));
+        bindings.push(KernelBinding::new(
+            1,
+            1,
+            "face_boundary",
+            "array<u32>",
+            BindingAccess::ReadOnlyStorage,
+        ));
+        if uses_normal {
+            // Face outward normals (flat [f32;2] pairs, bound as vec2).
+            bindings.push(KernelBinding::new(
+                1,
+                2,
+                "face_normals",
+                "array<vec2<f32>>",
+                BindingAccess::ReadOnlyStorage,
+            ));
+        }
     }
 
-    let bc = BcTable::new(Expr::ident("idx"), coupled_stride);
-    let base = Expr::ident("base");
+    // BC table is keyed by the FACE id: physical `idx` on the unstructured
+    // (face-dispatched) path; per-(cell,dir) `sfd_face_id` on the structured
+    // (cell-dispatched) path. The interior "base" is the owner cell's state
+    // base: `face_owner[idx]*stride` unstructured; `idx*stride` structured (the
+    // structured cell IS the owner).
+    let bc = BcTable::new(
+        Expr::ident(if structured { "sfd_face_id" } else { "idx" }),
+        coupled_stride,
+    );
+    let base = if structured {
+        Expr::ident("idx") * state_stride
+    } else {
+        Expr::ident("base")
+    };
 
     // Group entries per boundary type, preserving collection order.
     let mut boundaries: Vec<crate::solver::gpu::enums::GpuBoundaryType> = Vec::new();
@@ -319,7 +368,7 @@ fn generate_bc_expr_kernel_program(
         for entry in &group {
             stmts.push(dsl::assign_expr(
                 bc.value(entry.target_offset),
-                lower_expr(&entry.expr),
+                lower_expr(&entry.expr, structured),
             ));
         }
 
@@ -330,21 +379,52 @@ fn generate_bc_expr_kernel_program(
         ));
     }
 
+    let dispatch = if structured {
+        DispatchDomain::Cells
+    } else {
+        DispatchDomain::Faces
+    };
     let mut program = KernelProgram::new(
         KernelId::BC_EXPR_UPDATE.as_str(),
-        DispatchDomain::Faces,
+        dispatch,
         launch,
         bindings,
     );
-    program.indexing = vec![
-        dsl::let_expr(
+    if structured {
+        // Cell-dispatched: bind the cell geometry once, then walk the 4 faces.
+        // `sfd_face_id = idx*4 + k` keys `face_boundary`; each per-boundary block
+        // (already keyed on `idx*stride` and `sfd_face_id` via `base`/`bc`) runs
+        // only when the face is on a domain edge.
+        program.indexing = sg::structured_cell_geom();
+        // for k in 0..4 { <face locals>; if sfd_is_boundary { <bc groups> } }
+        let mut face_stmts = sg::structured_face_locals();
+        let mut guarded = vec![dsl::let_expr(
             "face_boundary_type",
-            dsl::array_access("face_boundary", Expr::ident("idx")),
-        ),
-        dsl::let_expr("owner", dsl::array_access("face_owner", Expr::ident("idx"))),
-        dsl::let_expr("base", Expr::ident("owner") * state_stride),
-    ];
-    program.body = body;
+            sg::structured_boundary_type(),
+        )];
+        guarded.extend(body);
+        face_stmts.push(dsl::if_block_expr(
+            Expr::ident("sfd_is_boundary"),
+            dsl::block(guarded),
+            None,
+        ));
+        program.body = vec![dsl::for_loop_expr(
+            dsl::for_init_var_expr("k", Expr::from(0u32)),
+            Expr::ident("k").lt(Expr::from(4u32)),
+            dsl::for_step_increment_expr(Expr::ident("k")),
+            dsl::block(face_stmts),
+        )];
+    } else {
+        program.indexing = vec![
+            dsl::let_expr(
+                "face_boundary_type",
+                dsl::array_access("face_boundary", Expr::ident("idx")),
+            ),
+            dsl::let_expr("owner", dsl::array_access("face_owner", Expr::ident("idx"))),
+            dsl::let_expr("base", Expr::ident("owner") * state_stride),
+        ];
+        program.body = body;
+    }
     program
         .side_effects
         .read_set

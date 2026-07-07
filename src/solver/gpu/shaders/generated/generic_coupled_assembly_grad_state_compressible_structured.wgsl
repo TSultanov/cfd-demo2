@@ -36,6 +36,7 @@ struct Constants {
 
 
 @group(0) @binding(0) var<uniform> grid: StructuredGrid;
+@group(0) @binding(1) var<storage, read> face_boundary: array<u32>;
 @group(1) @binding(0) var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) var<storage, read> state_old: array<f32>;
 @group(1) @binding(2) var<storage, read> state_old_old: array<f32>;
@@ -238,8 +239,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let f_center = Vector2(center.x + half * normal.x, center.y + half * normal.y);
         let mult = select(spacing, half, is_boundary);
         let other_center = Vector2(center.x + mult * normal.x, center.y + mult * normal.y);
-        let boundary_type = 0u;
         let face_idx = idx * 4u + k;
+        let boundary_type = face_boundary[face_idx];
         let dx = other_center.x - center.x;
         let dy = other_center.y - center.y;
         let dist_proj = abs(dx * normal.x + dy * normal.y);

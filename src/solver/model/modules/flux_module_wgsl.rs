@@ -489,6 +489,7 @@ fn base_items(include_low_mach_params: bool, eos_params: &[ParamSpec], structure
             0,
             0,
         ));
+        items.push(sg::structured_face_boundary_binding());
     } else {
         items.push(Item::Comment("Group 0: Mesh".to_string()));
         items.extend(mesh_bindings());
@@ -810,7 +811,7 @@ fn structured_main_body(
     face_body.push(dsl::let_expr("area", Expr::ident("sfd_area")));
     // SlipWall (type 4) is not yet represented structured; a neutral tag keeps
     // the flux on its default (Dirichlet/Neumann-via-bc) boundary path.
-    face_body.push(dsl::let_expr("boundary_type", Expr::from(0u32)));
+    face_body.push(dsl::let_expr("boundary_type", sg::structured_boundary_type()));
     face_body.push(dsl::let_expr(
         "face_center",
         sg::sfd_vector2("sfd_face_cx", "sfd_face_cy"),
@@ -873,7 +874,7 @@ fn structured_main_body_runtime_scheme(
     face_body.push(dsl::let_expr("neigh_idx", Expr::ident("sfd_other_idx")));
     face_body.push(dsl::let_expr("is_boundary", Expr::ident("sfd_is_boundary")));
     face_body.push(dsl::let_expr("area", Expr::ident("sfd_area")));
-    face_body.push(dsl::let_expr("boundary_type", Expr::from(0u32)));
+    face_body.push(dsl::let_expr("boundary_type", sg::structured_boundary_type()));
     face_body.push(dsl::let_expr(
         "face_center",
         sg::sfd_vector2("sfd_face_cx", "sfd_face_cy"),

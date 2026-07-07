@@ -145,6 +145,9 @@ pub fn base_mesh_items_structured(eos_params: &[ParamSpec]) -> Vec<Item> {
         Item::Struct(structured_grid_struct()),
         Item::Comment("Group 0: Structured Cartesian grid (no connectivity)".to_string()),
         uniform_var("grid", Type::Custom("StructuredGrid".to_string()), 0, 0),
+        // Boundary-TYPE table per (cell, dir) — the only "group 0" data besides
+        // the grid dims; it is BC metadata (not mesh connectivity/geometry).
+        super::structured_grid::structured_face_boundary_binding(),
     ]
 }
 

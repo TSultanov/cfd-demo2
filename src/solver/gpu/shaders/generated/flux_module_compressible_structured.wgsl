@@ -43,6 +43,7 @@ struct LowMachParams {
 
 
 @group(0) @binding(0) var<uniform> grid: StructuredGrid;
+@group(0) @binding(1) var<storage, read> face_boundary: array<u32>;
 @group(1) @binding(0) var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) var<storage, read> state_old: array<f32>;
 @group(1) @binding(2) var<storage, read> state_old_old: array<f32>;
@@ -98,7 +99,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let neigh_idx = sfd_other_idx;
         let is_boundary = sfd_is_boundary;
         let area = sfd_area;
-        let boundary_type = 0u;
+        let boundary_type = face_boundary[sfd_face_id];
         let face_center = Vector2(sfd_face_cx, sfd_face_cy);
         let normal_vec: vec2<f32> = vec2<f32>(sfd_normal_x, sfd_normal_y);
         let c_owner = Vector2(sfd_cx, sfd_cy);

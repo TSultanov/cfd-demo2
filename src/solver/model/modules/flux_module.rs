@@ -418,6 +418,7 @@ fn generate_flux_module_gradients_kernel_program_for_model(
         model.state_layout.stride(),
         &flux_layout,
         &targets,
+        model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D,
     )
 }
 
@@ -493,6 +494,8 @@ fn generate_flux_module_kernel_program_for_model(
         .ok_or_else(|| "flux_module port_manifest missing resolved_state_slots".to_string())?;
 
     let eos_params = crate::solver::model::kernel::extract_eos_params(model);
+    let structured =
+        model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D;
 
     match flux {
         crate::solver::model::flux_module::FluxModuleSpec::Kernel { kernel, .. } => {
@@ -504,6 +507,7 @@ fn generate_flux_module_kernel_program_for_model(
                 &prims,
                 kernel,
                 &eos_params,
+                structured,
             )
         }
         crate::solver::model::flux_module::FluxModuleSpec::Scheme { scheme, .. } => {

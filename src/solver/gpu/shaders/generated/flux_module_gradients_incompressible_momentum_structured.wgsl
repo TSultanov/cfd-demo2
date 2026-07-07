@@ -6,6 +6,13 @@ struct Vector2 {
     y: f32,
 }
 
+struct StructuredGrid {
+    nx: u32,
+    ny: u32,
+    dx: f32,
+    dy: f32,
+}
+
 struct Constants {
     dt: f32,
     dt_old: f32,
@@ -22,16 +29,7 @@ struct Constants {
 }
 
 
-@group(0) @binding(0) var<storage, read> face_owner: array<u32>;
-@group(0) @binding(1) var<storage, read> face_neighbor: array<i32>;
-@group(0) @binding(2) var<storage, read> face_areas: array<f32>;
-@group(0) @binding(3) var<storage, read> face_normals: array<Vector2>;
-@group(0) @binding(4) var<storage, read> cell_centers: array<Vector2>;
-@group(0) @binding(5) var<storage, read> cell_vols: array<f32>;
-@group(0) @binding(6) var<storage, read> cell_face_offsets: array<u32>;
-@group(0) @binding(7) var<storage, read> cell_faces: array<u32>;
-@group(0) @binding(12) var<storage, read> face_boundary: array<u32>;
-@group(0) @binding(13) var<storage, read> face_centers: array<Vector2>;
+@group(0) @binding(0) var<uniform> grid: StructuredGrid;
 @group(1) @binding(0) var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) var<uniform> constants: Constants;
 @group(2) @binding(0) var<storage, read> bc_kind: array<u32>;
@@ -40,37 +38,44 @@ struct Constants {
 @compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.y * constants.stride_x + global_id.x;
-    if (idx >= arrayLength(&cell_vols)) { return; }
-    let cell_center = cell_centers[idx];
-    let cell_center_vec: vec2<f32> = vec2<f32>(cell_center.x, cell_center.y);
-    let vol = cell_vols[idx];
-    let start = cell_face_offsets[idx];
-    let end = cell_face_offsets[idx + 1u];
+    if (idx >= grid.nx * grid.ny) { return; }
+    let sfd_gi = idx % grid.nx;
+    let sfd_gj = idx / grid.nx;
+    let sfd_cx = (f32(sfd_gi) + 0.5) * grid.dx;
+    let sfd_cy = (f32(sfd_gj) + 0.5) * grid.dy;
+    let sfd_vol = grid.dx * grid.dy;
+    let cell_center_vec: vec2<f32> = vec2<f32>(sfd_cx, sfd_cy);
+    let vol = sfd_vol;
     var grad_acc_p: vec2<f32> = vec2<f32>(0.0, 0.0);
-    for (var k = start; k < end; k++) {
-        let face_idx = cell_faces[k];
-        let owner = face_owner[face_idx];
-        let neighbor_raw = face_neighbor[face_idx];
-        let is_boundary = neighbor_raw == -1;
-        let boundary_type = face_boundary[face_idx];
-        let area = face_areas[face_idx];
-        let face_center = face_centers[face_idx];
-        let face_center_vec: vec2<f32> = vec2<f32>(face_center.x, face_center.y);
-        var normal_vec: vec2<f32> = vec2<f32>(face_normals[face_idx].x, face_normals[face_idx].y);
-        if (dot(face_center_vec - cell_center_vec, normal_vec) < 0.0) {
-            normal_vec = -normal_vec;
-        }
-        var other_idx: u32 = idx;
-        var other_center_vec: vec2<f32> = face_center_vec;
-        if (neighbor_raw != -1) {
-            let neighbor = u32(neighbor_raw);
-            other_idx = neighbor;
-            if (owner != idx) {
-                other_idx = owner;
-            }
-            let other_center = cell_centers[other_idx];
-            other_center_vec = vec2<f32>(other_center.x, other_center.y);
-        }
+    for (var k = 0u; k < 4u; k++) {
+        let sfd_axis_is_x = k >= 1u && k <= 2u;
+        let sfd_sign = select(-1.0, 1.0, k >= 2u);
+        let sfd_normal_x = select(0.0, sfd_sign, sfd_axis_is_x);
+        let sfd_normal_y = select(sfd_sign, 0.0, sfd_axis_is_x);
+        let sfd_area = select(grid.dx, grid.dy, sfd_axis_is_x);
+        let sfd_spacing = select(grid.dy, grid.dx, sfd_axis_is_x);
+        let sfd_half = 0.5 * sfd_spacing;
+        let sfd_coord = select(sfd_gj, sfd_gi, sfd_axis_is_x);
+        let sfd_ext = select(grid.ny, grid.nx, sfd_axis_is_x);
+        let sfd_is_boundary = select(sfd_coord == sfd_ext - 1u, sfd_coord == 0u, k < 2u);
+        let sfd_off = select(grid.nx, 1u, sfd_axis_is_x);
+        let sfd_neighbor = select(idx - sfd_off, idx + sfd_off, k >= 2u);
+        let sfd_other_idx = select(sfd_neighbor, idx, sfd_is_boundary);
+        let sfd_face_cx = sfd_cx + sfd_half * sfd_normal_x;
+        let sfd_face_cy = sfd_cy + sfd_half * sfd_normal_y;
+        let sfd_mult = select(sfd_spacing, sfd_half, sfd_is_boundary);
+        let sfd_other_cx = sfd_cx + sfd_mult * sfd_normal_x;
+        let sfd_other_cy = sfd_cy + sfd_mult * sfd_normal_y;
+        let sfd_band_rank = select(k + 1u, k, k < 2u);
+        let sfd_face_id = idx * 4u + k;
+        let face_idx = sfd_face_id;
+        let is_boundary = sfd_is_boundary;
+        let boundary_type = 0u;
+        let area = sfd_area;
+        let face_center_vec: vec2<f32> = vec2<f32>(sfd_face_cx, sfd_face_cy);
+        let normal_vec: vec2<f32> = vec2<f32>(sfd_normal_x, sfd_normal_y);
+        let other_idx = sfd_other_idx;
+        let other_center_vec: vec2<f32> = vec2<f32>(sfd_other_cx, sfd_other_cy);
         let d_own = abs(dot(face_center_vec - cell_center_vec, normal_vec));
         let d_neigh = abs(dot(other_center_vec - face_center_vec, normal_vec));
         let total_dist = d_own + d_neigh;

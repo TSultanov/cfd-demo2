@@ -10,7 +10,8 @@ use cfd2_codegen::solver::codegen::fusion::{ExpectedHazard, HazardKind};
 use cfd2_codegen::solver::codegen::{
     bc_table::BcTable,
     dsl::XY,
-    wgsl_ast::{AssignOp, Expr, ForStep, Type},
+    structured_grid as sg,
+    wgsl_ast::{AssignOp, Expr, ForStep, Stmt, Type},
     wgsl_dsl as dsl,
 };
 use cfd2_ir::kernel::{
@@ -703,6 +704,29 @@ fn rhie_chow_grad_p_update_bindings() -> Vec<KernelBinding> {
     ]
 }
 
+/// The `grid: StructuredGrid` uniform that replaces every connectivity /
+/// geometry buffer on the `TopologyMode::Structured2D` path. Placed in group 1
+/// where the mesh buffers live on the unstructured path (state/constants stay in
+/// group 0, boundary tables in group 2), and resolved by NAME by the runtime
+/// (the CPU interpreter binds it as the `grid` constant namespace).
+fn structured_grid_binding() -> KernelBinding {
+    KernelBinding::new(1, 0, "grid", "StructuredGrid", BindingAccess::Uniform)
+}
+
+/// Structured (dense Cartesian) analogue of [`rhie_chow_grad_p_update_bindings`]:
+/// the connectivity + face-geometry buffers are gone, replaced by the single
+/// `grid` uniform. Boundary tables (group 2) survive — the Green–Gauss gradient
+/// still reads ghost pressures at domain-edge faces.
+fn rhie_chow_grad_p_update_bindings_structured() -> Vec<KernelBinding> {
+    vec![
+        KernelBinding::new(0, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage),
+        KernelBinding::new(0, 1, "constants", "Constants", BindingAccess::Uniform),
+        structured_grid_binding(),
+        KernelBinding::new(2, 0, "bc_kind", "array<u32>", BindingAccess::ReadOnlyStorage),
+        KernelBinding::new(2, 1, "bc_value", "array<f32>", BindingAccess::ReadOnlyStorage),
+    ]
+}
+
 fn generate_dp_update_from_diag_kernel_program(
     model: &crate::solver::model::ModelSpec,
     dp_field: &str,
@@ -839,6 +863,11 @@ fn generate_dp_update_from_assembled_diagonal(
     theta: f32,
     denominator: DpDenominator,
 ) -> Result<KernelProgram, String> {
+    // Dense Cartesian topology: the cell volume is `dx*dy` from the grid
+    // uniform; the assembled CSR buffers (row splits + matrix_values) are
+    // provided in both topologies by the generic-coupled backend.
+    let structured =
+        model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D;
     let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
     let unknowns: Vec<String> = flux_layout
         .components
@@ -864,14 +893,19 @@ fn generate_dp_update_from_assembled_diagonal(
     // matches grad_p_update's (1,5); the CSR buffers take the free slots
     // (1,8..10). All names resolve through the generic-coupled backend
     // ResourceRegistry (mesh: scalar_row_offsets/diagonal_indices/cell_vols;
-    // linear ports: matrix_values).
-    bindings.push(KernelBinding::new(
-        1,
-        5,
-        "cell_vols",
-        "array<f32>",
-        BindingAccess::ReadOnlyStorage,
-    ));
+    // linear ports: matrix_values). Structured cells read the volume from the
+    // `grid` uniform instead, so the cell_vols buffer is dropped.
+    if structured {
+        bindings.push(structured_grid_binding());
+    } else {
+        bindings.push(KernelBinding::new(
+            1,
+            5,
+            "cell_vols",
+            "array<f32>",
+            BindingAccess::ReadOnlyStorage,
+        ));
+    }
     bindings.push(KernelBinding::new(
         1,
         8,
@@ -1014,12 +1048,20 @@ fn generate_dp_update_from_assembled_diagonal(
             ),
         ]),
     }
+    if structured {
+        // Cell volume dx*dy from the grid uniform (no cell_vols buffer).
+        preamble_stmts.extend(sg::structured_cell_geom());
+    }
     preamble_stmts.extend([
         dsl::let_expr(
             "a_bar",
             Expr::lit_f32(0.5) * (Expr::ident("a_u_x") + Expr::ident("a_u_y")),
         ),
-        dsl::let_expr("vol", dsl::array_access("cell_vols", Expr::ident("idx"))),
+        if structured {
+            dsl::let_expr("vol", Expr::ident("sfd_vol"))
+        } else {
+            dsl::let_expr("vol", dsl::array_access("cell_vols", Expr::ident("idx")))
+        },
         dsl::let_expr(
             "d_p_diag",
             closed_form_scale * Expr::ident("vol")
@@ -1054,7 +1096,14 @@ fn generate_dp_update_from_assembled_diagonal(
         .side_effects
         .read_set
         .insert(EffectResource::binding(0, 1));
-    for slot in [5u32, 8, 9, 10] {
+    // Structured reads the grid uniform at (1,0) in place of cell_vols (1,5);
+    // the CSR buffers (1,8..10) are common to both topologies.
+    let group1_slots: &[u32] = if structured {
+        &[0, 8, 9, 10]
+    } else {
+        &[5, 8, 9, 10]
+    };
+    for &slot in group1_slots {
         program
             .side_effects
             .read_set
@@ -1087,6 +1136,11 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
 ) -> Result<KernelProgram, String> {
     use crate::solver::model::ports::dimensions::{Pressure, PressureGradient};
     use crate::solver::model::ports::PortRegistry;
+
+    // Dense Cartesian topology: the Green–Gauss face loop walks the 4 grid
+    // neighbours by index arithmetic instead of the connectivity buffers.
+    let structured =
+        model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D;
 
     let mut registry = PortRegistry::new(model.state_layout.clone());
     let p = registry
@@ -1133,136 +1187,184 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
         "rhie_chow/grad_p_update",
         DispatchDomain::Cells,
         rhie_chow_state_launch(state_stride),
-        rhie_chow_grad_p_update_bindings(),
+        if structured {
+            rhie_chow_grad_p_update_bindings_structured()
+        } else {
+            rhie_chow_grad_p_update_bindings()
+        },
     );
     let indexing_stmts = vec![dsl::let_expr("base", Expr::ident("idx") * state_stride)];
-    let preamble_stmts = vec![
-        dsl::let_expr(
+    let mut preamble_stmts: Vec<Stmt> = Vec::new();
+    if structured {
+        // Cell centre + volume from the grid uniform (no cell_centers/cell_vols).
+        preamble_stmts.extend(sg::structured_cell_geom());
+        preamble_stmts.push(dsl::let_typed_expr(
+            "cell_center_vec",
+            Type::vec2_f32(),
+            sg::sfd_vec2("sfd_cx", "sfd_cy"),
+        ));
+        preamble_stmts.push(dsl::let_expr("vol", Expr::ident("sfd_vol")));
+    } else {
+        preamble_stmts.push(dsl::let_expr(
             "cell_center",
             dsl::array_access("cell_centers", Expr::ident("idx")),
-        ),
-        dsl::let_typed_expr(
+        ));
+        preamble_stmts.push(dsl::let_typed_expr(
             "cell_center_vec",
             Type::vec2_f32(),
             dsl::vec2_f32(
                 Expr::ident("cell_center").field("x"),
                 Expr::ident("cell_center").field("y"),
             ),
-        ),
-        dsl::let_expr("vol", dsl::array_access("cell_vols", Expr::ident("idx"))),
-        dsl::let_expr(
+        ));
+        preamble_stmts.push(dsl::let_expr(
+            "vol",
+            dsl::array_access("cell_vols", Expr::ident("idx")),
+        ));
+        preamble_stmts.push(dsl::let_expr(
             "start",
             dsl::array_access("cell_face_offsets", Expr::ident("idx")),
-        ),
-        dsl::let_expr(
+        ));
+        preamble_stmts.push(dsl::let_expr(
             "end",
             dsl::array_access("cell_face_offsets", Expr::ident("idx") + 1u32),
-        ),
-        dsl::var_typed_expr(
-            "grad_acc_p",
+        ));
+    }
+    preamble_stmts.push(dsl::var_typed_expr(
+        "grad_acc_p",
+        Type::vec2_f32(),
+        Some(dsl::vec2_f32(0.0, 0.0)),
+    ));
+
+    // The face-loop HEAD gathers the neighbour + face geometry; only this
+    // prologue differs between topologies. On the structured path the shared
+    // `sfd_*` descriptor is aliased to the exact local names the Green–Gauss
+    // body below already uses, so the physics after the head is byte-for-byte
+    // the unstructured code. `boundary_type` is kept (as a benign `0u`) only so
+    // the shared `_unused_boundary_type` tail statement stays position-identical.
+    let mut face_loop_body: Vec<Stmt> = Vec::new();
+    if structured {
+        face_loop_body.extend(sg::structured_face_locals());
+        face_loop_body.push(dsl::let_expr("face_idx", Expr::ident("sfd_face_id")));
+        face_loop_body.push(dsl::let_expr("is_boundary", Expr::ident("sfd_is_boundary")));
+        face_loop_body.push(dsl::let_expr("boundary_type", Expr::lit_u32(0)));
+        face_loop_body.push(dsl::let_expr("area", Expr::ident("sfd_area")));
+        face_loop_body.push(dsl::let_typed_expr(
+            "face_center_vec",
             Type::vec2_f32(),
-            Some(dsl::vec2_f32(0.0, 0.0)),
-        ),
-    ];
-    let body_stmts = vec![
-        dsl::for_loop_expr(
-            dsl::for_init_var_expr("k", Expr::ident("start")),
-            Expr::ident("k").lt(Expr::ident("end")),
-            ForStep::Increment(Expr::ident("k")),
-            dsl::block(vec![
-                dsl::let_expr(
-                    "face_idx",
-                    dsl::array_access("cell_faces", Expr::ident("k")),
+            sg::sfd_vec2("sfd_face_cx", "sfd_face_cy"),
+        ));
+        face_loop_body.push(dsl::let_typed_expr(
+            "normal_vec",
+            Type::vec2_f32(),
+            sg::sfd_vec2("sfd_normal_x", "sfd_normal_y"),
+        ));
+        face_loop_body.push(dsl::let_expr("other_idx", Expr::ident("sfd_other_idx")));
+        face_loop_body.push(dsl::let_typed_expr(
+            "other_center_vec",
+            Type::vec2_f32(),
+            sg::sfd_vec2("sfd_other_cx", "sfd_other_cy"),
+        ));
+    } else {
+        face_loop_body.extend(vec![
+            dsl::let_expr(
+                "face_idx",
+                dsl::array_access("cell_faces", Expr::ident("k")),
+            ),
+            dsl::let_expr(
+                "owner",
+                dsl::array_access("face_owner", Expr::ident("face_idx")),
+            ),
+            dsl::let_expr(
+                "neighbor_raw",
+                dsl::array_access("face_neighbor", Expr::ident("face_idx")),
+            ),
+            dsl::let_expr(
+                "is_boundary",
+                Expr::ident("neighbor_raw").eq(Expr::lit_i32(-1)),
+            ),
+            dsl::let_expr(
+                "boundary_type",
+                dsl::array_access("face_boundary", Expr::ident("face_idx")),
+            ),
+            dsl::let_expr(
+                "area",
+                dsl::array_access("face_areas", Expr::ident("face_idx")),
+            ),
+            dsl::let_expr(
+                "face_center",
+                dsl::array_access("face_centers", Expr::ident("face_idx")),
+            ),
+            dsl::let_typed_expr(
+                "face_center_vec",
+                Type::vec2_f32(),
+                dsl::vec2_f32(
+                    Expr::ident("face_center").field("x"),
+                    Expr::ident("face_center").field("y"),
                 ),
-                dsl::let_expr(
-                    "owner",
-                    dsl::array_access("face_owner", Expr::ident("face_idx")),
-                ),
-                dsl::let_expr(
-                    "neighbor_raw",
-                    dsl::array_access("face_neighbor", Expr::ident("face_idx")),
-                ),
-                dsl::let_expr(
-                    "is_boundary",
-                    Expr::ident("neighbor_raw").eq(Expr::lit_i32(-1)),
-                ),
-                dsl::let_expr(
-                    "boundary_type",
-                    dsl::array_access("face_boundary", Expr::ident("face_idx")),
-                ),
-                dsl::let_expr(
-                    "area",
-                    dsl::array_access("face_areas", Expr::ident("face_idx")),
-                ),
-                dsl::let_expr(
-                    "face_center",
-                    dsl::array_access("face_centers", Expr::ident("face_idx")),
-                ),
-                dsl::let_typed_expr(
-                    "face_center_vec",
-                    Type::vec2_f32(),
-                    dsl::vec2_f32(
-                        Expr::ident("face_center").field("x"),
-                        Expr::ident("face_center").field("y"),
+            ),
+            dsl::var_typed_expr(
+                "normal_vec",
+                Type::vec2_f32(),
+                Some(dsl::vec2_f32(
+                    dsl::array_access("face_normals", Expr::ident("face_idx")).field("x"),
+                    dsl::array_access("face_normals", Expr::ident("face_idx")).field("y"),
+                )),
+            ),
+            dsl::if_block_expr(
+                dsl::dot_expr(
+                    Expr::ident("face_center_vec") - Expr::ident("cell_center_vec"),
+                    Expr::ident("normal_vec"),
+                )
+                .lt(Expr::lit_f32(0.0)),
+                dsl::block(vec![dsl::assign_expr(
+                    Expr::ident("normal_vec"),
+                    -Expr::ident("normal_vec"),
+                )]),
+                None,
+            ),
+            dsl::var_typed_expr("other_idx", Type::U32, Some(Expr::ident("idx"))),
+            dsl::var_typed_expr(
+                "other_center_vec",
+                Type::vec2_f32(),
+                Some(Expr::ident("face_center_vec")),
+            ),
+            dsl::if_block_expr(
+                Expr::ident("neighbor_raw").ne(Expr::lit_i32(-1)),
+                dsl::block(vec![
+                    dsl::let_expr(
+                        "neighbor",
+                        Expr::call_named("u32", vec![Expr::ident("neighbor_raw")]),
                     ),
-                ),
-                dsl::var_typed_expr(
-                    "normal_vec",
-                    Type::vec2_f32(),
-                    Some(dsl::vec2_f32(
-                        dsl::array_access("face_normals", Expr::ident("face_idx")).field("x"),
-                        dsl::array_access("face_normals", Expr::ident("face_idx")).field("y"),
-                    )),
-                ),
-                dsl::if_block_expr(
-                    dsl::dot_expr(
-                        Expr::ident("face_center_vec") - Expr::ident("cell_center_vec"),
-                        Expr::ident("normal_vec"),
-                    )
-                    .lt(Expr::lit_f32(0.0)),
-                    dsl::block(vec![dsl::assign_expr(
-                        Expr::ident("normal_vec"),
-                        -Expr::ident("normal_vec"),
-                    )]),
-                    None,
-                ),
-                dsl::var_typed_expr("other_idx", Type::U32, Some(Expr::ident("idx"))),
-                dsl::var_typed_expr(
-                    "other_center_vec",
-                    Type::vec2_f32(),
-                    Some(Expr::ident("face_center_vec")),
-                ),
-                dsl::if_block_expr(
-                    Expr::ident("neighbor_raw").ne(Expr::lit_i32(-1)),
-                    dsl::block(vec![
-                        dsl::let_expr(
-                            "neighbor",
-                            Expr::call_named("u32", vec![Expr::ident("neighbor_raw")]),
+                    dsl::assign_expr(Expr::ident("other_idx"), Expr::ident("neighbor")),
+                    dsl::if_block_expr(
+                        Expr::ident("owner").ne(Expr::ident("idx")),
+                        dsl::block(vec![dsl::assign_expr(
+                            Expr::ident("other_idx"),
+                            Expr::ident("owner"),
+                        )]),
+                        None,
+                    ),
+                    dsl::let_expr(
+                        "other_center",
+                        dsl::array_access("cell_centers", Expr::ident("other_idx")),
+                    ),
+                    dsl::assign_expr(
+                        Expr::ident("other_center_vec"),
+                        dsl::vec2_f32(
+                            Expr::ident("other_center").field("x"),
+                            Expr::ident("other_center").field("y"),
                         ),
-                        dsl::assign_expr(Expr::ident("other_idx"), Expr::ident("neighbor")),
-                        dsl::if_block_expr(
-                            Expr::ident("owner").ne(Expr::ident("idx")),
-                            dsl::block(vec![dsl::assign_expr(
-                                Expr::ident("other_idx"),
-                                Expr::ident("owner"),
-                            )]),
-                            None,
-                        ),
-                        dsl::let_expr(
-                            "other_center",
-                            dsl::array_access("cell_centers", Expr::ident("other_idx")),
-                        ),
-                        dsl::assign_expr(
-                            Expr::ident("other_center_vec"),
-                            dsl::vec2_f32(
-                                Expr::ident("other_center").field("x"),
-                                Expr::ident("other_center").field("y"),
-                            ),
-                        ),
-                    ]),
-                    None,
-                ),
-                dsl::let_expr(
+                    ),
+                ]),
+                None,
+            ),
+        ]);
+    }
+
+    // Shared Green–Gauss physics tail (byte-identical across topologies).
+    face_loop_body.extend(vec![
+        dsl::let_expr(
                     "d_own",
                     dsl::abs(dsl::dot_expr(
                         Expr::ident("face_center_vec") - Expr::ident("cell_center_vec"),
@@ -1288,12 +1390,32 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
                 ),
                 dsl::let_expr("lambda_other", Expr::lit_f32(1.0) - Expr::ident("lambda")),
                 dsl::let_expr("_unused_boundary_type", Expr::ident("boundary_type")),
-                dsl::assign_op_expr(
-                    AssignOp::Add,
-                    Expr::ident("grad_acc_p"),
-                    Expr::ident("normal_vec") * p_interp_expr * Expr::ident("area"),
-                ),
-            ]),
+        dsl::assign_op_expr(
+            AssignOp::Add,
+            Expr::ident("grad_acc_p"),
+            Expr::ident("normal_vec") * p_interp_expr * Expr::ident("area"),
+        ),
+    ]);
+
+    // Structured cells walk the 4 grid directions (S,W,E,N); unstructured cells
+    // walk their CSR face slice.
+    let (loop_init, loop_cond) = if structured {
+        (
+            dsl::for_init_var_expr("k", Expr::from(0u32)),
+            Expr::ident("k").lt(Expr::from(4u32)),
+        )
+    } else {
+        (
+            dsl::for_init_var_expr("k", Expr::ident("start")),
+            Expr::ident("k").lt(Expr::ident("end")),
+        )
+    };
+    let body_stmts = vec![
+        dsl::for_loop_expr(
+            loop_init,
+            loop_cond,
+            ForStep::Increment(Expr::ident("k")),
+            dsl::block(face_loop_body),
         ),
         dsl::let_typed_expr(
             "grad_out_p",
@@ -1313,21 +1435,27 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
     program.indexing = indexing_stmts;
     program.preamble = preamble_stmts;
     program.body = body_stmts;
-    for (group, binding) in [
-        (0u32, 1u32),
-        (1, 0),
-        (1, 1),
-        (1, 2),
-        (1, 3),
-        (1, 4),
-        (1, 5),
-        (1, 6),
-        (1, 7),
-        (1, 12),
-        (1, 13),
-        (2, 0),
-        (2, 1),
-    ] {
+    let read_bindings: &[(u32, u32)] = if structured {
+        // constants, grid uniform, bc_kind, bc_value.
+        &[(0, 1), (1, 0), (2, 0), (2, 1)]
+    } else {
+        &[
+            (0, 1),
+            (1, 0),
+            (1, 1),
+            (1, 2),
+            (1, 3),
+            (1, 4),
+            (1, 5),
+            (1, 6),
+            (1, 7),
+            (1, 12),
+            (1, 13),
+            (2, 0),
+            (2, 1),
+        ]
+    };
+    for &(group, binding) in read_bindings {
         program
             .side_effects
             .read_set

@@ -710,6 +710,8 @@ mod probe {
         let mut events: Vec<(f64, f64, usize)> = Vec::new();
         let mut ambient_worst = 0.0f64;
         let mut ambient_top: Vec<(f64, usize, f64, f64)> = Vec::new();
+        let mut osc_series: Vec<(usize, f64)> = Vec::new();
+        let mut osc_sites: Vec<(f64, usize, f64, f64)> = Vec::new();
         let mut prev_seeds: Option<Vec<Point2<f64>>> = None;
         let (mut outlet_iso_worst, mut outlet_vr_worst, mut outlet_skew_worst) =
             (0.0f64, f64::INFINITY, 0.0f64);
@@ -781,6 +783,74 @@ mod probe {
             }
             let dip = max_jump / range;
             let ambient_dip = ambient_jump / range;
+            // PHANTOM-DIPOLE-SPECIFIC metric: the `dip` jump above flags any
+            // steep adjacent |dp| — at deep refinement its worst faces are
+            // MONOTONE resolved-gradient steps (suction slope, corner
+            // singularities), NOT dipoles. A phantom dipole is a +/-
+            // OSCILLATION pair: adjacent cells whose deviations from their
+            // own neighborhood means carry OPPOSITE signs. For a linear
+            // field on a centroidal mesh the deviation is ~0 (gradients are
+            // nulled exactly); a smooth resolved extremum scores at
+            // truncation size O(h^2 * lap p); a checkerboard scores at its
+            // full amplitude. osc = max over opposite-signed adjacent pairs
+            // of min(|r_o|, |r_n|) / range.
+            let mut resid = vec![0.0f64; n];
+            for c in 0..n {
+                let (fb, fe) = (mesh.cell_face_offsets[c], mesh.cell_face_offsets[c + 1]);
+                let (mut sum, mut cnt) = (0.0f64, 0usize);
+                for &f in &mesh.cell_faces[fb..fe] {
+                    let other = if mesh.face_owner[f] == c {
+                        mesh.face_neighbor[f]
+                    } else {
+                        Some(mesh.face_owner[f])
+                    };
+                    if let Some(nb) = other {
+                        sum += p_of(nb);
+                        cnt += 1;
+                    }
+                }
+                if cnt > 0 {
+                    resid[c] = p_of(c) - sum / cnt as f64;
+                }
+            }
+            let (mut osc_amp, mut osc_face) = (0.0f64, 0usize);
+            for f in 0..mesh.num_faces() {
+                if let Some(nb) = mesh.face_neighbor[f] {
+                    let (ro, rn) = (resid[mesh.face_owner[f]], resid[nb]);
+                    if ro * rn < 0.0 && ro.abs().min(rn.abs()) > osc_amp {
+                        osc_amp = ro.abs().min(rn.abs());
+                        osc_face = f;
+                    }
+                }
+            }
+            let osc = osc_amp / range;
+            osc_series.push((step, osc));
+            osc_sites.push((osc, step, mesh.face_cx[osc_face], mesh.face_cy[osc_face]));
+            // Flare anatomy: is the worst +/- pair the TWIN half-guards born
+            // by a wall split (two near-identical tiny wall cells sharing a
+            // face = weakly damped two-cell checkerboard mode)?
+            if std::env::var("PROBE_OSC_ANATOMY").is_ok() && osc > 1.5 {
+                let kinds = moving.seed_kinds();
+                let (o, nb) = (mesh.face_owner[osc_face], mesh.face_neighbor[osc_face].unwrap());
+                for c in [o, nb] {
+                    let (fb, fe) = (mesh.cell_face_offsets[c], mesh.cell_face_offsets[c + 1]);
+                    let nbp: Vec<String> = mesh.cell_faces[fb..fe]
+                        .iter()
+                        .filter_map(|&f| {
+                            let other = if mesh.face_owner[f] == c {
+                                mesh.face_neighbor[f]
+                            } else {
+                                Some(mesh.face_owner[f])
+                            };
+                            other.map(|x| format!("{x}:{:+.4e}(v{:.2e})", p_of(x), mesh.cell_vol[x]))
+                        })
+                        .collect();
+                    println!(
+                        "[osc-anatomy] step {step} osc {osc:.3} cell {c} kind {:?} @({:.4},{:.4}) vol {:.3e} p {:+.4e} resid {:+.4e} nbrs [{}]",
+                        kinds[c], mesh.cell_cx[c], mesh.cell_cy[c], mesh.cell_vol[c], p_of(c), resid[c], nbp.join(", ")
+                    );
+                }
+            }
             if step >= 30 {
                 ambient_worst = ambient_worst.max(ambient_dip);
                 ambient_top.push((
@@ -875,6 +945,20 @@ mod probe {
              {EVENT_R_CELLS} local spacings of any event younger than {EVENT_AGE} steps): \
              {ambient_worst:.3}"
         );
+        // Full OSC series to the log (one line per step) so any window can
+        // be analyzed offline — the phantom-dipole-specific A/B needs
+        // running-vs-frozen windows.
+        for (s, o) in &osc_series {
+            println!("[osc-series] step {s} osc {o:.5}");
+        }
+        osc_sites.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let top: Vec<String> = osc_sites
+            .iter()
+            .filter(|(_, s, _, _)| *s >= 30)
+            .take(12)
+            .map(|(o, s, x, y)| format!("step {s}: {o:.2} @({x:.3},{y:.3})"))
+            .collect();
+        println!("[dipole-watch] OSC worst sites: {}", top.join("; "));
         println!(
             "[dipole-watch] OUTLET-strip quality (steps 30..{steps}): worst isoperimetric \
              {outlet_iso_worst:.2} (1 = circle; hexagonal CVT ~1.1) at step {} @({:.3},{:.3}); \

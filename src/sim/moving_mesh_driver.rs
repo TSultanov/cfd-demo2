@@ -3016,6 +3016,21 @@ impl MovingMeshDriver {
                     g,
                 );
             }
+            // Repair the reflex-corner equidistance the splits just broke
+            // (and any corner a prior event left unbalanced).
+            let tol = MeshgenTolerances::from_geometry(self.min_cell_size, self.domain);
+            let budget = self
+                .adapt_cell_cap()
+                .saturating_sub(n - kills.len() + births.len() + wall_births.len());
+            plan_reflex_balance_births(
+                &spec_new,
+                &self.seeds,
+                &kinds_upd,
+                &mut wall_births,
+                self.boundary_motion.loop_index(),
+                8.0 * tol.edge_len_eps,
+                budget,
+            );
         }
 
         // New seed set: survivors in slot order, then interior births, then
@@ -4027,13 +4042,23 @@ impl MovingMeshDriver {
                 continue;
             }
             let mid = Point2::new(0.5 * (a.x + b.x), 0.5 * (a.y + b.y));
-            let splittable = seg_seeds[g].iter().all(|&i| match self.kinds[i] {
-                SeedKind::Boundary { seg_prev, seg_next } if seg_prev == seg_next => {
-                    (self.seeds[i] - mid).norm() <= 0.05 * len
+            // Splittable = a collapsed guard sits near the midpoint (the
+            // split pivot), or the segment carries no collapsed guards at
+            // all (the endpoint-vertex-seed pattern). OFF-midpoint strays
+            // (reflex-corner junction guards) no longer block: the split
+            // re-kinds them to the half that contains them.
+            let (mut any_collapsed, mut has_pivot) = (false, false);
+            for &i in &seg_seeds[g] {
+                if let SeedKind::Boundary { seg_prev, seg_next } = self.kinds[i] {
+                    if seg_prev == seg_next {
+                        any_collapsed = true;
+                        if (self.seeds[i] - mid).norm() <= 0.05 * len {
+                            has_pivot = true;
+                        }
+                    }
                 }
-                _ => true,
-            });
-            if !splittable {
+            }
+            if any_collapsed && !has_pivot {
                 continue;
             }
             let t_h = seg_seeds[g]
@@ -4594,23 +4619,40 @@ fn split_wall_segment(
     let m = Point2::new(0.5 * (a.x + b.x), 0.5 * (a.y + b.y));
     let len = (b - a).norm();
 
-    // Locate the wall seeds referencing `g` and classify the pattern.
+    // Locate the wall seeds referencing `g` and classify the pattern. A
+    // segment may carry several collapsed guards (its mid guard plus
+    // reflex-corner junction guards from `plan_reflex_balance_births`): the
+    // guard nearest the midpoint is the split pivot; the others are STRAYS,
+    // re-kinded below to whichever half contains them.
     let mut guard: Option<usize> = None;
+    let mut guard_d = f64::INFINITY;
+    let mut strays: Vec<usize> = Vec::new();
     let mut a_end: Option<usize> = None;
     let mut b_end: Option<usize> = None;
     for (i, k) in kinds.iter().enumerate() {
         if let SeedKind::Boundary { seg_prev, seg_next } = *k {
             let (p, q) = (seg_prev as usize, seg_next as usize);
             if p == g && q == g {
-                if (seeds[i] - m).norm() > 0.05 * len {
-                    return false; // off-midpoint (reflex-corner) guard
+                let d = (seeds[i] - m).norm();
+                if d < guard_d {
+                    if let Some(prev) = guard {
+                        strays.push(prev);
+                    }
+                    guard = Some(i);
+                    guard_d = d;
+                } else {
+                    strays.push(i);
                 }
-                guard = Some(i);
             } else if q == g {
                 a_end = Some(i);
             } else if p == g {
                 b_end = Some(i);
             }
+        }
+    }
+    if let Some(i) = guard {
+        if (seeds[i] - m).norm() > 0.05 * len {
+            return false; // no near-midpoint pivot (reflex-corner guard only)
         }
     }
     if guard.is_none() && a_end.is_none() && b_end.is_none() {
@@ -4645,28 +4687,84 @@ fn split_wall_segment(
     }
 
     let (ga, gb) = (g as u32, (g + 1) as u32);
+    // STRAY collapsed guards (reflex-corner junction guards) belong to
+    // whichever half contains them. The remap left their `g` untouched.
+    for &i in &strays {
+        let side = if (seeds[i] - a).norm() < (seeds[i] - b).norm() {
+            ga
+        } else {
+            gb
+        };
+        kinds[i] = SeedKind::Boundary {
+            seg_prev: side,
+            seg_next: side,
+        };
+    }
+    // Pending births referencing `g` (junction guards emitted by an earlier
+    // split in the same batch) get the same half assignment.
+    for (p, _, k) in births.iter_mut() {
+        if *k
+            == (SeedKind::Boundary {
+                seg_prev: ga,
+                seg_next: ga,
+            })
+            && (*p - b).norm() < (*p - a).norm()
+        {
+            *k = SeedKind::Boundary {
+                seg_prev: gb,
+                seg_next: gb,
+            };
+        }
+    }
     match guard {
         Some(i) => {
+            // The b-endpoint's vertex seed now abuts the SECOND half — the
+            // same correction the straight-wall arm below applies. Its
+            // omission HERE left every hole-loop downstream-junction vertex
+            // seed referencing the stale first half after a split
+            // ({g, g+2}, skipping g+1): that cell clips against the wrong
+            // segment's line, and the slightly mis-clipped wall cell rang
+            // as the persistent junction pressure oscillation the OSC watch
+            // localized to fixed obstacle-contour points.
+            if let Some(ib) = b_end {
+                if let SeedKind::Boundary { seg_prev, .. } = &mut kinds[ib] {
+                    *seg_prev = gb;
+                }
+            }
             kinds[i] = SeedKind::Boundary {
                 seg_prev: ga,
                 seg_next: gb,
             };
-            births.push((
-                Point2::new(0.5 * (a.x + m.x), 0.5 * (a.y + m.y)),
-                i,
-                SeedKind::Boundary {
-                    seg_prev: ga,
-                    seg_next: ga,
-                },
-            ));
-            births.push((
-                Point2::new(0.5 * (m.x + b.x), 0.5 * (m.y + b.y)),
-                i,
-                SeedKind::Boundary {
-                    seg_prev: gb,
-                    seg_next: gb,
-                },
-            ));
+            // Half-mid guard births — skipped when a stray junction guard
+            // already sits at that half's midpoint (the self-similar case:
+            // a junction guard at len/4 IS the first half's mid guard).
+            let covered = |q: Point2<f64>| {
+                strays
+                    .iter()
+                    .any(|&i| (seeds[i] - q).norm() <= 0.05 * (0.5 * len))
+            };
+            let q1 = Point2::new(0.5 * (a.x + m.x), 0.5 * (a.y + m.y));
+            if !covered(q1) {
+                births.push((
+                    q1,
+                    i,
+                    SeedKind::Boundary {
+                        seg_prev: ga,
+                        seg_next: ga,
+                    },
+                ));
+            }
+            let q2 = Point2::new(0.5 * (m.x + b.x), 0.5 * (m.y + b.y));
+            if !covered(q2) {
+                births.push((
+                    q2,
+                    i,
+                    SeedKind::Boundary {
+                        seg_prev: gb,
+                        seg_next: gb,
+                    },
+                ));
+            }
         }
         None => {
             // The b-endpoint's vertex seed now abuts the SECOND half.
@@ -4687,6 +4785,123 @@ fn split_wall_segment(
         }
     }
     true
+}
+
+/// Restore the reflex-corner guard EQUIDISTANCE invariant after wall splits.
+///
+/// `boundary_seeds` establishes, for every reflex polyline vertex (fluid
+/// angle > π — a corner poking into the fluid, i.e. every vertex of an
+/// embedded hole), a PAIR of guard seeds on the two flanking segments at the
+/// SAME distance from the vertex: their mutual bisector then passes exactly
+/// through the vertex and the corner assembles watertight from two convex
+/// cells (the boundary module calls the equidistance load-bearing). Midpoint
+/// wall splits preserve each segment's own mid guard but BREAK the pair
+/// symmetry at the parent's endpoints: the fresh half-guard sits at `len/4`
+/// from the corner while the unsplit neighbor's mid guard stays at its
+/// `len/2`. The corner's bisector then misses the vertex and the two guard
+/// cells degenerate into a doubled-face sliver pair around it — a weakly
+/// damped pressure-checkerboard mode that every-step adaptation traffic
+/// pumps continuously (the phantom-dipole flares the OSC probe localized to
+/// obstacle-wall generation boundaries).
+///
+/// This pass re-establishes the invariant over the WHOLE spec: for every
+/// reflex vertex of a static `Wall`/`SlipWall` pair of segments, if the
+/// nearest collapsed guards on the two flanks sit at measurably different
+/// distances, BIRTH a matching junction guard on the far flank at the near
+/// flank's distance. Idempotent (balanced corners no-op), self-similar (a
+/// junction guard at `len/4` is exactly the half-mid guard the next split of
+/// that segment expects), and budget-bounded. Vertex-seed corners and
+/// uncovered flanks are left alone.
+fn plan_reflex_balance_births(
+    spec: &BoundarySpec,
+    seeds: &[Point2<f64>],
+    kinds: &[SeedKind],
+    births: &mut Vec<(Point2<f64>, usize, SeedKind)>,
+    moving_loop: Option<usize>,
+    min_t: f64,
+    mut budget: usize,
+) {
+    let total = spec.num_segments();
+    // Collapsed-guard registry per segment: (position, donor row). Pending
+    // wall births participate with their donor, so a corner freshly served
+    // by a split's half-guard is measured correctly.
+    let mut reg: Vec<Vec<(Point2<f64>, usize)>> = vec![Vec::new(); total];
+    for (i, k) in kinds.iter().enumerate() {
+        if let SeedKind::Boundary { seg_prev, seg_next } = *k {
+            if seg_prev == seg_next {
+                reg[seg_prev as usize].push((seeds[i], i));
+            }
+        }
+    }
+    for &(p, donor, k) in births.iter() {
+        if let SeedKind::Boundary { seg_prev, seg_next } = k {
+            if seg_prev == seg_next {
+                reg[seg_prev as usize].push((p, donor));
+            }
+        }
+    }
+    for (l, lp) in spec.loops.iter().enumerate() {
+        if moving_loop == Some(l) {
+            continue;
+        }
+        let n_pts = lp.pts.len();
+        for v in 0..n_pts {
+            if budget == 0 {
+                return;
+            }
+            let g_prev = spec.seg_offsets[l] + (v + n_pts - 1) % n_pts;
+            let g_next = spec.seg_offsets[l] + v;
+            let static_wall = |g: usize| {
+                matches!(
+                    spec.segment_tag(g as u32),
+                    BoundaryType::Wall | BoundaryType::SlipWall
+                )
+            };
+            if !static_wall(g_prev) || !static_wall(g_next) {
+                continue;
+            }
+            let pv = lp.pts[v];
+            let d1 = pv - lp.pts[(v + n_pts - 1) % n_pts];
+            let d2 = lp.pts[(v + 1) % n_pts] - pv;
+            // Reflex = fluid angle > π = right turn (fluid on the left).
+            if d1.x * d2.y - d1.y * d2.x >= -1e-12 * d1.norm() * d2.norm() {
+                continue;
+            }
+            let near = |g: usize| {
+                reg[g]
+                    .iter()
+                    .map(|&(p, d)| ((p - pv).norm(), d))
+                    .min_by(|x, y| x.0.total_cmp(&y.0))
+            };
+            let (Some((dp, don_p)), Some((dn, don_n))) = (near(g_prev), near(g_next)) else {
+                continue; // vertex-seed / uncovered patterns: not ours
+            };
+            let t = dp.min(dn);
+            if t < min_t || dp.max(dn) <= 1.05 * t {
+                continue; // balanced (or too tight to act on)
+            }
+            let (g_far, dir, donor) = if dp > dn {
+                (g_prev, -d1 / d1.norm(), don_p)
+            } else {
+                (g_next, d2 / d2.norm(), don_n)
+            };
+            let p_new = Point2::new(pv.x + t * dir.x, pv.y + t * dir.y);
+            // Clearance: never crowd an existing same-segment guard.
+            if reg[g_far]
+                .iter()
+                .any(|&(p, _)| (p - p_new).norm() < 0.5 * t)
+            {
+                continue;
+            }
+            let kind = SeedKind::Boundary {
+                seg_prev: g_far as u32,
+                seg_next: g_far as u32,
+            };
+            births.push((p_new, donor, kind));
+            reg[g_far].push((p_new, donor));
+            budget -= 1;
+        }
+    }
 }
 
 /// Whether two meshes with the same cell count differ in face set / adjacency

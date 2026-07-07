@@ -32,7 +32,7 @@ use crate::solver::model::ModelSpec;
 use crate::solver::scheme::Scheme;
 use crate::solver::{PreconditionerType, TimeScheme};
 use cfd2_codegen::solver::codegen::fusion::lower_kernel_program_to_wgsl;
-use cfd2_ir::kernel::{BindingAccess, DispatchDomain};
+use cfd2_ir::kernel::BindingAccess;
 
 const WG: u32 = 64;
 
@@ -133,10 +133,54 @@ struct CompiledKernel {
     /// statically use are still present — the codegen assembly binds e.g.
     /// `state_iter`/`state_old_old` that pure diffusion never reads.
     layouts: Vec<(u32, wgpu::BindGroupLayout)>,
+    /// This kernel's `constants` uniform, packed to ITS `Constants` struct layout
+    /// (base fields + this kernel's declared EOS params in order). Most kernels
+    /// declare the full canonical EOS block (= a `GpuConstants` prefix), but
+    /// `bc_expr` declares only the EOS params its expressions reference, so a
+    /// shared buffer would misalign its `eos_*` reads. Per-kernel packing fixes it.
+    constants_buf: wgpu::Buffer,
+    eos_fields: Vec<String>,
+}
+
+/// Pack the `constants` uniform for a kernel whose `Constants` struct is the 12
+/// base fields followed by `eos_fields` (in declared order), padded to the WGSL
+/// 16-byte uniform alignment.
+fn pack_kernel_constants(c: &GpuConstants, eos_fields: &[String]) -> Vec<u8> {
+    // First 48 bytes of GpuConstants are the 12 canonical base fields.
+    let mut bytes = bytemuck::bytes_of(c)[0..48].to_vec();
+    for f in eos_fields {
+        let v: f32 = match f.as_str() {
+            "eos_gamma" => c.eos_gamma,
+            "eos_gm1" => c.eos_gm1,
+            "eos_r" => c.eos_r,
+            "eos_dp_drho" => c.eos_dp_drho,
+            "eos_p_offset" => c.eos_p_offset,
+            "eos_theta_ref" => c.eos_theta_ref,
+            "buoyant_beta_g" => c.buoyant_beta_g,
+            "buoyant_t0" => c.buoyant_t0,
+            "buoyant_k_over_cp" => c.buoyant_k_over_cp,
+            _ => 0.0,
+        };
+        bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    while bytes.len() % 16 != 0 {
+        bytes.push(0);
+    }
+    bytes
 }
 
 impl CompiledKernel {
-    fn build(device: &wgpu::Device, id: &str, wgsl: &str, bindings: Vec<BindInfo>) -> Self {
+    fn write_constants(&self, queue: &wgpu::Queue, c: &GpuConstants) {
+        queue.write_buffer(&self.constants_buf, 0, &pack_kernel_constants(c, &self.eos_fields));
+    }
+
+    fn build(
+        device: &wgpu::Device,
+        id: &str,
+        wgsl: &str,
+        bindings: Vec<BindInfo>,
+        eos_fields: Vec<String>,
+    ) -> Self {
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some(id),
             source: wgpu::ShaderSource::Wgsl(wgsl.into()),
@@ -208,10 +252,21 @@ impl CompiledKernel {
             compilation_options: Default::default(),
             cache: None,
         });
+        // `Constants` = 12 base fields (48 B) + eos_fields, padded to 16 B.
+        let cbytes = 48 + eos_fields.len() * 4;
+        let csize = ((cbytes + 15) / 16 * 16).max(16) as u64;
+        let constants_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some(id),
+            size: csize,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         Self {
             pipeline,
             bindings,
             layouts,
+            constants_buf,
+            eos_fields,
         }
     }
 
@@ -232,7 +287,13 @@ impl CompiledKernel {
                 .filter(|b| b.group == *g)
                 .map(|b| wgpu::BindGroupEntry {
                     binding: b.binding,
-                    resource: resolve(&b.name).as_entire_binding(),
+                    // `constants` binds THIS kernel's per-layout uniform (correct
+                    // eos field offsets); everything else resolves by name.
+                    resource: if b.name == "constants" {
+                        self.constants_buf.as_entire_binding()
+                    } else {
+                        resolve(&b.name).as_entire_binding()
+                    },
                 })
                 .collect();
             bind_groups.push((
@@ -262,7 +323,7 @@ impl CompiledKernel {
 fn lower_structured_kernels(
     model: &ModelSpec,
     schemes: &SchemeRegistry,
-) -> Result<Vec<(String, String, Vec<BindInfo>, DispatchDomain)>, String> {
+) -> Result<Vec<(String, String, Vec<BindInfo>, Vec<String>)>, String> {
     let mut out = Vec::new();
     for module in &model.modules {
         let module: &dyn ModelModule = module;
@@ -282,11 +343,51 @@ fn lower_structured_kernels(
                         access: b.access,
                     })
                     .collect();
-                out.push((spec.id.as_str().to_string(), wgsl.to_wgsl(), bindings, p.dispatch));
+                // The kernel's `Constants` tail (EOS params beyond the 12 base
+                // fields), read from the EMITTED WGSL — authoritative, since the
+                // codegen derives them from referenced params, not p.eos_params
+                // (which is empty for e.g. bc_expr yet its struct has eos_gm1/eos_r).
+                let src = wgsl.to_wgsl();
+                let eos_fields = parse_constants_eos_fields(&src);
+                out.push((spec.id.as_str().to_string(), src, bindings, eos_fields));
             }
         }
     }
     Ok(out)
+}
+
+/// The `struct Constants` fields BEYOND the 12 canonical base fields, in order,
+/// parsed from emitted WGSL. These are the EOS/buoyant params a kernel appends;
+/// they drive per-kernel `constants` uniform packing so `eos_*` reads land at the
+/// right offset (bc_expr appends only the params it references, not the full set).
+fn parse_constants_eos_fields(wgsl: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut in_struct = false;
+    for line in wgsl.lines() {
+        let t = line.trim();
+        if t.starts_with("struct Constants") {
+            in_struct = true;
+            continue;
+        }
+        if in_struct {
+            if t.starts_with('}') {
+                break;
+            }
+            // Field line: `name: type,`
+            if let Some(colon) = t.find(':') {
+                let name = t[..colon].trim();
+                if !name.is_empty() {
+                    fields.push(name.to_string());
+                }
+            }
+        }
+    }
+    // Drop the 12 base fields; the remainder is the EOS/buoyant tail.
+    if fields.len() > 12 {
+        fields.split_off(12)
+    } else {
+        Vec::new()
+    }
 }
 
 fn storage_buffer(device: &wgpu::Device, label: &str, len: usize) -> wgpu::Buffer {
@@ -323,6 +424,9 @@ pub struct StructuredGpuSolver {
     constants: GpuConstants,
     constants_buf: wgpu::Buffer,
     grid_buf: wgpu::Buffer,
+    /// The `low_mach_params` uniform the all-Mach/compressible kernels bind.
+    /// Held at the CPU structured solver's neutral values (`model=0`, others 0).
+    low_mach_buf: wgpu::Buffer,
 
     solver: BandedGpuLinAlg,
 
@@ -365,9 +469,9 @@ impl StructuredGpuSolver {
         let schemes = SchemeRegistry::new(scheme);
 
         let lowered = lower_structured_kernels(model, &schemes)?;
-        let wgsl_by_id: HashMap<String, (String, Vec<BindInfo>)> = lowered
+        let wgsl_by_id: HashMap<String, (String, Vec<BindInfo>, Vec<String>)> = lowered
             .into_iter()
-            .map(|(id, wgsl, bindings, _)| (id, (wgsl, bindings)))
+            .map(|(id, wgsl, bindings, eos)| (id, (wgsl, bindings, eos)))
             .collect();
 
         let n = grid.num_cells();
@@ -386,12 +490,12 @@ impl StructuredGpuSolver {
             if kernels.contains_key(id) {
                 return Ok(());
             }
-            let (wgsl, bindings) = wgsl_by_id
+            let (wgsl, bindings, eos_fields) = wgsl_by_id
                 .get(id)
                 .ok_or_else(|| format!("structured GPU model missing kernel `{id}`"))?;
             kernels.insert(
                 id.to_string(),
-                CompiledKernel::build(&ctx.device, id, wgsl, bindings.clone()),
+                CompiledKernel::build(&ctx.device, id, wgsl, bindings.clone(), eos_fields.clone()),
             );
             Ok(())
         };
@@ -474,8 +578,26 @@ impl StructuredGpuSolver {
             contents: bytemuck::bytes_of(&grid_gpu),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
+        // Neutral low-Mach params (model=Off/0), matching the CPU structured
+        // solver's build_ctx — no preconditioning, no biharmonic dissipation.
+        let low_mach = crate::solver::gpu::structs::GpuLowMachParams {
+            model: 0,
+            theta_floor: 0.0,
+            pressure_coupling_alpha: 0.0,
+            eps4: 0.0,
+        };
+        let low_mach_buf = dev.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("low_mach_params"),
+            contents: bytemuck::bytes_of(&low_mach),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
 
         let solver = BandedGpuLinAlg::new(dev, grid.nx as u32, grid.ny as u32, s as u32);
+
+        // Pack each kernel's `constants` uniform to its own `Constants` layout.
+        for k in kernels.values() {
+            k.write_constants(&ctx.queue, &constants);
+        }
 
         Ok(Self {
             ctx,
@@ -492,6 +614,7 @@ impl StructuredGpuSolver {
             constants,
             constants_buf,
             grid_buf,
+            low_mach_buf,
             solver,
             outer_iters: outer_iters.max(1),
             dt,
@@ -499,11 +622,12 @@ impl StructuredGpuSolver {
     }
 
     fn buf(&self, name: &str) -> &wgpu::Buffer {
-        // `constants` and `grid` are the two uniforms; everything else is a
+        // `constants`/`grid`/`low_mach_params` are uniforms; everything else is a
         // named storage buffer.
         match name {
             "constants" => &self.constants_buf,
             "grid" => &self.grid_buf,
+            "low_mach_params" => &self.low_mach_buf,
             other => self
                 .buffers
                 .get(other)
@@ -572,9 +696,23 @@ impl StructuredGpuSolver {
     pub fn set_fluid(&mut self, density: f64, viscosity: f64) {
         self.constants.density = density as f32;
         self.constants.viscosity = viscosity as f32;
-        self.ctx
-            .queue
-            .write_buffer(&self.constants_buf, 0, bytemuck::bytes_of(&self.constants));
+        self.write_kernel_constants();
+    }
+
+    /// (Re)pack every kernel's `constants` uniform from the current `GpuConstants`
+    /// — each to its own `Constants` struct layout (base fields + its EOS params).
+    fn write_kernel_constants(&self) {
+        for k in self.kernels.values() {
+            k.write_constants(&self.ctx.queue, &self.constants);
+        }
+    }
+
+    /// Set an EOS runtime parameter (e.g. gamma via `eos_gm1`) on the constants.
+    pub fn set_eos(&mut self, gamma: f32, gas_constant: f32) {
+        self.constants.eos_gamma = gamma;
+        self.constants.eos_gm1 = gamma - 1.0;
+        self.constants.eos_r = gas_constant;
+        self.write_kernel_constants();
     }
 
     /// Impose a per-`(cell, dir)` boundary type + per-unknown BC. Mirrors the CPU
@@ -675,9 +813,7 @@ impl StructuredGpuSolver {
         let sstride = self.state_stride;
         self.constants.dt = self.dt as f32;
         self.constants.dt_old = self.dt as f32;
-        self.ctx
-            .queue
-            .write_buffer(&self.constants_buf, 0, bytemuck::bytes_of(&self.constants));
+        self.write_kernel_constants();
 
         // Advance history: old_old <- old, old <- state.
         self.copy_submit("state_old", "state_old_old", n * sstride);

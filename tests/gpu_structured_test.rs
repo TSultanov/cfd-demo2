@@ -11,6 +11,7 @@
 use cfd2::solver::cpu::structured::{StructuredCpuSolver, StructuredModelSolver};
 use cfd2::solver::gpu::structured::{BcComp, Edge, StructuredGpuSolver, StructuredGrid};
 use cfd2::solver::model::{
+    allmach_thermal_structured_model, compressible_structured_model,
     generic_diffusion_demo_structured_model, incompressible_momentum_structured_model,
 };
 
@@ -386,4 +387,175 @@ fn gpu_structured_momentum_lid_cavity_matches_cpu() {
     }
     println!("[gpu-structured] momentum lid: umax={umax:.4}, top_ux={top_row_mean_ux:.4}, max|Δcpu|={max_d:e}");
     assert!(max_d < 3e-2, "GPU vs CPU lid-cavity velocity mismatch {max_d}");
+}
+
+/// EOS FAMILY: the all-Mach THERMAL structured pipeline (Ux/Uy/p/T + on-device
+/// EOS density recovery + low_mach_params uniform) runs its full kernel schedule
+/// on the GPU and matches the CPU StructuredModelSolver's lid-driven flow.
+#[test]
+fn gpu_structured_thermal_lid_matches_cpu() {
+    let (nx, ny) = (16usize, 16usize);
+    let steps = 10;
+    let model = allmach_thermal_structured_model().expect("model");
+    let s = model.system.unknowns_per_cell() as usize;
+    let psi = 0.5f64;
+    let seed = |solver: &mut dyn ThermalSeed| {
+        solver.set_fluid(1.0, 0.02);
+        solver.seed("psi", psi);
+        solver.seed("psi_precond", psi.max(1.0));
+        solver.seed("rho", 1.0);
+        solver.seed("rho_t_ref", 1.0);
+        solver.seed("T", 1.0);
+        solver.seed_if("t_ref", 1.0);
+        solver.seed_if("rho_floor", psi * 1.0e-5);
+    };
+    let bc = move |edge: Edge| {
+        let u_wall = if matches!(edge, Edge::Top) { 1.0 } else { 0.0 };
+        let btype = if matches!(edge, Edge::Top) { 5 } else { 3 };
+        let mut v = vec![
+            BcComp { kind: 1, value: u_wall },
+            BcComp { kind: 1, value: 0.0 },
+            BcComp { kind: 2, value: 0.0 },
+        ];
+        if s >= 4 {
+            v.push(BcComp { kind: 2, value: 0.0 });
+        }
+        (btype, v)
+    };
+
+    let mut cpu =
+        StructuredModelSolver::new(StructuredGrid::new(nx, ny, 1.0, 1.0), &model, 0.02, 3).unwrap();
+    seed(&mut CpuThermal(&mut cpu));
+    cpu.set_boundaries(|e, _x, _y| bc(e));
+    for _ in 0..steps {
+        cpu.step();
+    }
+    let cpu_ux = cpu.state_field(0);
+
+    let mut gpu =
+        StructuredGpuSolver::new(StructuredGrid::new(nx, ny, 1.0, 1.0), &model, 0.02, 3).unwrap();
+    seed(&mut GpuThermal(&mut gpu));
+    gpu.set_boundaries(|e, _x, _y| bc(e));
+    for _ in 0..steps {
+        gpu.step();
+    }
+    let gpu_ux = gpu.state_field(0);
+    let gpu_uy = gpu.state_field(1);
+
+    let mut umax = 0.0f64;
+    let mut max_d = 0.0f64;
+    for p in 0..cpu_ux.len() {
+        assert!(gpu_ux[p].is_finite() && gpu_uy[p].is_finite(), "thermal GPU diverged");
+        umax = umax.max(gpu_ux[p].hypot(gpu_uy[p]));
+        max_d = max_d.max((cpu_ux[p] - gpu_ux[p]).abs());
+    }
+    assert!(umax > 0.02 && umax < 5.0, "unphysical thermal speed {umax}");
+    println!("[gpu-structured] thermal lid: umax={umax:.4}, max|Δcpu|={max_d:e}");
+    assert!(max_d < 3e-2, "GPU vs CPU thermal mismatch {max_d}");
+}
+
+/// EOS FAMILY: the density-based COMPRESSIBLE structured pipeline (s conserved
+/// unknowns + central-upwind flux + on-device primitive recovery + the
+/// expression-BC closure `bc_expr`, whose per-kernel EOS constants are packed to
+/// its reduced Constants layout) runs on the GPU and matches the CPU on a uniform
+/// gas box that must stay bounded.
+#[test]
+fn gpu_structured_compressible_box_matches_cpu() {
+    let (nx, ny) = (16usize, 16usize);
+    let steps = 20;
+    let model = compressible_structured_model().expect("model");
+    let s = model.system.unknowns_per_cell() as usize;
+    let (rho0, e0, p0) = (1.0, 2.5, 1.0);
+    let seed = |g: &mut StructuredGpuSolver| {
+        g.set_fluid(1.0, 0.0);
+        g.set_named_field("rho", |_, _| rho0);
+        g.set_named_field("rho_e", |_, _| e0);
+        g.set_named_field("p", |_, _| p0);
+        g.set_named_field("T", |_, _| 1.0);
+        if g.field_offset("mu").is_some() {
+            g.set_named_field("mu", |_, _| 0.0);
+        }
+    };
+    let bc = move |_edge: Edge| {
+        let mut v = vec![
+            BcComp { kind: 1, value: rho0 as f32 },
+            BcComp { kind: 1, value: 0.0 },
+            BcComp { kind: 1, value: 0.0 },
+        ];
+        if s >= 4 {
+            v.push(BcComp { kind: 1, value: e0 as f32 });
+        }
+        (3u32, v) // Wall
+    };
+
+    let mut cpu =
+        StructuredModelSolver::new(StructuredGrid::new(nx, ny, 1.0, 1.0), &model, 0.01, 1).unwrap();
+    cpu.set_fluid(1.0, 0.0);
+    cpu.set_named_field("rho", |_, _| rho0);
+    cpu.set_named_field("rho_e", |_, _| e0);
+    cpu.set_named_field("p", |_, _| p0);
+    cpu.set_named_field("T", |_, _| 1.0);
+    if cpu.field_offset("mu").is_some() {
+        cpu.set_named_field("mu", |_, _| 0.0);
+    }
+    cpu.set_boundaries(|e, _x, _y| bc(e));
+    for _ in 0..steps {
+        cpu.step();
+    }
+    let cpu_rho = cpu.state_field(cpu.field_offset("rho").unwrap());
+
+    let mut gpu =
+        StructuredGpuSolver::new(StructuredGrid::new(nx, ny, 1.0, 1.0), &model, 0.01, 1).unwrap();
+    seed(&mut gpu);
+    gpu.set_boundaries(|e, _x, _y| bc(e));
+    for _ in 0..steps {
+        gpu.step();
+    }
+    let rho_off = gpu.field_offset("rho").unwrap();
+    let gpu_rho = gpu.state_field(rho_off);
+    let gpu_re = gpu.state_field(gpu.field_offset("rho_e").unwrap());
+
+    let mut max_d = 0.0f64;
+    for (p, (&cr, &gr)) in cpu_rho.iter().zip(&gpu_rho).enumerate() {
+        assert!(gr.is_finite() && gpu_re[p].is_finite(), "compressible GPU diverged");
+        assert!(gr > 0.5 && gr < 2.0, "compressible density drifted: {gr}");
+        max_d = max_d.max((cr - gr).abs());
+    }
+    println!("[gpu-structured] compressible box: max|Δcpu rho|={max_d:e}");
+    assert!(max_d < 5e-3, "GPU vs CPU compressible mismatch {max_d}");
+}
+
+// Small shims so the thermal seeding is shared between the CPU and GPU solvers.
+trait ThermalSeed {
+    fn set_fluid(&mut self, d: f64, v: f64);
+    fn seed(&mut self, name: &str, val: f64);
+    fn seed_if(&mut self, name: &str, val: f64);
+}
+struct CpuThermal<'a>(&'a mut StructuredModelSolver);
+impl ThermalSeed for CpuThermal<'_> {
+    fn set_fluid(&mut self, d: f64, v: f64) {
+        self.0.set_fluid(d, v);
+    }
+    fn seed(&mut self, name: &str, val: f64) {
+        self.0.set_named_field(name, |_, _| val);
+    }
+    fn seed_if(&mut self, name: &str, val: f64) {
+        if self.0.field_offset(name).is_some() {
+            self.0.set_named_field(name, |_, _| val);
+        }
+    }
+}
+struct GpuThermal<'a>(&'a mut StructuredGpuSolver);
+impl ThermalSeed for GpuThermal<'_> {
+    fn set_fluid(&mut self, d: f64, v: f64) {
+        self.0.set_fluid(d, v);
+    }
+    fn seed(&mut self, name: &str, val: f64) {
+        self.0.set_named_field(name, |_, _| val);
+    }
+    fn seed_if(&mut self, name: &str, val: f64) {
+        if self.0.field_offset(name).is_some() {
+            self.0.set_named_field(name, |_, _| val);
+        }
+    }
 }

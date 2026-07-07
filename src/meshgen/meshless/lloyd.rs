@@ -171,7 +171,7 @@ pub fn lloyd_relax(
         // per-seed results (position, h-relative displacement).
         let moved: Vec<(Point2<f64>, f64)> = (0..seeds.len())
             .into_par_iter()
-            .with_min_len(1024)
+            .with_min_len(super::meshless_min_len())
             .map(|i| {
                 let p = seeds[i];
                 let interior = kinds.is_empty() || kinds[i] == SeedKind::Interior;

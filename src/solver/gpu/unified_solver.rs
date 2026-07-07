@@ -389,6 +389,20 @@ impl GpuUnifiedSolver {
         self.cpu_ref().map(|c| c.debug_scalar_csr())
     }
 
+    /// The CPU worker-thread budget (`CFD2_CPU_THREADS`), or `1` on the GPU
+    /// backend / when the `cpu` feature is off. Lets driver-side ALE code size
+    /// its own `parallel.rs` regions to the same budget the solver uses.
+    pub fn cpu_threads(&self) -> usize {
+        #[cfg(feature = "cpu")]
+        {
+            self.cpu_ref().map(|c| c.threads()).unwrap_or(1)
+        }
+        #[cfg(not(feature = "cpu"))]
+        {
+            1
+        }
+    }
+
     /// True if this solver is running on the CPU backend.
     pub fn is_cpu(&self) -> bool {
         #[cfg(feature = "cpu")]

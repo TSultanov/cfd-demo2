@@ -116,34 +116,49 @@ fn assemble_eps_w(
     u_rank: usize,
     n: usize,
 ) -> (Vec<f64>, Vec<f64>) {
+    let threads = cpu.threads();
     let (mat, rhs) = cpu.debug_assemble();
     let (row_offsets, col_indices, diag_indices, s) = cpu.debug_topology();
-    let offsets = cpu.unknown_state_offsets();
+    let offsets: Vec<usize> = cpu.unknown_state_offsets().iter().map(|&o| o as usize).collect();
     let mut eps = vec![0.0f64; n];
     let mut w = vec![0.0f64; 2 * n];
-    for c in 0..n {
-        let so = row_offsets[c] as usize;
-        let nn = row_offsets[c + 1] as usize - so;
-        let start_p = so * s * s + nn * s * p_rank;
-        let mut acc = rhs[c * s + p_rank] as f64;
-        for k in 0..nn {
-            let col_cell = col_indices[so + k] as usize;
-            let base = start_p + k * s;
-            for col in 0..s {
-                let off = offsets[col] as usize;
-                acc -= mat[base + col] as f64 * state[col_cell * stride + off] as f64;
+    // Per-cell CSR read: each `eps[c]` / `w[c*2..]` depends only on cell `c`'s
+    // matrix row, so the fill parallelizes bit-identically (disjoint writes,
+    // no reduction — same arithmetic per cell regardless of `threads`).
+    crate::solver::cpu::parallel::parallel_cell_chunks_mut2(
+        n,
+        1,
+        2,
+        threads,
+        &mut eps,
+        &mut w,
+        |start, er, wr| {
+            for (li, (ec, wc)) in er.iter_mut().zip(wr.chunks_exact_mut(2)).enumerate() {
+                let c = start + li;
+                let so = row_offsets[c] as usize;
+                let nn = row_offsets[c + 1] as usize - so;
+                let start_p = so * s * s + nn * s * p_rank;
+                let mut acc = rhs[c * s + p_rank] as f64;
+                for k in 0..nn {
+                    let col_cell = col_indices[so + k] as usize;
+                    let base = start_p + k * s;
+                    for col in 0..s {
+                        let off = offsets[col];
+                        acc -= mat[base + col] as f64 * state[col_cell * stride + off] as f64;
+                    }
+                }
+                *ec = acc;
+                let drank = (diag_indices[c] as usize) - so;
+                for comp in 0..2 {
+                    let r = u_rank + comp;
+                    let a = mat[so * s * s + nn * s * r + drank * s + r] as f64;
+                    // Momentum diagonals carry vol*rho/dt and are positive; a
+                    // degenerate one freezes that dof out of the correction.
+                    wc[comp] = if a > 1e-30 { 1.0 / a } else { 0.0 };
+                }
             }
-        }
-        eps[c] = acc;
-        let drank = (diag_indices[c] as usize) - so;
-        for comp in 0..2 {
-            let r = u_rank + comp;
-            let a = mat[so * s * s + nn * s * r + drank * s + r] as f64;
-            // Momentum diagonals carry vol*rho/dt and are positive; a
-            // degenerate one freezes that dof out of the correction.
-            w[c * 2 + comp] = if a > 1e-30 { 1.0 / a } else { 0.0 };
-        }
-    }
+        },
+    );
     (eps, w)
 }
 
@@ -264,55 +279,120 @@ fn solve_du(
     target: &[f64],
     grounded: bool,
     n: usize,
+    threads: usize,
 ) -> (Vec<f64>, usize) {
-    let apply_gt_w = |lam: &[f64], t: &mut [f64]| {
-        t.iter_mut().for_each(|v| *v = 0.0);
-        for fj in jac {
-            if fj.neighbor == NO_NEIGHBOR {
-                let lo = lam[fj.owner];
-                t[fj.owner * 2] += lo * fj.g_own[0];
-                t[fj.owner * 2 + 1] += lo * fj.g_own[1];
-            } else {
-                let d = lam[fj.owner] - lam[fj.neighbor];
-                t[fj.owner * 2] += d * fj.g_own[0];
-                t[fj.owner * 2 + 1] += d * fj.g_own[1];
-                t[fj.neighbor * 2] += d * fj.g_nei[0];
-                t[fj.neighbor * 2 + 1] += d * fj.g_nei[1];
-            }
-        }
-        for (ti, wi) in t.iter_mut().zip(w.iter()) {
-            *ti *= wi;
-        }
-    };
-    let apply_g = |t: &[f64], y: &mut [f64]| {
-        y.iter_mut().for_each(|v| *v = 0.0);
-        for fj in jac {
-            if fj.neighbor == NO_NEIGHBOR {
-                let val = fj.g_own[0] * t[fj.owner * 2] + fj.g_own[1] * t[fj.owner * 2 + 1];
-                y[fj.owner] += val;
-            } else {
-                let val = fj.g_own[0] * t[fj.owner * 2]
-                    + fj.g_own[1] * t[fj.owner * 2 + 1]
-                    + fj.g_nei[0] * t[fj.neighbor * 2]
-                    + fj.g_nei[1] * t[fj.neighbor * 2 + 1];
-                y[fj.owner] += val;
-                y[fj.neighbor] -= val;
-            }
-        }
-    };
-    let mut diag = vec![0.0f64; n];
+    use crate::solver::cpu::parallel::parallel_cell_chunks_mut;
+
+    // Per-cell CSR of the `jac` entries that touch each cell, in ASCENDING jac
+    // index. Because `jac` is built in ascending face order, this reproduces
+    // the exact order the serial scatter (`for fj in jac`) would add each
+    // cell's contributions — so the gather operators below are BIT-IDENTICAL
+    // to the serial scatter regardless of `threads`. Built once per solve
+    // (integer counting sort, deterministic).
+    let mut off = vec![0usize; n + 1];
     for fj in jac {
-        let own2 = fj.g_own[0] * fj.g_own[0] * w[fj.owner * 2]
-            + fj.g_own[1] * fj.g_own[1] * w[fj.owner * 2 + 1];
-        if fj.neighbor == NO_NEIGHBOR {
-            diag[fj.owner] += own2;
-        } else {
-            let nei2 = fj.g_nei[0] * fj.g_nei[0] * w[fj.neighbor * 2]
-                + fj.g_nei[1] * fj.g_nei[1] * w[fj.neighbor * 2 + 1];
-            diag[fj.owner] += own2 + nei2;
-            diag[fj.neighbor] += own2 + nei2;
+        off[fj.owner + 1] += 1;
+        if fj.neighbor != NO_NEIGHBOR {
+            off[fj.neighbor + 1] += 1;
         }
     }
+    for c in 0..n {
+        off[c + 1] += off[c];
+    }
+    let mut ent = vec![0u32; off[n]];
+    {
+        let mut cur = off[..n].to_vec();
+        for (j, fj) in jac.iter().enumerate() {
+            let o = fj.owner;
+            ent[cur[o]] = j as u32;
+            cur[o] += 1;
+            if fj.neighbor != NO_NEIGHBOR {
+                let nb = fj.neighbor;
+                ent[cur[nb]] = j as u32;
+                cur[nb] += 1;
+            }
+        }
+    }
+    let cell_entries = |c: usize| -> &[u32] { &ent[off[c]..off[c + 1]] };
+
+    // t = W · G^T lam, gathered per cell (owner: +, neighbor: −), then scaled
+    // by the momentum diagonal `w`. Disjoint per-cell writes.
+    let apply_gt_w = |lam: &[f64], t: &mut [f64]| {
+        parallel_cell_chunks_mut(n, 2, threads, t, |start, tr| {
+            for (li, tc) in tr.chunks_exact_mut(2).enumerate() {
+                let c = start + li;
+                let (mut a0, mut a1) = (0.0f64, 0.0f64);
+                for &je in cell_entries(c) {
+                    let fj = &jac[je as usize];
+                    if fj.neighbor == NO_NEIGHBOR {
+                        let lo = lam[fj.owner];
+                        a0 += lo * fj.g_own[0];
+                        a1 += lo * fj.g_own[1];
+                    } else {
+                        let d = lam[fj.owner] - lam[fj.neighbor];
+                        if fj.owner == c {
+                            a0 += d * fj.g_own[0];
+                            a1 += d * fj.g_own[1];
+                        } else {
+                            a0 += d * fj.g_nei[0];
+                            a1 += d * fj.g_nei[1];
+                        }
+                    }
+                }
+                tc[0] = a0 * w[c * 2];
+                tc[1] = a1 * w[c * 2 + 1];
+            }
+        });
+    };
+    // y = G t, gathered per cell. The per-face divergence `val` is recomputed
+    // for both incident cells (owner adds it, neighbor subtracts it) — 2× the
+    // flops of the scatter, no shared state.
+    let apply_g = |t: &[f64], y: &mut [f64]| {
+        parallel_cell_chunks_mut(n, 1, threads, y, |start, yr| {
+            for (li, yc) in yr.iter_mut().enumerate() {
+                let c = start + li;
+                let mut acc = 0.0f64;
+                for &je in cell_entries(c) {
+                    let fj = &jac[je as usize];
+                    if fj.neighbor == NO_NEIGHBOR {
+                        acc += fj.g_own[0] * t[fj.owner * 2] + fj.g_own[1] * t[fj.owner * 2 + 1];
+                    } else {
+                        let val = fj.g_own[0] * t[fj.owner * 2]
+                            + fj.g_own[1] * t[fj.owner * 2 + 1]
+                            + fj.g_nei[0] * t[fj.neighbor * 2]
+                            + fj.g_nei[1] * t[fj.neighbor * 2 + 1];
+                        if fj.owner == c {
+                            acc += val;
+                        } else {
+                            acc -= val;
+                        }
+                    }
+                }
+                *yc = acc;
+            }
+        });
+    };
+    let mut diag = vec![0.0f64; n];
+    parallel_cell_chunks_mut(n, 1, threads, &mut diag, |start, dr| {
+        for (li, dc) in dr.iter_mut().enumerate() {
+            let c = start + li;
+            let mut acc = 0.0f64;
+            for &je in cell_entries(c) {
+                let fj = &jac[je as usize];
+                let own2 = fj.g_own[0] * fj.g_own[0] * w[fj.owner * 2]
+                    + fj.g_own[1] * fj.g_own[1] * w[fj.owner * 2 + 1];
+                if fj.neighbor == NO_NEIGHBOR {
+                    acc += own2;
+                } else {
+                    let nei2 = fj.g_nei[0] * fj.g_nei[0] * w[fj.neighbor * 2]
+                        + fj.g_nei[1] * fj.g_nei[1] * w[fj.neighbor * 2 + 1];
+                    // Both incident cells receive own2+nei2 (see the scatter).
+                    acc += own2 + nei2;
+                }
+            }
+            *dc = acc;
+        }
+    });
     let deflate = |v: &mut [f64]| {
         // Closed domain (no outlet u-sensitivity): S has the constant null
         // space; keep everything mean-free so PCG stays on the range.
@@ -408,7 +488,10 @@ pub fn project_transferred_state(
         return Ok(MassProjectionOutcome::default());
     };
 
+    let profile = super::moving_mesh_driver::ale_profile_level() >= 2;
+    let eps_t = std::time::Instant::now();
     let (eps, w) = assemble_eps_w(cpu, rows, stride, p_rank, u_rank, n);
+    let eps_ms = eps_t.elapsed().as_secs_f32() * 1000.0;
     let pre = inf_norm(&eps);
     let mut out = MassProjectionOutcome {
         pre,
@@ -423,8 +506,13 @@ pub fn project_transferred_state(
         return Ok(out);
     }
 
+    let threads = cpu.threads();
+    let jac_t = std::time::Instant::now();
     let (jac, grounded) = build_face_jacobian(cpu, mesh, layout, rows, u_rank);
-    let (du, iters) = solve_du(&jac, &w, &eps, grounded, n);
+    let jac_ms = jac_t.elapsed().as_secs_f32() * 1000.0;
+    let cg_t = std::time::Instant::now();
+    let (du, iters) = solve_du(&jac, &w, &eps, grounded, n, threads);
+    let cg_ms = cg_t.elapsed().as_secs_f32() * 1000.0;
     out.cg_iters = iters;
     if du.iter().any(|v| !v.is_finite()) {
         return Ok(out);
@@ -432,6 +520,7 @@ pub fn project_transferred_state(
 
     // Apply + verify by re-assembly; revert unless the measured residual
     // actually improved.
+    let verify_t = std::time::Instant::now();
     let original: Vec<f32> = rows.to_vec();
     for c in 0..n {
         rows[c * stride + layout.u_off] =
@@ -449,6 +538,14 @@ pub fn project_transferred_state(
     } else {
         rows.copy_from_slice(&original);
         cpu.reinit_cells(&cells, rows, vols)?;
+    }
+    if profile {
+        eprintln!(
+            "[ale-profile]   proj(transfer): eps_w={eps_ms:.2} jac={jac_ms:.2} \
+             cg={cg_ms:.2}({iters}it) verify={:.2}ms n={n} faces={}",
+            verify_t.elapsed().as_secs_f32() * 1000.0,
+            mesh.num_faces(),
+        );
     }
     Ok(out)
 }
@@ -522,7 +619,10 @@ pub fn project_recycled_state(
             .fold(0.0f64, |m, (&x, _)| m.max(x.abs()))
     };
 
+    let profile = super::moving_mesh_driver::ale_profile_level() >= 2;
+    let eps_t = std::time::Instant::now();
     let (r1, w) = assemble_eps_w(cpu, &state, stride, p_rank, u_rank, n);
+    let eps_ms = eps_t.elapsed().as_secs_f32() * 1000.0;
     let pre = inf_masked(&r1);
     let pre_global = inf_norm(&r1);
     let mut out = MassProjectionOutcome {
@@ -543,13 +643,19 @@ pub fn project_recycled_state(
         .map(|(&r, &m)| if m { r } else { 0.0 })
         .collect();
 
+    let threads = cpu.threads();
+    let jac_t = std::time::Instant::now();
     let (jac, grounded) = build_face_jacobian(cpu, mesh, layout, &state, u_rank);
-    let (du, iters) = solve_du(&jac, &w, &target, grounded, n);
+    let jac_ms = jac_t.elapsed().as_secs_f32() * 1000.0;
+    let cg_t = std::time::Instant::now();
+    let (du, iters) = solve_du(&jac, &w, &target, grounded, n, threads);
+    let cg_ms = cg_t.elapsed().as_secs_f32() * 1000.0;
     out.cg_iters = iters;
     if du.iter().any(|v| !v.is_finite()) {
         return Ok(out);
     }
 
+    let verify_t = std::time::Instant::now();
     let original = state.clone();
     for c in 0..n {
         state[c * stride + layout.u_off] =
@@ -582,6 +688,15 @@ pub fn project_recycled_state(
         out.applied = true;
     } else {
         write_all(cpu, &original)?;
+    }
+    if profile {
+        eprintln!(
+            "[ale-profile]   proj(recycle): eps_w={eps_ms:.2} jac={jac_ms:.2} \
+             cg={cg_ms:.2}({iters}it) verify={:.2}ms n={n} faces={} recycled={}",
+            verify_t.elapsed().as_secs_f32() * 1000.0,
+            mesh.num_faces(),
+            recycled.len(),
+        );
     }
     Ok(out)
 }

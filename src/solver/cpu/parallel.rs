@@ -65,13 +65,52 @@ where
 /// work itself, so the helpers scale the worker count down (bit-exactness is
 /// unaffected). 8k f64 ≈ 64 KB per worker ≈ the break-even for a persistent-pool
 /// region against ~10 GB/s-per-core streaming.
-const MIN_ELEMS_PER_WORKER: usize = 8 * 1024;
+///
+/// Overridable via `CFD2_CPU_MIN_ELEMS` (read once). Value-safe: element-wise
+/// regions stay bit-identical across any worker count (each output produced
+/// once); `par_dot` sums per fixed 8192-element chunk regardless, so its VALUE
+/// never depends on this floor.
+///
+/// The former `8*1024` floor was tuned as a BLAS-1 streaming break-even, but a
+/// measured sweep (2.4k–20k cells, every-step-adapt ALE + static) found it far
+/// too conservative on this class of machine: the small-to-mid-mesh solve +
+/// mass-row projection fell entirely below the floor and ran near-serially,
+/// leaving cores idle. `1024` fanned the same work across all workers for
+/// +55% ALE throughput and −25% static wall/step at ~5k cells, BIT-IDENTICAL
+/// (fingerprints unchanged), with NO effect at ≥~5k cells (those already
+/// saturate `threads` workers, so the chunking is unchanged). Below ~1024 the
+/// gain plateaus. Retune per machine via the env var.
+const MIN_ELEMS_PER_WORKER_DEFAULT: usize = 1024;
 
 /// Same idea for the row-wise chunk helpers ([`parallel_cell_chunks_mut`] and
 /// friends), whose per-element work (a CSR row gather, a block solve) is
-/// several times heavier than BLAS-1 streaming, so coarse levels (a few k rows)
-/// run serial rather than fan out for microseconds of work.
-const MIN_CELL_ELEMS_PER_WORKER: usize = 4 * 1024;
+/// several times heavier than BLAS-1 streaming. Overridable via
+/// `CFD2_CPU_MIN_CELL_ELEMS`. Lowered from `4*1024` for the same measured
+/// reason (see [`MIN_ELEMS_PER_WORKER_DEFAULT`]); kept at half the BLAS-1 floor
+/// since the per-row work is heavier.
+const MIN_CELL_ELEMS_PER_WORKER_DEFAULT: usize = 512;
+
+fn env_usize(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|&v| v > 0)
+        .unwrap_or(default)
+}
+
+/// The active BLAS-1 per-worker floor (`CFD2_CPU_MIN_ELEMS` or the default),
+/// read once per process.
+fn min_elems_per_worker() -> usize {
+    static V: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *V.get_or_init(|| env_usize("CFD2_CPU_MIN_ELEMS", MIN_ELEMS_PER_WORKER_DEFAULT))
+}
+
+/// The active row-chunk per-worker floor (`CFD2_CPU_MIN_CELL_ELEMS` or the
+/// default), read once per process.
+fn min_cell_elems_per_worker() -> usize {
+    static V: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *V.get_or_init(|| env_usize("CFD2_CPU_MIN_CELL_ELEMS", MIN_CELL_ELEMS_PER_WORKER_DEFAULT))
+}
 
 /// Worker count for the deterministic dot helpers (shared with the f32
 /// mixed-precision twin in `linalg`).
@@ -83,14 +122,14 @@ pub(crate) fn par_dot_workers(threads: usize, total_elems: usize) -> usize {
 #[inline]
 fn effective_workers(threads: usize, total_elems: usize) -> usize {
     threads
-        .min(total_elems.div_ceil(MIN_ELEMS_PER_WORKER))
+        .min(total_elems.div_ceil(min_elems_per_worker()))
         .max(1)
 }
 
 #[inline]
 fn effective_row_workers(threads: usize, total_elems: usize) -> usize {
     threads
-        .min(total_elems.div_ceil(MIN_CELL_ELEMS_PER_WORKER))
+        .min(total_elems.div_ceil(min_cell_elems_per_worker()))
         .max(1)
 }
 

@@ -722,19 +722,24 @@ impl CpuSolver {
     /// a fresh solver built on the same mesh + restored reproduces the next step
     /// byte-identically.
     pub fn snapshot(&self) -> SolverStateSnapshot {
+        // Threaded marshal (bit-identical to `f32_vec`): the moving-mesh resize
+        // seam captures a snapshot every adapt step, so the state/history reads
+        // are on the hot path. The threaded copies self-collapse to serial below
+        // 65536 elements, so small meshes pay nothing.
+        let t = self.config.threads;
         SolverStateSnapshot {
             num_cells: self.num_cells,
             num_faces: self.num_faces,
             state_stride: self.state_stride,
             unknowns_per_cell: self.unknowns_per_cell,
-            state: self.buffers.f32_vec("state"),
-            state_old: self.buffers.f32_vec("state_old"),
-            state_old_old: self.buffers.f32_vec("state_old_old"),
-            x: self.buffers.f32_vec("x"),
-            cell_vols: self.buffers.f32_vec("cell_vols"),
-            cell_vols_old: self.buffers.f32_vec("cell_vols_old"),
-            cell_vols_old_old: self.buffers.f32_vec("cell_vols_old_old"),
-            mesh_fluxes: self.buffers.f32_vec("mesh_fluxes"),
+            state: self.buffers.f32_vec_threaded("state", t),
+            state_old: self.buffers.f32_vec_threaded("state_old", t),
+            state_old_old: self.buffers.f32_vec_threaded("state_old_old", t),
+            x: self.buffers.f32_vec_threaded("x", t),
+            cell_vols: self.buffers.f32_vec_threaded("cell_vols", t),
+            cell_vols_old: self.buffers.f32_vec_threaded("cell_vols_old", t),
+            cell_vols_old_old: self.buffers.f32_vec_threaded("cell_vols_old_old", t),
+            mesh_fluxes: self.buffers.f32_vec_threaded("mesh_fluxes", t),
             time: self.time,
             dt: self.dt,
             dt_old: self.dt_old,
@@ -751,25 +756,29 @@ impl CpuSolver {
     /// restored when the face count also matches (a remesh recomputes it).
     pub fn restore(&mut self, snap: &SolverStateSnapshot) -> Result<(), String> {
         snap.check_compatible(self.num_cells, self.state_stride)?;
-        self.buffers.copy_into_f32("state", &snap.state);
+        // Threaded stores (bit-identical to `copy_into_f32`) — the resize seam's
+        // BDF-continuity restore + the two-level re-solve fire every adapt step.
+        let t = self.config.threads;
+        self.buffers.copy_into_f32_threaded("state", &snap.state, t);
         if snap.has_history {
-            self.buffers.copy_into_f32("state_old", &snap.state_old);
-            self.buffers.copy_into_f32("state_old_old", &snap.state_old_old);
-            self.buffers.copy_into_f32("x", &snap.x);
+            self.buffers.copy_into_f32_threaded("state_old", &snap.state_old, t);
+            self.buffers.copy_into_f32_threaded("state_old_old", &snap.state_old_old, t);
+            self.buffers.copy_into_f32_threaded("x", &snap.x, t);
             if !snap.cell_vols.is_empty() {
-                self.buffers.copy_into_f32("cell_vols", &snap.cell_vols);
+                self.buffers.copy_into_f32_threaded("cell_vols", &snap.cell_vols, t);
             }
-            self.buffers.copy_into_f32("cell_vols_old", &snap.cell_vols_old);
-            self.buffers.copy_into_f32("cell_vols_old_old", &snap.cell_vols_old_old);
+            self.buffers.copy_into_f32_threaded("cell_vols_old", &snap.cell_vols_old, t);
+            self.buffers
+                .copy_into_f32_threaded("cell_vols_old_old", &snap.cell_vols_old_old, t);
             if snap.num_faces == self.num_faces {
-                self.buffers.copy_into_f32("mesh_fluxes", &snap.mesh_fluxes);
+                self.buffers.copy_into_f32_threaded("mesh_fluxes", &snap.mesh_fluxes, t);
             }
         } else {
             // Current-state-only snapshot (GPU capture): re-seed the history
             // from the restored state (IC semantics) so a subsequent step has a
             // consistent `state_old`/`x`. Exact for single-step schemes.
-            self.buffers.copy_into_f32("state_old", &snap.state);
-            self.buffers.copy_into_f32("state_old_old", &snap.state);
+            self.buffers.copy_into_f32_threaded("state_old", &snap.state, t);
+            self.buffers.copy_into_f32_threaded("state_old_old", &snap.state, t);
             self.sync_x_from_state();
         }
         self.time = snap.time;
@@ -949,10 +958,19 @@ impl CpuSolver {
     pub fn state_stride(&self) -> u32 {
         self.state_stride
     }
+    /// Worker-thread count this backend runs its parallel regions on
+    /// (`CFD2_CPU_THREADS`, default 1). Callers outside the solver (e.g. the
+    /// moving-mesh resize seam) use it to size their own bit-identical
+    /// `parallel.rs` regions to the same budget.
+    pub fn threads(&self) -> usize {
+        self.config.threads
+    }
 
     /// Full packed state (all components, `num_cells * stride` floats).
+    /// Threaded marshal (bit-identical) — the resize seam reads the full state
+    /// several times per adapt step (transfer gather, projection, velocities).
     pub fn read_state_f32(&self) -> Vec<f32> {
-        self.buffers.f32_vec("state")
+        self.buffers.f32_vec_threaded("state", self.config.threads)
     }
 
     /// Any non-finite value in the packed state? Clone-free host-side scan
@@ -1164,17 +1182,19 @@ impl CpuSolver {
     // ── stepping ──────────────────────────────────────────────────────────
 
     pub fn initialize_history(&self) {
-        let state = self.buffers.f32_vec("state");
-        self.buffers.copy_into_f32("state_old", &state);
-        self.buffers.copy_into_f32("state_old_old", &state);
-        self.buffers.copy_into_f32("state_iter", &state);
+        // Threaded marshal (bit-identical) — runs on every resize rebuild.
+        let t = self.config.threads;
+        let state = self.buffers.f32_vec_threaded("state", t);
+        self.buffers.copy_into_f32_threaded("state_old", &state, t);
+        self.buffers.copy_into_f32_threaded("state_old_old", &state, t);
+        self.buffers.copy_into_f32_threaded("state_iter", &state, t);
         // ALE volume history: `cell_vols_old == cell_vols_old_old ==
         // cell_vols` at t=0 (also seeded at build; re-copied here in case a
         // geometry refresh rewrote `cell_vols` before initialization). A
         // numeric no-op for static models — only *_ale kernels bind these.
-        let vols = self.buffers.f32_vec("cell_vols");
-        self.buffers.copy_into_f32("cell_vols_old", &vols);
-        self.buffers.copy_into_f32("cell_vols_old_old", &vols);
+        let vols = self.buffers.f32_vec_threaded("cell_vols", t);
+        self.buffers.copy_into_f32_threaded("cell_vols_old", &vols, t);
+        self.buffers.copy_into_f32_threaded("cell_vols_old_old", &vols, t);
         // Warm-start the solve buffer `x` from the coupled unknowns in the state.
         // The compressible EOS-coupled block system is rank-deficient (the
         // recovery rows admit a null-space the residual does not pin), so a zero
@@ -1201,31 +1221,51 @@ impl CpuSolver {
             .map(|(k, &v)| (v, k.clone()))
             .collect();
         offs.sort();
-        let state = self.buffers.f32_vec("state");
+        // Resolve the (x-base, width, state-offset) map once, then pack every
+        // cell's unknown row. The per-cell rows are disjoint, so the pack runs
+        // in parallel bit-identically (each x slot written exactly once).
+        let field_map: Vec<(usize, usize, usize)> = offs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (xbase, field))| {
+                let xbase = *xbase as usize;
+                let next = offs.get(i + 1).map(|(o, _)| *o as usize).unwrap_or(s);
+                let width = next - xbase;
+                self.state_layout
+                    .offset_for(field)
+                    .map(|soff| (xbase, width, soff as usize))
+            })
+            .collect();
+        let threads = self.config.threads;
+        let state = self.buffers.f32_vec_threaded("state", threads);
         let mut x = vec![0.0f32; self.num_cells * s];
-        for (i, (xbase, field)) in offs.iter().enumerate() {
-            let xbase = *xbase as usize;
-            let next = offs.get(i + 1).map(|(o, _)| *o as usize).unwrap_or(s);
-            let width = next - xbase;
-            let Some(soff) = self.state_layout.offset_for(field) else {
-                continue;
-            };
-            let soff = soff as usize;
-            for cell in 0..self.num_cells {
-                for c in 0..width {
-                    x[cell * s + xbase + c] = state[cell * stride + soff + c];
+        crate::solver::cpu::parallel::parallel_cell_chunks_mut(
+            self.num_cells,
+            s,
+            threads,
+            &mut x,
+            |start, xrows| {
+                for (li, xrow) in xrows.chunks_exact_mut(s).enumerate() {
+                    let cell = start + li;
+                    for &(xbase, width, soff) in &field_map {
+                        for c in 0..width {
+                            xrow[xbase + c] = state[cell * stride + soff + c];
+                        }
+                    }
                 }
-            }
-        }
-        self.buffers.copy_into_f32("x", &x);
+            },
+        );
+        self.buffers.copy_into_f32_threaded("x", &x, threads);
     }
 
     pub fn step(&mut self) {
-        // Rotate time history: old_old <- old, old <- current state.
-        let old = self.buffers.f32_vec("state_old");
-        self.buffers.copy_into_f32("state_old_old", &old);
-        let cur = self.buffers.f32_vec("state");
-        self.buffers.copy_into_f32("state_old", &cur);
+        // Rotate time history: old_old <- old, old <- current state. Threaded
+        // marshal (bit-identical) — runs every step incl. the resize re-solves.
+        let t = self.config.threads;
+        let old = self.buffers.f32_vec_threaded("state_old", t);
+        self.buffers.copy_into_f32_threaded("state_old_old", &old, t);
+        let cur = self.buffers.f32_vec_threaded("state", t);
+        self.buffers.copy_into_f32_threaded("state_old", &cur, t);
 
         self.constants.dt = self.dt;
         self.constants.dt_old = self.dt_old;
@@ -1605,7 +1645,13 @@ impl CpuSolver {
         for id in &assembly_group {
             run(id);
         }
-        (self.buffers.f32_vec("matrix_values"), self.buffers.f32_vec("rhs"))
+        // Threaded marshal (bit-identical): `matrix_values` is the multi-M-entry
+        // block matrix; the mass-row projection re-assembles 2-4x per resize.
+        let t = self.config.threads;
+        (
+            self.buffers.f32_vec_threaded("matrix_values", t),
+            self.buffers.f32_vec_threaded("rhs", t),
+        )
     }
 
     /// Debug: read the per-face `bc_value` buffer (length `num_faces * S`).

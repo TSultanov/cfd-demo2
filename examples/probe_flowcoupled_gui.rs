@@ -1250,6 +1250,8 @@ mod probe {
             let (mut births, mut kills, mut recycles) = (0usize, 0usize, 0usize);
             let mut track: Vec<(usize, f64)> = Vec::new();
             let mut died = None;
+            let wall_t = std::time::Instant::now();
+            let mut done_steps = 0usize;
             for step in 0..steps {
                 let (outcome, stats) = match moving.step(false) {
                     Ok(x) => x,
@@ -1266,6 +1268,7 @@ mod probe {
                 births += stats.cells_born;
                 kills += stats.cells_killed;
                 recycles += usize::from(stats.recycled > 0);
+                done_steps = step + 1;
                 if step % 100 == 99 || step + 1 == steps {
                     let state = pollster::block_on(moving.driver().solver().read_state_f32());
                     let n = moving.mesh().num_cells();
@@ -1285,6 +1288,17 @@ mod probe {
                 traj.join(", "),
                 died.map(|s| format!(" DIED@{s}")).unwrap_or_default()
             );
+            // Throughput line, PROFILE-gated and separate from the physics
+            // line above so cross-thread determinism diffs stay byte-clean.
+            if std::env::var("CFD2_ALE_PROFILE").map_or(false, |v| v.trim() != "" && v.trim() != "0")
+            {
+                let secs = wall_t.elapsed().as_secs_f64();
+                println!(
+                    "[matrix-time] {} | {done_steps} steps in {secs:.2}s = {:.2} steps/s",
+                    v.label,
+                    done_steps as f64 / secs.max(1e-9),
+                );
+            }
         }
     }
 

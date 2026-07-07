@@ -487,6 +487,43 @@ pub struct MovingMeshStats {
     /// ... and AFTER. `post == pre` means the correction was rejected by
     /// the re-assembly verification (kept only when it measurably helps).
     pub transfer_defect_post: f64,
+    /// Wall time of the adaptation PLANNING outside the resize event (ms):
+    /// `adapt_target_vols` (both derivations), `plan_adaptation`,
+    /// `plan_wall_refinement`, `plan_recycle_resize`. 0 on non-adapt steps.
+    pub adapt_plan_ms: f32,
+    /// Wall-time split of THIS step's resize event (all zeros when none
+    /// fired) — the cost `regen_ms`/`plan_ms` never see: the resize's own
+    /// regen, the full solver rebuild, the state/history transfer, the
+    /// mass-row projection, and the two-level re-solve.
+    pub resize: ResizeTiming,
+    /// Wall time of the COMMITTED coupled solve (ms) — the `driver.step`
+    /// this step publishes (re-solve/trial solves are inside `resize`/the
+    /// trial's own stats). Lets the ALE-vs-solve split be read directly
+    /// instead of by outer-wall subtraction.
+    pub solve_ms: f32,
+}
+
+/// Wall-time split of one resize event ([`MovingMeshDriver::resize_cells`] /
+/// the flow-adaptive event): where a resize step's serial envelope actually
+/// goes. All fields in ms; `Default` = no resize fired.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ResizeTiming {
+    /// Whole `resize_cells_impl` wall.
+    pub total_ms: f32,
+    /// Birth pre-relax (2-iter Lloyd) + the resize's own
+    /// `assemble_meshless_from_seeds` + retags.
+    pub regen_ms: f32,
+    /// `SolverDriver::build` at the new count + `reinit_cells`.
+    pub build_ms: f32,
+    /// State readback + Green–Gauss gradients + first-order transfer +
+    /// BDF history transfer + snapshot construction.
+    pub transfer_ms: f32,
+    /// Mass-row transfer projection (`project_transferred_rows`).
+    pub proj_ms: f32,
+    /// CG iterations the mass-row projection ran (0 = skipped/empty).
+    pub proj_iters: usize,
+    /// Snapshot restores + the TWO-level re-solve (`driver.step` ×2).
+    pub resolve_ms: f32,
 }
 
 /// One step's shared pre-regen plan ([`MovingMeshDriver::plan_step`]): the
@@ -500,6 +537,12 @@ struct StepPlan {
     step_spec: BoundarySpec,
     escalated: bool,
     plan_ms: f32,
+    /// The quality-escalation probe mesh, reusable as THIS step's committed
+    /// mesh (`step_cpu_planned` skips its own `assemble_meshless_from_seeds`).
+    /// `Some` only when the probe was built AND matches the final seeds (no
+    /// escalation, no containment revert); `None` otherwise (assemble as
+    /// usual). The device regen path ignores it (it rebuilds on-device).
+    reuse_mesh: Option<Mesh>,
     /// Seeds RECYCLED this step (outflow → inflow relabel-in-place, see
     /// [`MovingMeshDriver::set_seed_recycling`]): their slot keeps its index,
     /// but the cell is a REMOVED + INSERTED pair — the step is forced onto
@@ -616,6 +659,8 @@ pub struct MovingMeshDriver {
     /// inf-norm mass-row residual before/after. Surfaced per adapt step in
     /// [`MovingMeshStats`].
     last_transfer_projection: (f64, f64),
+    /// Timing split of the LAST resize event this step (reset each step).
+    last_resize_timing: ResizeTiming,
     /// Positions of the seeds KILLED by the latest adaptation event
     /// (cleared every step) — probe support: kill sites are event zones for
     /// the ambient/event artifact split, exactly like births and recycle
@@ -859,6 +904,13 @@ impl MovingMeshDriver {
                     .into(),
             );
         }
+        // Align rayon's regen/Lloyd pool with the CPU worker budget: rayon
+        // otherwise defaults to ALL logical cores, so a `CFD2_CPU_THREADS`-
+        // capped run still fans mesh regen across the whole machine (blows the
+        // fan-noise budget, oversubscribes vs the solver pool). Idempotent and
+        // deferential — a no-op if `RAYON_NUM_THREADS` is set or a global pool
+        // already exists.
+        configure_rayon_budget();
         let CvtMeshSeeds {
             mesh,
             seeds,
@@ -918,6 +970,7 @@ impl MovingMeshDriver {
                 .map(|v| v != "0")
                 .unwrap_or(true),
             last_transfer_projection: (0.0, 0.0),
+            last_resize_timing: ResizeTiming::default(),
             last_kill_sites: Vec::new(),
             recycle_via_resize: false,
             trial_step_adaptation: false,
@@ -1348,11 +1401,38 @@ impl MovingMeshDriver {
     /// Advance one moving-mesh step; returns the solver outcome + the per-step
     /// moving-mesh telemetry.
     pub fn step(&mut self, readback: bool) -> Result<(StepOutcome, MovingMeshStats), String> {
+        let step_t = Instant::now();
         let out = self.step_inner(readback)?;
         // The COMMITTED pinned dt — the flow-adaptive controller's
         // growth-limit reference (discarded implicit-motion attempts re-pin
         // from the same committed value, so retries stay deterministic).
         self.last_pinned_dt = Some(out.1.dt);
+        if ale_profile_level() >= 1 {
+            let s = &out.1;
+            let r = &s.resize;
+            eprintln!(
+                "[ale-profile] step {} cells={} | plan={:.2} adapt={:.2} \
+                 resize={:.2} (regen={:.2} build={:.2} transfer={:.2} \
+                 proj={:.2}({}it) resolve={:.2}) regen={:.2} swept={:.2} \
+                 refresh={:.2} solve={:.2} | total={:.2}ms",
+                self.step_index,
+                s.n_cells,
+                s.plan_ms,
+                s.adapt_plan_ms,
+                r.total_ms,
+                r.regen_ms,
+                r.build_ms,
+                r.transfer_ms,
+                r.proj_ms,
+                r.proj_iters,
+                r.resolve_ms,
+                s.regen_ms,
+                s.swept_ms,
+                s.refresh_ms,
+                s.solve_ms,
+                ms_since(step_t),
+            );
+        }
         Ok(out)
     }
 
@@ -1407,6 +1487,9 @@ impl MovingMeshDriver {
                 motion_iters: 1,
                 transfer_defect_pre: 0.0,
                 transfer_defect_post: 0.0,
+                adapt_plan_ms: 0.0,
+                resize: ResizeTiming::default(),
+                solve_ms: 0.0,
             };
             return Ok((outcome, stats));
         }
@@ -1441,7 +1524,9 @@ impl MovingMeshDriver {
         // events (the trial IS the step).
         let (mut cells_born, mut cells_killed) = (0usize, 0usize);
         let mut transfer_defect = (0.0f64, 0.0f64);
+        let mut adapt_plan_ms = 0.0f32;
         self.last_kill_sites.clear();
+        self.last_resize_timing = ResizeTiming::default();
         self.recycle_via_resize = false;
         if self.adapt_fires_this_step() {
             if self.trial_step_adaptation {
@@ -1451,16 +1536,19 @@ impl MovingMeshDriver {
                     // A diverged trial is the step's own problem — publish it.
                     return Ok(trial);
                 }
+                let plan_t = Instant::now();
                 let targets = self.adapt_target_vols()?;
                 let (mut kills, mut births) = self.plan_adaptation(&targets)?;
                 let wall_segs = self.plan_wall_refinement(&targets);
                 self.plan_recycle_resize(&targets, &mut kills, &mut births);
+                adapt_plan_ms += ms_since(plan_t);
                 self.recycle_via_resize = self.seed_recycling;
                 if kills.is_empty() && births.is_empty() && wall_segs.is_empty() {
                     // Nothing to adapt: accept the trial as the step.
                     self.adapt_targets = Some(targets);
                     let mut trial = trial;
                     trial.1.at_adapt_budget = self.adapt_budget_reached();
+                    trial.1.adapt_plan_ms = adapt_plan_ms;
                     return Ok(trial);
                 }
                 // Rewind to t^n and adapt there. The plan's indices are
@@ -1481,8 +1569,11 @@ impl MovingMeshDriver {
                     cells_killed = kills.len();
                     transfer_defect = self.last_transfer_projection;
                 }
+                let plan_t = Instant::now();
                 self.adapt_targets = Some(self.adapt_target_vols()?);
+                adapt_plan_ms += ms_since(plan_t);
             } else {
+                let plan_t = Instant::now();
                 let targets = self.adapt_target_vols()?;
                 let (mut kills, mut births) = self.plan_adaptation(&targets)?;
                 let wall_segs = self.plan_wall_refinement(&targets);
@@ -1496,6 +1587,7 @@ impl MovingMeshDriver {
                 // undisciplined — the residual mid-step teleports were the
                 // last remaining corner-flare channel.
                 self.plan_recycle_resize(&targets, &mut kills, &mut births);
+                adapt_plan_ms += ms_since(plan_t);
                 self.recycle_via_resize = self.seed_recycling;
                 if !kills.is_empty() || !births.is_empty() || !wall_segs.is_empty() {
                     let wall_born = self.resize_cells_impl(&kills, &births, &wall_segs)?;
@@ -1505,7 +1597,9 @@ impl MovingMeshDriver {
                     // Re-derive the per-cell target cache at the NEW indexing
                     // (the resize invalidated it) — the per-cell squeeze
                     // reference for chi_size and the escalation.
+                    let plan_t = Instant::now();
                     self.adapt_targets = Some(self.adapt_target_vols()?);
+                    adapt_plan_ms += ms_since(plan_t);
                 } else {
                     self.adapt_targets = Some(targets);
                 }
@@ -1527,11 +1621,13 @@ impl MovingMeshDriver {
             let targets = self.adapt_targets.take();
             let mut kills = Vec::new();
             let mut births = Vec::new();
+            let plan_t = Instant::now();
             let planned = self.plan_recycle_resize(
                 targets.as_deref().unwrap_or(&[]),
                 &mut kills,
                 &mut births,
             );
+            adapt_plan_ms += ms_since(plan_t);
             self.adapt_targets = targets;
             if planned > 0 {
                 self.resize_cells_impl(&kills, &births, &[])?;
@@ -1558,6 +1654,8 @@ impl MovingMeshDriver {
         out.1.at_adapt_budget = self.adapt_budget_reached();
         out.1.transfer_defect_pre = out.1.transfer_defect_pre.max(transfer_defect.0);
         out.1.transfer_defect_post = out.1.transfer_defect_post.max(transfer_defect.1);
+        out.1.adapt_plan_ms = adapt_plan_ms;
+        out.1.resize = self.last_resize_timing;
         Ok(out)
     }
 
@@ -1688,11 +1786,15 @@ impl MovingMeshDriver {
         // (an identity clone of `self.spec` under Static ⇒ byte-identical regen).
         let step_spec = self.moved_spec(new_time);
         let new_seeds = self.maybe_periodic_smooth(&step_spec, new_seeds);
-        let (mut new_seeds, escalated) = self.maybe_quality_escalate(&step_spec, new_seeds);
+        let (mut new_seeds, escalated, probe_mesh) =
+            self.maybe_quality_escalate(&step_spec, new_seeds);
         // HOLE containment barrier — after EVERY seed-motion stage
         // (advection/steering, recycling, smoothing, escalation): an interior
-        // seed may not end the step inside an embedded boundary loop.
-        self.contain_seeds(&step_spec, &mut new_seeds);
+        // seed may not end the step inside an embedded boundary loop. If it
+        // reverts any seed, the probe mesh no longer matches the committed
+        // seed set, so it can't be reused.
+        let contained_moved = self.contain_seeds(&step_spec, &mut new_seeds);
+        let reuse_mesh = if contained_moved { None } else { probe_mesh };
         let plan_ms = ms_since(plan_start);
         self.record_wall_velocity(&new_seeds, dt);
         Ok(StepPlan {
@@ -1703,6 +1805,7 @@ impl MovingMeshDriver {
             escalated,
             plan_ms,
             recycled,
+            reuse_mesh,
         })
     }
 
@@ -1723,6 +1826,7 @@ impl MovingMeshDriver {
             escalated,
             plan_ms,
             recycled,
+            reuse_mesh,
         } = plan;
 
         // A device-committed t^n mesh is vertex-less, but the CPU swept path
@@ -1769,15 +1873,24 @@ impl MovingMeshDriver {
         }
 
         // 3. Regenerate the mesh from the advected seeds (deterministic; a
-        //    frozen seed set reproduces `self.mesh` byte-for-byte).
+        //    frozen seed set reproduces `self.mesh` byte-for-byte). When the
+        //    quality-escalation probe already assembled THIS seed set (the
+        //    common clean, non-escalated, non-contained step), reuse it —
+        //    `assemble_meshless_from_seeds` is deterministic in the seeds, so
+        //    the reused probe is byte-identical to a fresh regen, and the
+        //    retags below run identically on either. Saves one full serial
+        //    assemble per clean step.
         let regen_start = Instant::now();
-        let mut new_mesh = assemble_meshless_from_seeds(
-            &new_seeds,
-            &self.kinds,
-            &step_spec,
-            self.domain,
-            self.min_cell_size,
-        );
+        let mut new_mesh = match reuse_mesh {
+            Some(m) => m,
+            None => assemble_meshless_from_seeds(
+                &new_seeds,
+                &self.kinds,
+                &step_spec,
+                self.domain,
+                self.min_cell_size,
+            ),
+        };
         // Re-stamp boundary tags (the topology seam rebuilds bc tables from
         // these) before anything downstream reads them. face_boundary only —
         // geometry/adjacency untouched.
@@ -2031,7 +2144,9 @@ impl MovingMeshDriver {
         let topo_changed = face_arrays_differ || is_flip || rebuilt_from_device;
 
         // 6. Step.
+        let solve_start = Instant::now();
         let outcome = self.driver.step(readback);
+        let solve_ms = ms_since(solve_start);
 
         // Commit the new mesh as the current realized mesh; its vertices become
         // next step's `old` positions.
@@ -2094,6 +2209,9 @@ impl MovingMeshDriver {
             motion_iters: 1,
             transfer_defect_pre: recycle_defect.0,
             transfer_defect_post: recycle_defect.1,
+            adapt_plan_ms: 0.0,
+            resize: ResizeTiming::default(),
+            solve_ms,
         };
         Ok((outcome, stats))
     }
@@ -2265,7 +2383,9 @@ impl MovingMeshDriver {
         let refresh_ms = ms_since(refresh_start);
 
         // 6. Step.
+        let solve_start = Instant::now();
         let outcome = self.driver.step(readback);
+        let solve_ms = ms_since(solve_start);
 
         let n_cells = new_mesh.num_cells();
         let n_faces = new_mesh.num_faces();
@@ -2315,6 +2435,9 @@ impl MovingMeshDriver {
             motion_iters: 1,
             transfer_defect_pre: 0.0,
             transfer_defect_post: 0.0,
+            adapt_plan_ms: 0.0,
+            resize: ResizeTiming::default(),
+            solve_ms,
         };
         Ok(DeviceStep::Done((outcome, stats)))
     }
@@ -3187,6 +3310,8 @@ impl MovingMeshDriver {
                     .into(),
             );
         }
+        let resize_t = Instant::now();
+        let mut timing = ResizeTiming::default();
         let n = self.seeds.len();
         let kill_set: HashSet<usize> = kills.iter().cloned().collect();
         if kill_set.len() != kills.len() {
@@ -3319,6 +3444,7 @@ impl MovingMeshDriver {
         // coarsening ramp at dynamic equilibrium, and skipping them left
         // the equilibrium's residual marks.
         let assemble_spec = self.moved_spec_from(&spec_new, self.time);
+        let regen_t = Instant::now();
         if !births.is_empty() || !wall_births.is_empty() || !kills.is_empty() {
             let sizing = self.lloyd_sizing();
             let tol = MeshgenTolerances::from_geometry(self.min_cell_size, self.domain);
@@ -3351,6 +3477,7 @@ impl MovingMeshDriver {
             retag(&mut new_mesh);
         }
         self.retag_moving_wall_faces_with(&mut new_mesh, &new_kinds);
+        timing.regen_ms = ms_since(regen_t);
         if new_mesh.num_cells() != n_new {
             return Err(format!(
                 "resize_cells: regen produced {} cells for {} seeds",
@@ -3361,6 +3488,7 @@ impl MovingMeshDriver {
 
         // Gather the full state rows (all fields, packed by the state layout
         // — model-agnostic) through the old→new source map.
+        let transfer_t = Instant::now();
         let state = pollster::block_on(self.driver.solver().read_state_f32());
         let layout = &self.driver.solver().model().state_layout;
         let stride = layout.stride() as usize;
@@ -3402,8 +3530,10 @@ impl MovingMeshDriver {
             init_u.push((row[u_off] as f64, row[u_off + 1] as f64));
             init_p.push(row[p_off] as f64);
         }
+        timing.transfer_ms += ms_since(transfer_t);
 
         // Rebuild the wrapped solver at the new count and transfer the rows.
+        let build_t = Instant::now();
         let params = *self.driver.params();
         let build = pollster::block_on(SolverDriver::build(
             &new_mesh,
@@ -3420,6 +3550,7 @@ impl MovingMeshDriver {
         driver
             .solver()
             .reinit_cells(&cells, &rows, &new_mesh.cell_vol)?;
+        timing.build_ms = ms_since(build_t);
 
         // MASS-ROW TRANSFER PROJECTION: the interpolated rows carry a
         // residual defect in the solver's OWN continuity row, and the first
@@ -3434,6 +3565,7 @@ impl MovingMeshDriver {
         self.last_transfer_projection = (0.0, 0.0);
         #[cfg(feature = "cpu")]
         if self.transfer_projection {
+            let proj_t = Instant::now();
             match self.project_transferred_rows(
                 &mut driver,
                 &new_mesh,
@@ -3442,10 +3574,14 @@ impl MovingMeshDriver {
                 &init_p,
                 &params,
             ) {
-                Ok(Some(out)) => self.last_transfer_projection = (out.pre, out.post),
+                Ok(Some(out)) => {
+                    self.last_transfer_projection = (out.pre, out.post);
+                    timing.proj_iters = out.cg_iters;
+                }
                 Ok(None) => {}
                 Err(e) => eprintln!("moving-mesh: transfer projection skipped: {e}"),
             }
+            timing.proj_ms = ms_since(proj_t);
         }
 
         // BDF CONTINUITY across the rebuild (BOTH backends): the fresh
@@ -3468,6 +3604,7 @@ impl MovingMeshDriver {
         // and restarted the integrator, and the outlet checkerboard grew
         // without bound instead of settling.)
         {
+            let hist_t = Instant::now();
             let old_snap = self.driver.snapshot();
             if old_snap.has_history
                 && old_snap.state_old.len() == n * stride
@@ -3528,6 +3665,8 @@ impl MovingMeshDriver {
                     schur_amg_active: old_snap.schur_amg_active,
                     has_history: true,
                 };
+                timing.transfer_ms += ms_since(hist_t);
+                let resolve_t = Instant::now();
                 if let Err(e) = driver.restore(&snap) {
                     eprintln!("moving-mesh: resize BDF continuity skipped: {e}");
                 } else {
@@ -3613,6 +3752,7 @@ impl MovingMeshDriver {
                         }
                     }
                 }
+                timing.resolve_ms = ms_since(resolve_t);
             }
         }
 
@@ -3634,6 +3774,8 @@ impl MovingMeshDriver {
         // The on-device regen bundle is sized at a fixed seed count —
         // rebuild it lazily at the new count on the next device attempt.
         self.gpu_regen_state = None;
+        timing.total_ms = ms_since(resize_t);
+        self.last_resize_timing = timing;
         Ok(wall_births.len())
     }
 
@@ -3760,12 +3902,16 @@ impl MovingMeshDriver {
     /// growing cell colony filling the obstacle). A seed ALREADY outside
     /// the fluid (a pre-barrier leak) is left for the adaptation cleanup
     /// ([`Self::plan_adaptation`] kills it).
-    fn contain_seeds(&self, spec_t: &BoundarySpec, new_seeds: &mut [Point2<f64>]) {
+    /// Returns `true` if any seed was reverted (the containment barrier
+    /// fired) — a caller reusing a pre-containment probe mesh must then drop
+    /// it, since the committed seed set no longer matches the probe.
+    fn contain_seeds(&self, spec_t: &BoundarySpec, new_seeds: &mut [Point2<f64>]) -> bool {
         use crate::meshgen::meshless::point_in_fluid;
         let boxes = Self::hole_bboxes(spec_t, self.min_cell_size);
         if boxes.is_empty() {
-            return;
+            return false;
         }
+        let mut moved = false;
         for i in 0..new_seeds.len() {
             if self.kinds[i] != SeedKind::Interior {
                 continue;
@@ -3779,8 +3925,10 @@ impl MovingMeshDriver {
                 .any(|&(x0, y0, x1, y1)| p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1);
             if near && !point_in_fluid(p, spec_t) && point_in_fluid(self.seeds[i], spec_t) {
                 new_seeds[i] = self.seeds[i];
+                moved = true;
             }
         }
+        moved
     }
 
     /// Interior seeds currently OUTSIDE the fluid (inside a hole loop) —
@@ -4470,18 +4618,27 @@ impl MovingMeshDriver {
     /// same post-resize quality hold; a plain Frozen run must stay
     /// byte-identical AND probe-free — the escalation assembles a probe mesh
     /// every step). Never under Prescribed (labels would overwrite it).
+    /// Returns `(seeds, escalated?, reusable_mesh)`. `reusable_mesh` is
+    /// `Some(probe)` ONLY on the clean, non-escalated path — there the probe
+    /// was assembled from exactly the returned seeds, so the authoritative
+    /// regen in `step_cpu_planned` would recompute a byte-identical mesh (the
+    /// assemble is deterministic in the seeds). Reusing it removes one full
+    /// serial `assemble_meshless_from_seeds` per clean step — the biggest
+    /// redundant-work item at GUI scale. `None` when no probe was built
+    /// (escalation inactive) or the probe is stale (escalation moved the
+    /// seeds); the caller then assembles as before.
     fn maybe_quality_escalate(
         &self,
         spec: &BoundarySpec,
         seeds: Vec<Point2<f64>>,
-    ) -> (Vec<Point2<f64>>, bool) {
+    ) -> (Vec<Point2<f64>>, bool, Option<Mesh>) {
         let active = match self.motion {
             MeshMotionSpec::FlowCoupled { .. } => true,
             MeshMotionSpec::Frozen => self.adapt_every_n > 0,
             MeshMotionSpec::Prescribed(_) => false,
         };
         if !active || self.lloyd_escalation_iters == 0 {
-            return (seeds, false);
+            return (seeds, false, None);
         }
         let probe = assemble_meshless_from_seeds(
             &seeds,
@@ -4514,7 +4671,9 @@ impl MovingMeshDriver {
             _ => vmin < lo || vmax > hi,
         };
         if !size_violated && probe.calculate_max_skewness() <= self.quality_skew_target {
-            return (seeds, false);
+            // No escalation: the probe IS the mesh this step will commit (same
+            // seeds). Hand it back for reuse instead of throwing it away.
+            return (seeds, false, Some(probe));
         }
         // Gentle, blended Lloyd toward the CVT of `lloyd_sizing` (uniform
         // without adaptation; the local adapted spacing with it). `tol_disp
@@ -4541,7 +4700,9 @@ impl MovingMeshDriver {
             &cfg,
             &lcfg,
         );
-        (relaxed, true)
+        // Escalation moved the seeds → the probe is stale; the caller
+        // re-assembles from `relaxed`.
+        (relaxed, true, None)
     }
 
     /// Pin the fixed dt: the configured `requested_dt`, capped by the
@@ -4688,6 +4849,41 @@ impl MovingMeshDriver {
 #[inline]
 fn ms_since(start: Instant) -> f32 {
     start.elapsed().as_secs_f32() * 1000.0
+}
+
+/// Cap rayon's global pool to `CFD2_CPU_THREADS` (the CPU worker budget) when
+/// set, so mesh regen / Lloyd don't fan across every logical core. Runs at most
+/// once (guarded), and only when the caller has NOT already configured rayon
+/// (`RAYON_NUM_THREADS` unset) — `build_global` fails harmlessly if a pool
+/// exists, which the `.ok()` swallows. Value-neutral: rayon output is
+/// thread-count-invariant by construction.
+fn configure_rayon_budget() {
+    static DONE: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    DONE.get_or_init(|| {
+        if std::env::var_os("RAYON_NUM_THREADS").is_none() {
+            if let Some(t) = std::env::var("CFD2_CPU_THREADS")
+                .ok()
+                .and_then(|v| v.trim().parse::<usize>().ok())
+                .filter(|&t| t >= 1)
+            {
+                let _ = rayon::ThreadPoolBuilder::new().num_threads(t).build_global();
+            }
+        }
+    });
+}
+
+/// `CFD2_ALE_PROFILE` level (0 = off, unset/unparsable = 0): `1` prints a
+/// per-step ALE phase-timing line to stderr from [`MovingMeshDriver::step`];
+/// `2` additionally splits the mass-row projection internals
+/// (`sim::mass_projection`). Read once — the level is fixed for the process.
+pub(crate) fn ale_profile_level() -> u8 {
+    static LEVEL: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    *LEVEL.get_or_init(|| {
+        std::env::var("CFD2_ALE_PROFILE")
+            .ok()
+            .and_then(|v| v.trim().parse::<u8>().ok())
+            .unwrap_or(0)
+    })
 }
 
 /// `(min, max)` cell volume — the per-step realized-sizing telemetry.

@@ -40,6 +40,30 @@ use seed_grid::dist2;
 use super::tolerances::MeshgenTolerances;
 use nalgebra::{Point2, Vector2};
 
+/// Rayon `with_min_len` grain for the per-seed diagram/Lloyd loops, overridable
+/// via `CFD2_MESHGEN_MIN_LEN`. Below this many seeds rayon won't split, so a
+/// few-thousand-cell moving-mesh regen runs the "parallel" build nearly
+/// serially. Each seed writes a disjoint slot, so the grain NEVER affects the
+/// output bits (bit-identical for any value and any thread count).
+///
+/// Lowered from `1024` to `256` after a measured sweep: at every-step-adapt
+/// ALE scale (~2.7k cells) the old grain left `build_diagram` under-split, so
+/// the per-step mesh regen (`plan` + resize `regen`) dominated the serial
+/// envelope. `256` roughly halves both (plan 7.9→4.0ms, regen 7.2→3.6ms) for
+/// +15% step throughput on top of the pool-threshold win, bit-identical. The
+/// per-cell work (kNN + half-plane clip) is heavy enough that `256` stays well
+/// clear of rayon task-scheduling overhead; retune per machine via the env.
+pub(crate) fn meshless_min_len() -> usize {
+    static V: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *V.get_or_init(|| {
+        std::env::var("CFD2_MESHGEN_MIN_LEN")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|&v| v > 0)
+            .unwrap_or(256)
+    })
+}
+
 /// Engine tuning knobs. `k` is the initial candidate count; uncertified
 /// cells retry with `k` doubled up to `k_max`, then stream every remaining
 /// seed in distance order (the CPU engine never fails).
@@ -501,7 +525,7 @@ pub fn build_diagram(input: &MeshlessInput) -> MeshlessDiagram {
             .zip(ring_xy.par_chunks_mut(m))
             .zip(ring_plane.par_chunks_mut(m))
             .enumerate()
-            .with_min_len(1024)
+            .with_min_len(meshless_min_len())
             .for_each(|(i, (((((st, len), ce), ar), rxy), rpl))| {
                 let out = compute_cell(input, &grid, i);
                 *st = out.status;

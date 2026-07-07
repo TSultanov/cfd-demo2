@@ -33,6 +33,33 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 const STEPS: usize = 60;
 
+/// Step count, env-overridable for profiling runs (`CFD2_STRESS_STEPS`,
+/// default [`STEPS`]). Physics gates always pass at the default; a longer
+/// profiling run keeps the identical per-step discipline.
+fn steps() -> usize {
+    std::env::var("CFD2_STRESS_STEPS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(STEPS)
+}
+
+/// Mesh resolution override for profiling runs (`CFD2_STRESS_H`): scales the
+/// per-family default `h` (and its CELL-SIZE adaptation band with it, so the
+/// flow-adaptive planner works the same relative sizing space). Unset = the
+/// committed default — the gate configuration is unchanged.
+fn h_override(default_h: f64, band: (f64, f64)) -> (f64, (f64, f64)) {
+    match std::env::var("CFD2_STRESS_H")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+    {
+        Some(h) if h > 0.0 => {
+            let s = h / default_h;
+            (h, (band.0 * s, band.1 * s))
+        }
+        _ => (default_h, band),
+    }
+}
+
 /// Is a GPU adapter present? (The GPU stress gates skip cleanly without one.)
 fn gpu_adapter_available() -> bool {
     let instance = wgpu::Instance::default();
@@ -125,8 +152,8 @@ struct StressReport {
 /// silently fell back to CPU would pass vacuously).
 fn stress_run(family: Family, motion: MeshMotionSpec, label: &str, expect_gpu: bool) -> StressReport {
     let (h, band) = match family {
-        Family::Incompressible => (0.05, (0.02, 0.06)),
-        Family::AllMach => (0.08, (0.04, 0.09)),
+        Family::Incompressible => h_override(0.05, (0.02, 0.06)),
+        Family::AllMach => h_override(0.08, (0.04, 0.09)),
     };
     let geo = ChannelWithObstacle {
         length: 2.0,
@@ -184,7 +211,8 @@ fn stress_run(family: Family, motion: MeshMotionSpec, label: &str, expect_gpu: b
         defect_pre_max: 0.0,
         worst_close_ratio: 0.0,
     };
-    for step in 0..STEPS {
+    let steps = steps();
+    for step in 0..steps {
         let (outcome, stats) = moving
             .step(false)
             .unwrap_or_else(|e| panic!("[{label}] step {step}: {e}"));
@@ -238,14 +266,14 @@ fn stress_run(family: Family, motion: MeshMotionSpec, label: &str, expect_gpu: b
         params.inlet_velocity
     );
     assert!(
-        report.adapt_steps * 3 >= STEPS,
-        "[{label}] only {}/{STEPS} steps carried a resize event — the stress \
+        report.adapt_steps * 3 >= steps,
+        "[{label}] only {}/{steps} steps carried a resize event — the stress \
          config no longer exercises the transfer seam (measured: 59 incompressible, \
          ~29-35 all-Mach whose steady low-Re wake front-loads the events)",
         report.adapt_steps
     );
     eprintln!(
-        "[{label}] {STEPS} steps, {} resizes, max|U| {:.3}, defect pre_max {:.3e}, \
+        "[{label}] {steps} steps, {} resizes, max|U| {:.3}, defect pre_max {:.3e}, \
          worst close ratio {:.3e}",
         report.adapt_steps, report.max_u, report.defect_pre_max, report.worst_close_ratio
     );

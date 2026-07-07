@@ -42,49 +42,10 @@ const BAND_STRIDE: usize = 5;
 /// A uniform Cartesian grid stored implicitly: `nx * ny` cells, spacing
 /// `(dx, dy)`, cell `p = j*nx + i` centred at `((i+0.5)dx, (j+0.5)dy)`. Carries
 /// no per-cell/face arrays — everything downstream is index arithmetic.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct StructuredGrid {
-    pub nx: usize,
-    pub ny: usize,
-    pub dx: f64,
-    pub dy: f64,
-}
-
-impl StructuredGrid {
-    /// A grid spanning `[0, length] x [0, height]` with `nx * ny` cells.
-    pub fn new(nx: usize, ny: usize, length: f64, height: f64) -> Self {
-        assert!(nx > 0 && ny > 0, "grid must have at least one cell per axis");
-        assert!(length > 0.0 && height > 0.0, "grid extents must be positive");
-        Self {
-            nx,
-            ny,
-            dx: length / nx as f64,
-            dy: height / ny as f64,
-        }
-    }
-
-    #[inline]
-    pub fn num_cells(&self) -> usize {
-        self.nx * self.ny
-    }
-
-    /// Cell centre coordinates for linear index `p = j*nx + i`.
-    #[inline]
-    pub fn cell_center(&self, p: usize) -> (f64, f64) {
-        let i = p % self.nx;
-        let j = p / self.nx;
-        ((i as f64 + 0.5) * self.dx, (j as f64 + 0.5) * self.dy)
-    }
-}
-
-/// Which domain edge a boundary face sits on (used to key the per-face BC).
-#[derive(Clone, Copy, Debug)]
-pub enum Edge {
-    Left,
-    Right,
-    Bottom,
-    Top,
-}
+///
+/// The dense-grid geometry types are shared with the GPU structured path
+/// (always compiled), so both backends key cells/faces identically.
+pub use crate::solver::gpu::structured::{BcComp, Edge, StructuredGrid};
 
 /// A structured-grid CPU solver: drives the codegen `Structured2D` assembly +
 /// update kernels through the interpreter and closes the loop with a matrix-free
@@ -713,14 +674,6 @@ fn axpy(y: &mut [f64], a: f64, x: &[f64]) {
 // that carries incompressible momentum (and, with their per-model kernels
 // converted, the all-Mach / compressible families) on the structured grid.
 // ===========================================================================
-
-/// Boundary condition (kind, value) for one unknown component on one face.
-/// `kind`: 0 = none/interior, 1 = Dirichlet, 2 = Neumann (matches `GpuBcKind`).
-#[derive(Clone, Copy)]
-pub struct BcComp {
-    pub kind: u32,
-    pub value: f32,
-}
 
 pub struct StructuredModelSolver {
     grid: StructuredGrid,

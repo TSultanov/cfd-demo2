@@ -21,6 +21,7 @@ pub(crate) mod runtime;
 pub(crate) mod runtime_common;
 pub mod srd;
 pub mod structs;
+pub mod structured;
 pub mod submission_counter;
 pub mod unified_solver;
 /// GPU meshless Voronoi engine; depends on the CPU engine's shared types, hence the `meshgen` gate.

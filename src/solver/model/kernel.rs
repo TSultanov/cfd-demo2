@@ -788,6 +788,7 @@ pub(crate) fn generate_packed_state_gradients_kernel_program(
         &unknown_state_offsets,
         &eos_params,
         !gradients_required_unconditionally,
+        model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D,
     )
 }
 

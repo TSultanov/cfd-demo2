@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 861db598fd8867bf4e1afb949fd8289f316662eaa890e514248591e4f9bb4798
+// SourceHash: 0d3b3d5b2a9e2d84fdec00edd66308ecafe01bb8993c3d9cffa21aca0ca9ebbc
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -20052,6 +20052,7 @@ pub mod layout_asserts {
             >() == 8
         );
     };
+    const GENERATED_PACKED_STATE_GRADIENTS_GENERIC_DIFFUSION_DEMO_STRUCTURED_STRUCTURED_GRID_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured :: StructuredGrid , nx) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured :: StructuredGrid , ny) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured :: StructuredGrid , dx) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured :: StructuredGrid , dy) == 12) ; assert ! (std :: mem :: size_of :: < generated :: packed_state_gradients_generic_diffusion_demo_structured :: StructuredGrid > () == 16) ; } ;
     const GENERATED_PACKED_STATE_GRADIENTS_GENERIC_DIFFUSION_DEMO_STRUCTURED_CONSTANTS_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(
@@ -20187,6 +20188,7 @@ pub mod layout_asserts {
             >() == 8
         );
     };
+    const GENERATED_PACKED_STATE_GRADIENTS_GENERIC_DIFFUSION_DEMO_STRUCTURED_IBM_STRUCTURED_GRID_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: StructuredGrid , nx) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: StructuredGrid , ny) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: StructuredGrid , dx) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: StructuredGrid , dy) == 12) ; assert ! (std :: mem :: size_of :: < generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: StructuredGrid > () == 16) ; } ;
     const GENERATED_PACKED_STATE_GRADIENTS_GENERIC_DIFFUSION_DEMO_STRUCTURED_IBM_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: Constants > () == 72) ; } ;
     const GENERATED_PACKED_STATE_GRADIENTS_GENERIC_DIFFUSION_DEMO_STRUCTURED_MMS_VECTOR2_ASSERTS: (
     ) = {
@@ -20208,6 +20210,7 @@ pub mod layout_asserts {
             >() == 8
         );
     };
+    const GENERATED_PACKED_STATE_GRADIENTS_GENERIC_DIFFUSION_DEMO_STRUCTURED_MMS_STRUCTURED_GRID_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: StructuredGrid , nx) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: StructuredGrid , ny) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: StructuredGrid , dx) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: StructuredGrid , dy) == 12) ; assert ! (std :: mem :: size_of :: < generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: StructuredGrid > () == 16) ; } ;
     const GENERATED_PACKED_STATE_GRADIENTS_GENERIC_DIFFUSION_DEMO_STRUCTURED_MMS_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: Constants > () == 72) ; } ;
     const GENERATED_PACKED_STATE_GRADIENTS_INCOMPRESSIBLE_MOMENTUM_VECTOR2_ASSERTS: () = {
         assert!(
@@ -20762,6 +20765,7 @@ pub mod layout_asserts {
             >() == 8
         );
     };
+    const GENERATED_PACKED_STATE_GRADIENTS_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_STRUCTURED_GRID_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_incompressible_momentum_structured :: StructuredGrid , nx) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_incompressible_momentum_structured :: StructuredGrid , ny) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_incompressible_momentum_structured :: StructuredGrid , dx) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: packed_state_gradients_incompressible_momentum_structured :: StructuredGrid , dy) == 12) ; assert ! (std :: mem :: size_of :: < generated :: packed_state_gradients_incompressible_momentum_structured :: StructuredGrid > () == 16) ; } ;
     const GENERATED_PACKED_STATE_GRADIENTS_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_CONSTANTS_ASSERTS: (
     ) = {
         assert!(
@@ -303301,6 +303305,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         #[repr(C, align(4))]
         #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct StructuredGrid {
+            #[doc = "offset: 0, size: 4, type: `u32`"]
+            pub nx: u32,
+            #[doc = "offset: 4, size: 4, type: `u32`"]
+            pub ny: u32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dx: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub dy: f32,
+        }
+        impl StructuredGrid {
+            pub const fn new(nx: u32, ny: u32, dx: f32, dy: f32) -> Self {
+                Self { nx, ny, dx, dy }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
         pub struct Constants {
             #[doc = "offset: 0, size: 4, type: `f32`"]
             pub dt: f32,
@@ -303403,88 +303424,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         pub const ENTRY_MAIN: &str = "main";
         #[derive(Debug)]
         pub struct WgpuBindGroup0EntriesParams<'a> {
-            pub face_owner: wgpu::BufferBinding<'a>,
-            pub face_neighbor: wgpu::BufferBinding<'a>,
-            pub face_areas: wgpu::BufferBinding<'a>,
-            pub face_normals: wgpu::BufferBinding<'a>,
-            pub cell_centers: wgpu::BufferBinding<'a>,
-            pub cell_vols: wgpu::BufferBinding<'a>,
-            pub cell_face_offsets: wgpu::BufferBinding<'a>,
-            pub cell_faces: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
-            pub face_wrap_shift: wgpu::BufferBinding<'a>,
+            pub grid: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
-            pub face_owner: wgpu::BindGroupEntry<'a>,
-            pub face_neighbor: wgpu::BindGroupEntry<'a>,
-            pub face_areas: wgpu::BindGroupEntry<'a>,
-            pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub cell_centers: wgpu::BindGroupEntry<'a>,
-            pub cell_vols: wgpu::BindGroupEntry<'a>,
-            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
-            pub cell_faces: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
-            pub face_wrap_shift: wgpu::BindGroupEntry<'a>,
+            pub grid: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
                 Self {
-                    face_owner: wgpu::BindGroupEntry {
+                    grid: wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.face_owner),
-                    },
-                    face_neighbor: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
-                    },
-                    face_areas: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.face_areas),
-                    },
-                    face_normals: wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    cell_centers: wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
-                    },
-                    cell_vols: wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
-                    },
-                    cell_face_offsets: wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
-                    },
-                    cell_faces: wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
-                    },
-                    face_wrap_shift: wgpu::BindGroupEntry {
-                        binding: 14,
-                        resource: wgpu::BindingResource::Buffer(params.face_wrap_shift),
+                        resource: wgpu::BindingResource::Buffer(params.grid),
                     },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
-                [
-                    self.face_owner,
-                    self.face_neighbor,
-                    self.face_areas,
-                    self.face_normals,
-                    self.cell_centers,
-                    self.cell_vols,
-                    self.cell_face_offsets,
-                    self.cell_faces,
-                    self.face_centers,
-                    self.face_wrap_shift,
-                ]
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 1] {
+                [self.grid]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
                 self.into_array().into_iter().collect()
@@ -303493,7 +303449,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup0(wgpu::BindGroup);
         impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedPackedStateGradientsGenericDiffusionDemoStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(14): \"face_wrap_shift\""] wgpu :: BindGroupLayoutEntry { binding : 14 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedPackedStateGradientsGenericDiffusionDemoStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"grid\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: packed_state_gradients_generic_diffusion_demo_structured :: StructuredGrid > () as _) , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -303679,6 +303635,13 @@ struct Vector2_ {
     y: f32,
 }
 
+struct StructuredGrid {
+    nx: u32,
+    ny: u32,
+    dx: f32,
+    dy: f32,
+}
+
 struct Constants {
     dt: f32,
     dt_old: f32,
@@ -303701,25 +303664,7 @@ struct Constants {
 }
 
 @group(0) @binding(0) 
-var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
-var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
-var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
-var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(4) 
-var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
-var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
-var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
-var<storage> cell_faces: array<u32>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(14) 
-var<storage> face_wrap_shift: array<Vector2_>;
+var<uniform> grid: StructuredGrid;
 @group(1) @binding(0) 
 var<storage> state: array<f32>;
 @group(1) @binding(3) 
@@ -303734,106 +303679,104 @@ var<storage> bc_value: array<f32>;
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var grad_acc_0_: vec2<f32> = vec2<f32>(0f, 0f);
-    var k: u32;
-    var normal_vec: vec2<f32>;
-    var own_center_vec: vec2<f32>;
-    var other_idx: u32;
-    var other_center_vec: vec2<f32>;
+    var k: u32 = 0u;
     var lambda: f32;
 
-    let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
-    if (idx >= arrayLength((&cell_vols))) {
+    let _e7 = constants.stride_x;
+    let idx = ((global_id.y * _e7) + global_id.x);
+    let _e13 = grid.nx;
+    let _e16 = grid.ny;
+    if (idx >= (_e13 * _e16)) {
         return;
     }
-    let _e15 = constants.scheme;
-    if (_e15 != 0u) {
-        let cell_center = cell_centers[idx];
-        let cell_center_vec = vec2<f32>(cell_center.x, cell_center.y);
-        let vol = cell_vols[idx];
-        let start = cell_face_offsets[idx];
-        let end = cell_face_offsets[(idx + 1u)];
-        k = start;
+    let _e21 = constants.scheme;
+    if (_e21 != 0u) {
+        let _e26 = grid.nx;
+        let sfd_gi = (idx % _e26);
+        let _e30 = grid.nx;
+        let sfd_gj = (idx / _e30);
+        let _e37 = grid.dx;
+        let sfd_cx = ((f32(sfd_gi) + 0.5f) * _e37);
+        let _e44 = grid.dy;
+        let sfd_cy = ((f32(sfd_gj) + 0.5f) * _e44);
+        let _e48 = grid.dx;
+        let _e51 = grid.dy;
+        let vol = (_e48 * _e51);
+        let own_center_vec = vec2<f32>(sfd_cx, sfd_cy);
         loop {
-            let _e36 = k;
-            if (_e36 < end) {
+            let _e55 = k;
+            if (_e55 < 4u) {
             } else {
                 break;
             }
             {
-                let _e39 = k;
-                let face_idx = cell_faces[_e39];
-                let owner = face_owner[face_idx];
-                let neighbor_raw = face_neighbor[face_idx];
-                let is_boundary = (neighbor_raw == -1i);
-                let area = face_areas[face_idx];
-                let face_center = face_centers[face_idx];
-                let face_center_vec = vec2<f32>(face_center.x, face_center.y);
-                let _e62 = face_normals[face_idx].x;
-                let _e66 = face_normals[face_idx].y;
-                normal_vec = vec2<f32>(_e62, _e66);
-                let _e72 = face_wrap_shift[face_idx].x;
-                let _e76 = face_wrap_shift[face_idx].y;
-                let wrap_shift = vec2<f32>(_e72, _e76);
-                own_center_vec = cell_center_vec;
-                if (owner != idx) {
-                    let _e80 = own_center_vec;
-                    own_center_vec = (_e80 + wrap_shift);
-                }
-                let _e82 = own_center_vec;
-                let _e84 = normal_vec;
-                if (dot((face_center_vec - _e82), _e84) < 0f) {
-                    let _e88 = normal_vec;
-                    normal_vec = -(_e88);
-                }
-                other_idx = idx;
-                other_center_vec = face_center_vec;
-                if (neighbor_raw != -1i) {
-                    let neighbor = u32(neighbor_raw);
-                    other_idx = neighbor;
-                    if (owner != idx) {
-                        other_idx = owner;
-                    }
-                    let _e97 = other_idx;
-                    let other_center = cell_centers[_e97];
-                    other_center_vec = vec2<f32>(other_center.x, other_center.y);
-                    if (owner == idx) {
-                        let _e104 = other_center_vec;
-                        other_center_vec = (_e104 + wrap_shift);
-                    }
-                }
-                let _e106 = own_center_vec;
-                let d_own = distance(_e106, face_center_vec);
-                let _e108 = other_center_vec;
-                let d_neigh = distance(_e108, face_center_vec);
+                let _e58 = k;
+                let _e61 = k;
+                let sfd_axis_is_x = ((_e58 >= 1u) && (_e61 <= 2u));
+                let _e65 = k;
+                let sfd_sign = select(-1f, 1f, (_e65 >= 2u));
+                let sfd_normal_x = select(0f, sfd_sign, sfd_axis_is_x);
+                let sfd_normal_y = select(sfd_sign, 0f, sfd_axis_is_x);
+                let _e77 = grid.dx;
+                let _e80 = grid.dy;
+                let area = select(_e77, _e80, sfd_axis_is_x);
+                let _e84 = grid.dy;
+                let _e87 = grid.dx;
+                let sfd_spacing = select(_e84, _e87, sfd_axis_is_x);
+                let sfd_half = (0.5f * sfd_spacing);
+                let sfd_coord = select(sfd_gj, sfd_gi, sfd_axis_is_x);
+                let _e94 = grid.ny;
+                let _e97 = grid.nx;
+                let sfd_ext = select(_e94, _e97, sfd_axis_is_x);
+                let _e104 = k;
+                let is_boundary = select((sfd_coord == (sfd_ext - 1u)), (sfd_coord == 0u), (_e104 < 2u));
+                let _e110 = grid.nx;
+                let sfd_off = select(_e110, 1u, sfd_axis_is_x);
+                let _e115 = k;
+                let sfd_neighbor = select((idx - sfd_off), (idx + sfd_off), (_e115 >= 2u));
+                let other_idx = select(sfd_neighbor, idx, is_boundary);
+                let sfd_face_cx = (sfd_cx + (sfd_half * sfd_normal_x));
+                let sfd_face_cy = (sfd_cy + (sfd_half * sfd_normal_y));
+                let sfd_mult = select(sfd_spacing, sfd_half, is_boundary);
+                let sfd_other_cx = (sfd_cx + (sfd_mult * sfd_normal_x));
+                let sfd_other_cy = (sfd_cy + (sfd_mult * sfd_normal_y));
+                let _e129 = k;
+                let _e132 = k;
+                let _e133 = k;
+                let sfd_band_rank = select((_e129 + 1u), _e132, (_e133 < 2u));
+                let _e139 = k;
+                let face_idx = ((idx * 4u) + _e139);
+                let face_center_vec = vec2<f32>(sfd_face_cx, sfd_face_cy);
+                let normal_vec = vec2<f32>(sfd_normal_x, sfd_normal_y);
+                let other_center_vec = vec2<f32>(sfd_other_cx, sfd_other_cy);
+                let d_own = distance(own_center_vec, face_center_vec);
+                let d_neigh = distance(other_center_vec, face_center_vec);
                 let total_dist = (d_own + d_neigh);
                 lambda = 0.5f;
                 if (total_dist > 0.000001f) {
                     lambda = (d_neigh / total_dist);
                 }
-                let _e116 = lambda;
-                let lambda_other = (1f - _e116);
-                let _e119 = normal_vec;
-                let _e126 = state[((idx * 1u) + 0u)];
-                let _e127 = lambda;
-                let _e129 = other_idx;
-                let _e136 = state[((_e129 * 1u) + 0u)];
-                let _e143 = state[((idx * 1u) + 0u)];
-                let _e150 = bc_value[((face_idx * 1u) + 0u)];
-                let _e157 = bc_kind[((face_idx * 1u) + 0u)];
-                let _e167 = state[((idx * 1u) + 0u)];
-                let _e174 = bc_value[((face_idx * 1u) + 0u)];
-                let _e183 = bc_kind[((face_idx * 1u) + 0u)];
-                let _e193 = grad_acc_0_;
-                grad_acc_0_ = (_e193 + ((_e119 * ((_e126 * _e127) + (select(_e136, select(select(_e143, _e150, (_e157 == 1u)), (_e167 + (_e174 * d_own)), (_e183 == 2u)), is_boundary) * lambda_other))) * area));
+                let _e152 = lambda;
+                let lambda_other = (1f - _e152);
+                let _e161 = state[((idx * 1u) + 0u)];
+                let _e162 = lambda;
+                let _e170 = state[((other_idx * 1u) + 0u)];
+                let _e177 = state[((idx * 1u) + 0u)];
+                let _e184 = bc_value[((face_idx * 1u) + 0u)];
+                let _e191 = bc_kind[((face_idx * 1u) + 0u)];
+                let _e201 = state[((idx * 1u) + 0u)];
+                let _e208 = bc_value[((face_idx * 1u) + 0u)];
+                let _e217 = bc_kind[((face_idx * 1u) + 0u)];
+                let _e227 = grad_acc_0_;
+                grad_acc_0_ = (_e227 + ((normal_vec * ((_e161 * _e162) + (select(_e170, select(select(_e177, _e184, (_e191 == 1u)), (_e201 + (_e208 * d_own)), (_e217 == 2u)), is_boundary) * lambda_other))) * area));
             }
             continuing {
-                let _e196 = k;
-                k = (_e196 + 1u);
+                let _e230 = k;
+                k = (_e230 + 1u);
             }
         }
-        let _e198 = grad_acc_0_;
-        let grad_out_0_ = ((_e198 * 1f) / vec2(max(vol, 0.000000000001f)));
+        let _e232 = grad_acc_0_;
+        let grad_out_0_ = ((_e232 * 1f) / vec2(max(vol, 0.000000000001f)));
         grad_state[((idx * 1u) + 0u)].x = grad_out_0_.x;
         grad_state[((idx * 1u) + 0u)].y = grad_out_0_.y;
         return;
@@ -303856,6 +303799,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         impl Vector2 {
             pub const fn new(x: f32, y: f32) -> Self {
                 Self { x, y }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct StructuredGrid {
+            #[doc = "offset: 0, size: 4, type: `u32`"]
+            pub nx: u32,
+            #[doc = "offset: 4, size: 4, type: `u32`"]
+            pub ny: u32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dx: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub dy: f32,
+        }
+        impl StructuredGrid {
+            pub const fn new(nx: u32, ny: u32, dx: f32, dy: f32) -> Self {
+                Self { nx, ny, dx, dy }
             }
         }
         #[repr(C, align(4))]
@@ -303962,88 +303922,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         pub const ENTRY_MAIN: &str = "main";
         #[derive(Debug)]
         pub struct WgpuBindGroup0EntriesParams<'a> {
-            pub face_owner: wgpu::BufferBinding<'a>,
-            pub face_neighbor: wgpu::BufferBinding<'a>,
-            pub face_areas: wgpu::BufferBinding<'a>,
-            pub face_normals: wgpu::BufferBinding<'a>,
-            pub cell_centers: wgpu::BufferBinding<'a>,
-            pub cell_vols: wgpu::BufferBinding<'a>,
-            pub cell_face_offsets: wgpu::BufferBinding<'a>,
-            pub cell_faces: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
-            pub face_wrap_shift: wgpu::BufferBinding<'a>,
+            pub grid: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
-            pub face_owner: wgpu::BindGroupEntry<'a>,
-            pub face_neighbor: wgpu::BindGroupEntry<'a>,
-            pub face_areas: wgpu::BindGroupEntry<'a>,
-            pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub cell_centers: wgpu::BindGroupEntry<'a>,
-            pub cell_vols: wgpu::BindGroupEntry<'a>,
-            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
-            pub cell_faces: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
-            pub face_wrap_shift: wgpu::BindGroupEntry<'a>,
+            pub grid: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
                 Self {
-                    face_owner: wgpu::BindGroupEntry {
+                    grid: wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.face_owner),
-                    },
-                    face_neighbor: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
-                    },
-                    face_areas: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.face_areas),
-                    },
-                    face_normals: wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    cell_centers: wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
-                    },
-                    cell_vols: wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
-                    },
-                    cell_face_offsets: wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
-                    },
-                    cell_faces: wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
-                    },
-                    face_wrap_shift: wgpu::BindGroupEntry {
-                        binding: 14,
-                        resource: wgpu::BindingResource::Buffer(params.face_wrap_shift),
+                        resource: wgpu::BindingResource::Buffer(params.grid),
                     },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
-                [
-                    self.face_owner,
-                    self.face_neighbor,
-                    self.face_areas,
-                    self.face_normals,
-                    self.cell_centers,
-                    self.cell_vols,
-                    self.cell_face_offsets,
-                    self.cell_faces,
-                    self.face_centers,
-                    self.face_wrap_shift,
-                ]
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 1] {
+                [self.grid]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
                 self.into_array().into_iter().collect()
@@ -304052,7 +303947,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup0(wgpu::BindGroup);
         impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedPackedStateGradientsGenericDiffusionDemoStructuredIbm::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(14): \"face_wrap_shift\""] wgpu :: BindGroupLayoutEntry { binding : 14 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedPackedStateGradientsGenericDiffusionDemoStructuredIbm::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"grid\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: StructuredGrid > () as _) , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -304210,6 +304105,13 @@ struct Vector2_ {
     y: f32,
 }
 
+struct StructuredGrid {
+    nx: u32,
+    ny: u32,
+    dx: f32,
+    dy: f32,
+}
+
 struct Constants {
     dt: f32,
     dt_old: f32,
@@ -304232,25 +304134,7 @@ struct Constants {
 }
 
 @group(0) @binding(0) 
-var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
-var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
-var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
-var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(4) 
-var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
-var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
-var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
-var<storage> cell_faces: array<u32>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(14) 
-var<storage> face_wrap_shift: array<Vector2_>;
+var<uniform> grid: StructuredGrid;
 @group(1) @binding(0) 
 var<storage> state: array<f32>;
 @group(1) @binding(3) 
@@ -304265,106 +304149,104 @@ var<storage> bc_value: array<f32>;
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var grad_acc_0_: vec2<f32> = vec2<f32>(0f, 0f);
-    var k: u32;
-    var normal_vec: vec2<f32>;
-    var own_center_vec: vec2<f32>;
-    var other_idx: u32;
-    var other_center_vec: vec2<f32>;
+    var k: u32 = 0u;
     var lambda: f32;
 
-    let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
-    if (idx >= arrayLength((&cell_vols))) {
+    let _e7 = constants.stride_x;
+    let idx = ((global_id.y * _e7) + global_id.x);
+    let _e13 = grid.nx;
+    let _e16 = grid.ny;
+    if (idx >= (_e13 * _e16)) {
         return;
     }
-    let _e15 = constants.scheme;
-    if (_e15 != 0u) {
-        let cell_center = cell_centers[idx];
-        let cell_center_vec = vec2<f32>(cell_center.x, cell_center.y);
-        let vol = cell_vols[idx];
-        let start = cell_face_offsets[idx];
-        let end = cell_face_offsets[(idx + 1u)];
-        k = start;
+    let _e21 = constants.scheme;
+    if (_e21 != 0u) {
+        let _e26 = grid.nx;
+        let sfd_gi = (idx % _e26);
+        let _e30 = grid.nx;
+        let sfd_gj = (idx / _e30);
+        let _e37 = grid.dx;
+        let sfd_cx = ((f32(sfd_gi) + 0.5f) * _e37);
+        let _e44 = grid.dy;
+        let sfd_cy = ((f32(sfd_gj) + 0.5f) * _e44);
+        let _e48 = grid.dx;
+        let _e51 = grid.dy;
+        let vol = (_e48 * _e51);
+        let own_center_vec = vec2<f32>(sfd_cx, sfd_cy);
         loop {
-            let _e36 = k;
-            if (_e36 < end) {
+            let _e55 = k;
+            if (_e55 < 4u) {
             } else {
                 break;
             }
             {
-                let _e39 = k;
-                let face_idx = cell_faces[_e39];
-                let owner = face_owner[face_idx];
-                let neighbor_raw = face_neighbor[face_idx];
-                let is_boundary = (neighbor_raw == -1i);
-                let area = face_areas[face_idx];
-                let face_center = face_centers[face_idx];
-                let face_center_vec = vec2<f32>(face_center.x, face_center.y);
-                let _e62 = face_normals[face_idx].x;
-                let _e66 = face_normals[face_idx].y;
-                normal_vec = vec2<f32>(_e62, _e66);
-                let _e72 = face_wrap_shift[face_idx].x;
-                let _e76 = face_wrap_shift[face_idx].y;
-                let wrap_shift = vec2<f32>(_e72, _e76);
-                own_center_vec = cell_center_vec;
-                if (owner != idx) {
-                    let _e80 = own_center_vec;
-                    own_center_vec = (_e80 + wrap_shift);
-                }
-                let _e82 = own_center_vec;
-                let _e84 = normal_vec;
-                if (dot((face_center_vec - _e82), _e84) < 0f) {
-                    let _e88 = normal_vec;
-                    normal_vec = -(_e88);
-                }
-                other_idx = idx;
-                other_center_vec = face_center_vec;
-                if (neighbor_raw != -1i) {
-                    let neighbor = u32(neighbor_raw);
-                    other_idx = neighbor;
-                    if (owner != idx) {
-                        other_idx = owner;
-                    }
-                    let _e97 = other_idx;
-                    let other_center = cell_centers[_e97];
-                    other_center_vec = vec2<f32>(other_center.x, other_center.y);
-                    if (owner == idx) {
-                        let _e104 = other_center_vec;
-                        other_center_vec = (_e104 + wrap_shift);
-                    }
-                }
-                let _e106 = own_center_vec;
-                let d_own = distance(_e106, face_center_vec);
-                let _e108 = other_center_vec;
-                let d_neigh = distance(_e108, face_center_vec);
+                let _e58 = k;
+                let _e61 = k;
+                let sfd_axis_is_x = ((_e58 >= 1u) && (_e61 <= 2u));
+                let _e65 = k;
+                let sfd_sign = select(-1f, 1f, (_e65 >= 2u));
+                let sfd_normal_x = select(0f, sfd_sign, sfd_axis_is_x);
+                let sfd_normal_y = select(sfd_sign, 0f, sfd_axis_is_x);
+                let _e77 = grid.dx;
+                let _e80 = grid.dy;
+                let area = select(_e77, _e80, sfd_axis_is_x);
+                let _e84 = grid.dy;
+                let _e87 = grid.dx;
+                let sfd_spacing = select(_e84, _e87, sfd_axis_is_x);
+                let sfd_half = (0.5f * sfd_spacing);
+                let sfd_coord = select(sfd_gj, sfd_gi, sfd_axis_is_x);
+                let _e94 = grid.ny;
+                let _e97 = grid.nx;
+                let sfd_ext = select(_e94, _e97, sfd_axis_is_x);
+                let _e104 = k;
+                let is_boundary = select((sfd_coord == (sfd_ext - 1u)), (sfd_coord == 0u), (_e104 < 2u));
+                let _e110 = grid.nx;
+                let sfd_off = select(_e110, 1u, sfd_axis_is_x);
+                let _e115 = k;
+                let sfd_neighbor = select((idx - sfd_off), (idx + sfd_off), (_e115 >= 2u));
+                let other_idx = select(sfd_neighbor, idx, is_boundary);
+                let sfd_face_cx = (sfd_cx + (sfd_half * sfd_normal_x));
+                let sfd_face_cy = (sfd_cy + (sfd_half * sfd_normal_y));
+                let sfd_mult = select(sfd_spacing, sfd_half, is_boundary);
+                let sfd_other_cx = (sfd_cx + (sfd_mult * sfd_normal_x));
+                let sfd_other_cy = (sfd_cy + (sfd_mult * sfd_normal_y));
+                let _e129 = k;
+                let _e132 = k;
+                let _e133 = k;
+                let sfd_band_rank = select((_e129 + 1u), _e132, (_e133 < 2u));
+                let _e139 = k;
+                let face_idx = ((idx * 4u) + _e139);
+                let face_center_vec = vec2<f32>(sfd_face_cx, sfd_face_cy);
+                let normal_vec = vec2<f32>(sfd_normal_x, sfd_normal_y);
+                let other_center_vec = vec2<f32>(sfd_other_cx, sfd_other_cy);
+                let d_own = distance(own_center_vec, face_center_vec);
+                let d_neigh = distance(other_center_vec, face_center_vec);
                 let total_dist = (d_own + d_neigh);
                 lambda = 0.5f;
                 if (total_dist > 0.000001f) {
                     lambda = (d_neigh / total_dist);
                 }
-                let _e116 = lambda;
-                let lambda_other = (1f - _e116);
-                let _e119 = normal_vec;
-                let _e126 = state[((idx * 2u) + 0u)];
-                let _e127 = lambda;
-                let _e129 = other_idx;
-                let _e136 = state[((_e129 * 2u) + 0u)];
-                let _e143 = state[((idx * 2u) + 0u)];
-                let _e150 = bc_value[((face_idx * 1u) + 0u)];
-                let _e157 = bc_kind[((face_idx * 1u) + 0u)];
-                let _e167 = state[((idx * 2u) + 0u)];
-                let _e174 = bc_value[((face_idx * 1u) + 0u)];
-                let _e183 = bc_kind[((face_idx * 1u) + 0u)];
-                let _e193 = grad_acc_0_;
-                grad_acc_0_ = (_e193 + ((_e119 * ((_e126 * _e127) + (select(_e136, select(select(_e143, _e150, (_e157 == 1u)), (_e167 + (_e174 * d_own)), (_e183 == 2u)), is_boundary) * lambda_other))) * area));
+                let _e152 = lambda;
+                let lambda_other = (1f - _e152);
+                let _e161 = state[((idx * 2u) + 0u)];
+                let _e162 = lambda;
+                let _e170 = state[((other_idx * 2u) + 0u)];
+                let _e177 = state[((idx * 2u) + 0u)];
+                let _e184 = bc_value[((face_idx * 1u) + 0u)];
+                let _e191 = bc_kind[((face_idx * 1u) + 0u)];
+                let _e201 = state[((idx * 2u) + 0u)];
+                let _e208 = bc_value[((face_idx * 1u) + 0u)];
+                let _e217 = bc_kind[((face_idx * 1u) + 0u)];
+                let _e227 = grad_acc_0_;
+                grad_acc_0_ = (_e227 + ((normal_vec * ((_e161 * _e162) + (select(_e170, select(select(_e177, _e184, (_e191 == 1u)), (_e201 + (_e208 * d_own)), (_e217 == 2u)), is_boundary) * lambda_other))) * area));
             }
             continuing {
-                let _e196 = k;
-                k = (_e196 + 1u);
+                let _e230 = k;
+                k = (_e230 + 1u);
             }
         }
-        let _e198 = grad_acc_0_;
-        let grad_out_0_ = ((_e198 * 1f) / vec2(max(vol, 0.000000000001f)));
+        let _e232 = grad_acc_0_;
+        let grad_out_0_ = ((_e232 * 1f) / vec2(max(vol, 0.000000000001f)));
         grad_state[((idx * 2u) + 0u)].x = grad_out_0_.x;
         grad_state[((idx * 2u) + 0u)].y = grad_out_0_.y;
         return;
@@ -304387,6 +304269,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         impl Vector2 {
             pub const fn new(x: f32, y: f32) -> Self {
                 Self { x, y }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct StructuredGrid {
+            #[doc = "offset: 0, size: 4, type: `u32`"]
+            pub nx: u32,
+            #[doc = "offset: 4, size: 4, type: `u32`"]
+            pub ny: u32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dx: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub dy: f32,
+        }
+        impl StructuredGrid {
+            pub const fn new(nx: u32, ny: u32, dx: f32, dy: f32) -> Self {
+                Self { nx, ny, dx, dy }
             }
         }
         #[repr(C, align(4))]
@@ -304493,88 +304392,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         pub const ENTRY_MAIN: &str = "main";
         #[derive(Debug)]
         pub struct WgpuBindGroup0EntriesParams<'a> {
-            pub face_owner: wgpu::BufferBinding<'a>,
-            pub face_neighbor: wgpu::BufferBinding<'a>,
-            pub face_areas: wgpu::BufferBinding<'a>,
-            pub face_normals: wgpu::BufferBinding<'a>,
-            pub cell_centers: wgpu::BufferBinding<'a>,
-            pub cell_vols: wgpu::BufferBinding<'a>,
-            pub cell_face_offsets: wgpu::BufferBinding<'a>,
-            pub cell_faces: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
-            pub face_wrap_shift: wgpu::BufferBinding<'a>,
+            pub grid: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
-            pub face_owner: wgpu::BindGroupEntry<'a>,
-            pub face_neighbor: wgpu::BindGroupEntry<'a>,
-            pub face_areas: wgpu::BindGroupEntry<'a>,
-            pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub cell_centers: wgpu::BindGroupEntry<'a>,
-            pub cell_vols: wgpu::BindGroupEntry<'a>,
-            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
-            pub cell_faces: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
-            pub face_wrap_shift: wgpu::BindGroupEntry<'a>,
+            pub grid: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
                 Self {
-                    face_owner: wgpu::BindGroupEntry {
+                    grid: wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.face_owner),
-                    },
-                    face_neighbor: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
-                    },
-                    face_areas: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.face_areas),
-                    },
-                    face_normals: wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    cell_centers: wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
-                    },
-                    cell_vols: wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
-                    },
-                    cell_face_offsets: wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
-                    },
-                    cell_faces: wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
-                    },
-                    face_wrap_shift: wgpu::BindGroupEntry {
-                        binding: 14,
-                        resource: wgpu::BindingResource::Buffer(params.face_wrap_shift),
+                        resource: wgpu::BindingResource::Buffer(params.grid),
                     },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
-                [
-                    self.face_owner,
-                    self.face_neighbor,
-                    self.face_areas,
-                    self.face_normals,
-                    self.cell_centers,
-                    self.cell_vols,
-                    self.cell_face_offsets,
-                    self.cell_faces,
-                    self.face_centers,
-                    self.face_wrap_shift,
-                ]
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 1] {
+                [self.grid]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
                 self.into_array().into_iter().collect()
@@ -304583,7 +304417,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup0(wgpu::BindGroup);
         impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedPackedStateGradientsGenericDiffusionDemoStructuredMms::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(14): \"face_wrap_shift\""] wgpu :: BindGroupLayoutEntry { binding : 14 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedPackedStateGradientsGenericDiffusionDemoStructuredMms::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"grid\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: StructuredGrid > () as _) , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -304741,6 +304575,13 @@ struct Vector2_ {
     y: f32,
 }
 
+struct StructuredGrid {
+    nx: u32,
+    ny: u32,
+    dx: f32,
+    dy: f32,
+}
+
 struct Constants {
     dt: f32,
     dt_old: f32,
@@ -304763,25 +304604,7 @@ struct Constants {
 }
 
 @group(0) @binding(0) 
-var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
-var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
-var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
-var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(4) 
-var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
-var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
-var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
-var<storage> cell_faces: array<u32>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(14) 
-var<storage> face_wrap_shift: array<Vector2_>;
+var<uniform> grid: StructuredGrid;
 @group(1) @binding(0) 
 var<storage> state: array<f32>;
 @group(1) @binding(3) 
@@ -304796,106 +304619,104 @@ var<storage> bc_value: array<f32>;
 @compute @workgroup_size(64, 1, 1) 
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var grad_acc_0_: vec2<f32> = vec2<f32>(0f, 0f);
-    var k: u32;
-    var normal_vec: vec2<f32>;
-    var own_center_vec: vec2<f32>;
-    var other_idx: u32;
-    var other_center_vec: vec2<f32>;
+    var k: u32 = 0u;
     var lambda: f32;
 
-    let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
-    if (idx >= arrayLength((&cell_vols))) {
+    let _e7 = constants.stride_x;
+    let idx = ((global_id.y * _e7) + global_id.x);
+    let _e13 = grid.nx;
+    let _e16 = grid.ny;
+    if (idx >= (_e13 * _e16)) {
         return;
     }
-    let _e15 = constants.scheme;
-    if (_e15 != 0u) {
-        let cell_center = cell_centers[idx];
-        let cell_center_vec = vec2<f32>(cell_center.x, cell_center.y);
-        let vol = cell_vols[idx];
-        let start = cell_face_offsets[idx];
-        let end = cell_face_offsets[(idx + 1u)];
-        k = start;
+    let _e21 = constants.scheme;
+    if (_e21 != 0u) {
+        let _e26 = grid.nx;
+        let sfd_gi = (idx % _e26);
+        let _e30 = grid.nx;
+        let sfd_gj = (idx / _e30);
+        let _e37 = grid.dx;
+        let sfd_cx = ((f32(sfd_gi) + 0.5f) * _e37);
+        let _e44 = grid.dy;
+        let sfd_cy = ((f32(sfd_gj) + 0.5f) * _e44);
+        let _e48 = grid.dx;
+        let _e51 = grid.dy;
+        let vol = (_e48 * _e51);
+        let own_center_vec = vec2<f32>(sfd_cx, sfd_cy);
         loop {
-            let _e36 = k;
-            if (_e36 < end) {
+            let _e55 = k;
+            if (_e55 < 4u) {
             } else {
                 break;
             }
             {
-                let _e39 = k;
-                let face_idx = cell_faces[_e39];
-                let owner = face_owner[face_idx];
-                let neighbor_raw = face_neighbor[face_idx];
-                let is_boundary = (neighbor_raw == -1i);
-                let area = face_areas[face_idx];
-                let face_center = face_centers[face_idx];
-                let face_center_vec = vec2<f32>(face_center.x, face_center.y);
-                let _e62 = face_normals[face_idx].x;
-                let _e66 = face_normals[face_idx].y;
-                normal_vec = vec2<f32>(_e62, _e66);
-                let _e72 = face_wrap_shift[face_idx].x;
-                let _e76 = face_wrap_shift[face_idx].y;
-                let wrap_shift = vec2<f32>(_e72, _e76);
-                own_center_vec = cell_center_vec;
-                if (owner != idx) {
-                    let _e80 = own_center_vec;
-                    own_center_vec = (_e80 + wrap_shift);
-                }
-                let _e82 = own_center_vec;
-                let _e84 = normal_vec;
-                if (dot((face_center_vec - _e82), _e84) < 0f) {
-                    let _e88 = normal_vec;
-                    normal_vec = -(_e88);
-                }
-                other_idx = idx;
-                other_center_vec = face_center_vec;
-                if (neighbor_raw != -1i) {
-                    let neighbor = u32(neighbor_raw);
-                    other_idx = neighbor;
-                    if (owner != idx) {
-                        other_idx = owner;
-                    }
-                    let _e97 = other_idx;
-                    let other_center = cell_centers[_e97];
-                    other_center_vec = vec2<f32>(other_center.x, other_center.y);
-                    if (owner == idx) {
-                        let _e104 = other_center_vec;
-                        other_center_vec = (_e104 + wrap_shift);
-                    }
-                }
-                let _e106 = own_center_vec;
-                let d_own = distance(_e106, face_center_vec);
-                let _e108 = other_center_vec;
-                let d_neigh = distance(_e108, face_center_vec);
+                let _e58 = k;
+                let _e61 = k;
+                let sfd_axis_is_x = ((_e58 >= 1u) && (_e61 <= 2u));
+                let _e65 = k;
+                let sfd_sign = select(-1f, 1f, (_e65 >= 2u));
+                let sfd_normal_x = select(0f, sfd_sign, sfd_axis_is_x);
+                let sfd_normal_y = select(sfd_sign, 0f, sfd_axis_is_x);
+                let _e77 = grid.dx;
+                let _e80 = grid.dy;
+                let area = select(_e77, _e80, sfd_axis_is_x);
+                let _e84 = grid.dy;
+                let _e87 = grid.dx;
+                let sfd_spacing = select(_e84, _e87, sfd_axis_is_x);
+                let sfd_half = (0.5f * sfd_spacing);
+                let sfd_coord = select(sfd_gj, sfd_gi, sfd_axis_is_x);
+                let _e94 = grid.ny;
+                let _e97 = grid.nx;
+                let sfd_ext = select(_e94, _e97, sfd_axis_is_x);
+                let _e104 = k;
+                let is_boundary = select((sfd_coord == (sfd_ext - 1u)), (sfd_coord == 0u), (_e104 < 2u));
+                let _e110 = grid.nx;
+                let sfd_off = select(_e110, 1u, sfd_axis_is_x);
+                let _e115 = k;
+                let sfd_neighbor = select((idx - sfd_off), (idx + sfd_off), (_e115 >= 2u));
+                let other_idx = select(sfd_neighbor, idx, is_boundary);
+                let sfd_face_cx = (sfd_cx + (sfd_half * sfd_normal_x));
+                let sfd_face_cy = (sfd_cy + (sfd_half * sfd_normal_y));
+                let sfd_mult = select(sfd_spacing, sfd_half, is_boundary);
+                let sfd_other_cx = (sfd_cx + (sfd_mult * sfd_normal_x));
+                let sfd_other_cy = (sfd_cy + (sfd_mult * sfd_normal_y));
+                let _e129 = k;
+                let _e132 = k;
+                let _e133 = k;
+                let sfd_band_rank = select((_e129 + 1u), _e132, (_e133 < 2u));
+                let _e139 = k;
+                let face_idx = ((idx * 4u) + _e139);
+                let face_center_vec = vec2<f32>(sfd_face_cx, sfd_face_cy);
+                let normal_vec = vec2<f32>(sfd_normal_x, sfd_normal_y);
+                let other_center_vec = vec2<f32>(sfd_other_cx, sfd_other_cy);
+                let d_own = distance(own_center_vec, face_center_vec);
+                let d_neigh = distance(other_center_vec, face_center_vec);
                 let total_dist = (d_own + d_neigh);
                 lambda = 0.5f;
                 if (total_dist > 0.000001f) {
                     lambda = (d_neigh / total_dist);
                 }
-                let _e116 = lambda;
-                let lambda_other = (1f - _e116);
-                let _e119 = normal_vec;
-                let _e126 = state[((idx * 2u) + 0u)];
-                let _e127 = lambda;
-                let _e129 = other_idx;
-                let _e136 = state[((_e129 * 2u) + 0u)];
-                let _e143 = state[((idx * 2u) + 0u)];
-                let _e150 = bc_value[((face_idx * 1u) + 0u)];
-                let _e157 = bc_kind[((face_idx * 1u) + 0u)];
-                let _e167 = state[((idx * 2u) + 0u)];
-                let _e174 = bc_value[((face_idx * 1u) + 0u)];
-                let _e183 = bc_kind[((face_idx * 1u) + 0u)];
-                let _e193 = grad_acc_0_;
-                grad_acc_0_ = (_e193 + ((_e119 * ((_e126 * _e127) + (select(_e136, select(select(_e143, _e150, (_e157 == 1u)), (_e167 + (_e174 * d_own)), (_e183 == 2u)), is_boundary) * lambda_other))) * area));
+                let _e152 = lambda;
+                let lambda_other = (1f - _e152);
+                let _e161 = state[((idx * 2u) + 0u)];
+                let _e162 = lambda;
+                let _e170 = state[((other_idx * 2u) + 0u)];
+                let _e177 = state[((idx * 2u) + 0u)];
+                let _e184 = bc_value[((face_idx * 1u) + 0u)];
+                let _e191 = bc_kind[((face_idx * 1u) + 0u)];
+                let _e201 = state[((idx * 2u) + 0u)];
+                let _e208 = bc_value[((face_idx * 1u) + 0u)];
+                let _e217 = bc_kind[((face_idx * 1u) + 0u)];
+                let _e227 = grad_acc_0_;
+                grad_acc_0_ = (_e227 + ((normal_vec * ((_e161 * _e162) + (select(_e170, select(select(_e177, _e184, (_e191 == 1u)), (_e201 + (_e208 * d_own)), (_e217 == 2u)), is_boundary) * lambda_other))) * area));
             }
             continuing {
-                let _e196 = k;
-                k = (_e196 + 1u);
+                let _e230 = k;
+                k = (_e230 + 1u);
             }
         }
-        let _e198 = grad_acc_0_;
-        let grad_out_0_ = ((_e198 * 1f) / vec2(max(vol, 0.000000000001f)));
+        let _e232 = grad_acc_0_;
+        let grad_out_0_ = ((_e232 * 1f) / vec2(max(vol, 0.000000000001f)));
         grad_state[((idx * 2u) + 0u)].x = grad_out_0_.x;
         grad_state[((idx * 2u) + 0u)].y = grad_out_0_.y;
         return;
@@ -307274,6 +307095,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         #[repr(C, align(4))]
         #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct StructuredGrid {
+            #[doc = "offset: 0, size: 4, type: `u32`"]
+            pub nx: u32,
+            #[doc = "offset: 4, size: 4, type: `u32`"]
+            pub ny: u32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dx: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub dy: f32,
+        }
+        impl StructuredGrid {
+            pub const fn new(nx: u32, ny: u32, dx: f32, dy: f32) -> Self {
+                Self { nx, ny, dx, dy }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
         pub struct Constants {
             #[doc = "offset: 0, size: 4, type: `f32`"]
             pub dt: f32,
@@ -307376,88 +307214,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         pub const ENTRY_MAIN: &str = "main";
         #[derive(Debug)]
         pub struct WgpuBindGroup0EntriesParams<'a> {
-            pub face_owner: wgpu::BufferBinding<'a>,
-            pub face_neighbor: wgpu::BufferBinding<'a>,
-            pub face_areas: wgpu::BufferBinding<'a>,
-            pub face_normals: wgpu::BufferBinding<'a>,
-            pub cell_centers: wgpu::BufferBinding<'a>,
-            pub cell_vols: wgpu::BufferBinding<'a>,
-            pub cell_face_offsets: wgpu::BufferBinding<'a>,
-            pub cell_faces: wgpu::BufferBinding<'a>,
-            pub face_centers: wgpu::BufferBinding<'a>,
-            pub face_wrap_shift: wgpu::BufferBinding<'a>,
+            pub grid: wgpu::BufferBinding<'a>,
         }
         #[derive(Clone, Debug)]
         pub struct WgpuBindGroup0Entries<'a> {
-            pub face_owner: wgpu::BindGroupEntry<'a>,
-            pub face_neighbor: wgpu::BindGroupEntry<'a>,
-            pub face_areas: wgpu::BindGroupEntry<'a>,
-            pub face_normals: wgpu::BindGroupEntry<'a>,
-            pub cell_centers: wgpu::BindGroupEntry<'a>,
-            pub cell_vols: wgpu::BindGroupEntry<'a>,
-            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
-            pub cell_faces: wgpu::BindGroupEntry<'a>,
-            pub face_centers: wgpu::BindGroupEntry<'a>,
-            pub face_wrap_shift: wgpu::BindGroupEntry<'a>,
+            pub grid: wgpu::BindGroupEntry<'a>,
         }
         impl<'a> WgpuBindGroup0Entries<'a> {
             pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
                 Self {
-                    face_owner: wgpu::BindGroupEntry {
+                    grid: wgpu::BindGroupEntry {
                         binding: 0,
-                        resource: wgpu::BindingResource::Buffer(params.face_owner),
-                    },
-                    face_neighbor: wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
-                    },
-                    face_areas: wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Buffer(params.face_areas),
-                    },
-                    face_normals: wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::Buffer(params.face_normals),
-                    },
-                    cell_centers: wgpu::BindGroupEntry {
-                        binding: 4,
-                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
-                    },
-                    cell_vols: wgpu::BindGroupEntry {
-                        binding: 5,
-                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
-                    },
-                    cell_face_offsets: wgpu::BindGroupEntry {
-                        binding: 6,
-                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
-                    },
-                    cell_faces: wgpu::BindGroupEntry {
-                        binding: 7,
-                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
-                    },
-                    face_centers: wgpu::BindGroupEntry {
-                        binding: 13,
-                        resource: wgpu::BindingResource::Buffer(params.face_centers),
-                    },
-                    face_wrap_shift: wgpu::BindGroupEntry {
-                        binding: 14,
-                        resource: wgpu::BindingResource::Buffer(params.face_wrap_shift),
+                        resource: wgpu::BindingResource::Buffer(params.grid),
                     },
                 }
             }
-            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
-                [
-                    self.face_owner,
-                    self.face_neighbor,
-                    self.face_areas,
-                    self.face_normals,
-                    self.cell_centers,
-                    self.cell_vols,
-                    self.cell_face_offsets,
-                    self.cell_faces,
-                    self.face_centers,
-                    self.face_wrap_shift,
-                ]
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 1] {
+                [self.grid]
             }
             pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
                 self.into_array().into_iter().collect()
@@ -307466,7 +307239,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         #[derive(Debug)]
         pub struct WgpuBindGroup0(wgpu::BindGroup);
         impl WgpuBindGroup0 {
-            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedPackedStateGradientsIncompressibleMomentumStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(14): \"face_wrap_shift\""] wgpu :: BindGroupLayoutEntry { binding : 14 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedPackedStateGradientsIncompressibleMomentumStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"grid\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: packed_state_gradients_incompressible_momentum_structured :: StructuredGrid > () as _) , } , count : None , }] , } ;
             pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
             }
@@ -307652,6 +307425,13 @@ struct Vector2_ {
     y: f32,
 }
 
+struct StructuredGrid {
+    nx: u32,
+    ny: u32,
+    dx: f32,
+    dy: f32,
+}
+
 struct Constants {
     dt: f32,
     dt_old: f32,
@@ -307674,25 +307454,7 @@ struct Constants {
 }
 
 @group(0) @binding(0) 
-var<storage> face_owner: array<u32>;
-@group(0) @binding(1) 
-var<storage> face_neighbor: array<i32>;
-@group(0) @binding(2) 
-var<storage> face_areas: array<f32>;
-@group(0) @binding(3) 
-var<storage> face_normals: array<Vector2_>;
-@group(0) @binding(4) 
-var<storage> cell_centers: array<Vector2_>;
-@group(0) @binding(5) 
-var<storage> cell_vols: array<f32>;
-@group(0) @binding(6) 
-var<storage> cell_face_offsets: array<u32>;
-@group(0) @binding(7) 
-var<storage> cell_faces: array<u32>;
-@group(0) @binding(13) 
-var<storage> face_centers: array<Vector2_>;
-@group(0) @binding(14) 
-var<storage> face_wrap_shift: array<Vector2_>;
+var<uniform> grid: StructuredGrid;
 @group(1) @binding(0) 
 var<storage> state: array<f32>;
 @group(1) @binding(3) 
@@ -307709,138 +307471,132 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var grad_acc_0_: vec2<f32> = vec2<f32>(0f, 0f);
     var grad_acc_1_: vec2<f32> = vec2<f32>(0f, 0f);
     var grad_acc_2_: vec2<f32> = vec2<f32>(0f, 0f);
-    var k: u32;
-    var normal_vec: vec2<f32>;
-    var own_center_vec: vec2<f32>;
-    var other_idx: u32;
-    var other_center_vec: vec2<f32>;
+    var k: u32 = 0u;
     var lambda: f32;
 
-    let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
-    if (idx >= arrayLength((&cell_vols))) {
+    let _e7 = constants.stride_x;
+    let idx = ((global_id.y * _e7) + global_id.x);
+    let _e13 = grid.nx;
+    let _e16 = grid.ny;
+    if (idx >= (_e13 * _e16)) {
         return;
     }
-    let cell_center = cell_centers[idx];
-    let cell_center_vec = vec2<f32>(cell_center.x, cell_center.y);
-    let vol = cell_vols[idx];
-    let start = cell_face_offsets[idx];
-    let end = cell_face_offsets[(idx + 1u)];
-    k = start;
+    let _e21 = grid.nx;
+    let sfd_gi = (idx % _e21);
+    let _e25 = grid.nx;
+    let sfd_gj = (idx / _e25);
+    let _e32 = grid.dx;
+    let sfd_cx = ((f32(sfd_gi) + 0.5f) * _e32);
+    let _e39 = grid.dy;
+    let sfd_cy = ((f32(sfd_gj) + 0.5f) * _e39);
+    let _e43 = grid.dx;
+    let _e46 = grid.dy;
+    let vol = (_e43 * _e46);
+    let own_center_vec = vec2<f32>(sfd_cx, sfd_cy);
     loop {
-        let _e31 = k;
-        if (_e31 < end) {
+        let _e50 = k;
+        if (_e50 < 4u) {
         } else {
             break;
         }
         {
-            let _e34 = k;
-            let face_idx = cell_faces[_e34];
-            let owner = face_owner[face_idx];
-            let neighbor_raw = face_neighbor[face_idx];
-            let is_boundary = (neighbor_raw == -1i);
-            let area = face_areas[face_idx];
-            let face_center = face_centers[face_idx];
-            let face_center_vec = vec2<f32>(face_center.x, face_center.y);
-            let _e57 = face_normals[face_idx].x;
-            let _e61 = face_normals[face_idx].y;
-            normal_vec = vec2<f32>(_e57, _e61);
-            let _e67 = face_wrap_shift[face_idx].x;
-            let _e71 = face_wrap_shift[face_idx].y;
-            let wrap_shift = vec2<f32>(_e67, _e71);
-            own_center_vec = cell_center_vec;
-            if (owner != idx) {
-                let _e75 = own_center_vec;
-                own_center_vec = (_e75 + wrap_shift);
-            }
-            let _e77 = own_center_vec;
-            let _e79 = normal_vec;
-            if (dot((face_center_vec - _e77), _e79) < 0f) {
-                let _e83 = normal_vec;
-                normal_vec = -(_e83);
-            }
-            other_idx = idx;
-            other_center_vec = face_center_vec;
-            if (neighbor_raw != -1i) {
-                let neighbor = u32(neighbor_raw);
-                other_idx = neighbor;
-                if (owner != idx) {
-                    other_idx = owner;
-                }
-                let _e92 = other_idx;
-                let other_center = cell_centers[_e92];
-                other_center_vec = vec2<f32>(other_center.x, other_center.y);
-                if (owner == idx) {
-                    let _e99 = other_center_vec;
-                    other_center_vec = (_e99 + wrap_shift);
-                }
-            }
-            let _e101 = own_center_vec;
-            let d_own = distance(_e101, face_center_vec);
-            let _e103 = other_center_vec;
-            let d_neigh = distance(_e103, face_center_vec);
+            let _e53 = k;
+            let _e56 = k;
+            let sfd_axis_is_x = ((_e53 >= 1u) && (_e56 <= 2u));
+            let _e60 = k;
+            let sfd_sign = select(-1f, 1f, (_e60 >= 2u));
+            let sfd_normal_x = select(0f, sfd_sign, sfd_axis_is_x);
+            let sfd_normal_y = select(sfd_sign, 0f, sfd_axis_is_x);
+            let _e72 = grid.dx;
+            let _e75 = grid.dy;
+            let area = select(_e72, _e75, sfd_axis_is_x);
+            let _e79 = grid.dy;
+            let _e82 = grid.dx;
+            let sfd_spacing = select(_e79, _e82, sfd_axis_is_x);
+            let sfd_half = (0.5f * sfd_spacing);
+            let sfd_coord = select(sfd_gj, sfd_gi, sfd_axis_is_x);
+            let _e89 = grid.ny;
+            let _e92 = grid.nx;
+            let sfd_ext = select(_e89, _e92, sfd_axis_is_x);
+            let _e99 = k;
+            let is_boundary = select((sfd_coord == (sfd_ext - 1u)), (sfd_coord == 0u), (_e99 < 2u));
+            let _e105 = grid.nx;
+            let sfd_off = select(_e105, 1u, sfd_axis_is_x);
+            let _e110 = k;
+            let sfd_neighbor = select((idx - sfd_off), (idx + sfd_off), (_e110 >= 2u));
+            let other_idx = select(sfd_neighbor, idx, is_boundary);
+            let sfd_face_cx = (sfd_cx + (sfd_half * sfd_normal_x));
+            let sfd_face_cy = (sfd_cy + (sfd_half * sfd_normal_y));
+            let sfd_mult = select(sfd_spacing, sfd_half, is_boundary);
+            let sfd_other_cx = (sfd_cx + (sfd_mult * sfd_normal_x));
+            let sfd_other_cy = (sfd_cy + (sfd_mult * sfd_normal_y));
+            let _e124 = k;
+            let _e127 = k;
+            let _e128 = k;
+            let sfd_band_rank = select((_e124 + 1u), _e127, (_e128 < 2u));
+            let _e134 = k;
+            let face_idx = ((idx * 4u) + _e134);
+            let face_center_vec = vec2<f32>(sfd_face_cx, sfd_face_cy);
+            let normal_vec = vec2<f32>(sfd_normal_x, sfd_normal_y);
+            let other_center_vec = vec2<f32>(sfd_other_cx, sfd_other_cy);
+            let d_own = distance(own_center_vec, face_center_vec);
+            let d_neigh = distance(other_center_vec, face_center_vec);
             let total_dist = (d_own + d_neigh);
             lambda = 0.5f;
             if (total_dist > 0.000001f) {
                 lambda = (d_neigh / total_dist);
             }
-            let _e111 = lambda;
-            let lambda_other = (1f - _e111);
-            let _e114 = normal_vec;
-            let _e121 = state[((idx * 9u) + 0u)];
-            let _e122 = lambda;
-            let _e124 = other_idx;
-            let _e131 = state[((_e124 * 9u) + 0u)];
-            let _e138 = state[((idx * 9u) + 0u)];
-            let _e145 = bc_value[((face_idx * 3u) + 0u)];
-            let _e152 = bc_kind[((face_idx * 3u) + 0u)];
-            let _e162 = state[((idx * 9u) + 0u)];
-            let _e169 = bc_value[((face_idx * 3u) + 0u)];
-            let _e178 = bc_kind[((face_idx * 3u) + 0u)];
-            let _e188 = grad_acc_0_;
-            grad_acc_0_ = (_e188 + ((_e114 * ((_e121 * _e122) + (select(_e131, select(select(_e138, _e145, (_e152 == 1u)), (_e162 + (_e169 * d_own)), (_e178 == 2u)), is_boundary) * lambda_other))) * area));
-            let _e190 = normal_vec;
-            let _e197 = state[((idx * 9u) + 1u)];
-            let _e198 = lambda;
-            let _e200 = other_idx;
-            let _e207 = state[((_e200 * 9u) + 1u)];
-            let _e214 = state[((idx * 9u) + 1u)];
-            let _e221 = bc_value[((face_idx * 3u) + 1u)];
-            let _e228 = bc_kind[((face_idx * 3u) + 1u)];
-            let _e238 = state[((idx * 9u) + 1u)];
-            let _e245 = bc_value[((face_idx * 3u) + 1u)];
-            let _e254 = bc_kind[((face_idx * 3u) + 1u)];
-            let _e264 = grad_acc_1_;
-            grad_acc_1_ = (_e264 + ((_e190 * ((_e197 * _e198) + (select(_e207, select(select(_e214, _e221, (_e228 == 1u)), (_e238 + (_e245 * d_own)), (_e254 == 2u)), is_boundary) * lambda_other))) * area));
-            let _e266 = normal_vec;
-            let _e273 = state[((idx * 9u) + 2u)];
-            let _e274 = lambda;
-            let _e276 = other_idx;
-            let _e283 = state[((_e276 * 9u) + 2u)];
-            let _e290 = state[((idx * 9u) + 2u)];
-            let _e297 = bc_value[((face_idx * 3u) + 2u)];
-            let _e304 = bc_kind[((face_idx * 3u) + 2u)];
-            let _e314 = state[((idx * 9u) + 2u)];
-            let _e321 = bc_value[((face_idx * 3u) + 2u)];
-            let _e330 = bc_kind[((face_idx * 3u) + 2u)];
-            let _e340 = grad_acc_2_;
-            grad_acc_2_ = (_e340 + ((_e266 * ((_e273 * _e274) + (select(_e283, select(select(_e290, _e297, (_e304 == 1u)), (_e314 + (_e321 * d_own)), (_e330 == 2u)), is_boundary) * lambda_other))) * area));
+            let _e147 = lambda;
+            let lambda_other = (1f - _e147);
+            let _e156 = state[((idx * 9u) + 0u)];
+            let _e157 = lambda;
+            let _e165 = state[((other_idx * 9u) + 0u)];
+            let _e172 = state[((idx * 9u) + 0u)];
+            let _e179 = bc_value[((face_idx * 3u) + 0u)];
+            let _e186 = bc_kind[((face_idx * 3u) + 0u)];
+            let _e196 = state[((idx * 9u) + 0u)];
+            let _e203 = bc_value[((face_idx * 3u) + 0u)];
+            let _e212 = bc_kind[((face_idx * 3u) + 0u)];
+            let _e222 = grad_acc_0_;
+            grad_acc_0_ = (_e222 + ((normal_vec * ((_e156 * _e157) + (select(_e165, select(select(_e172, _e179, (_e186 == 1u)), (_e196 + (_e203 * d_own)), (_e212 == 2u)), is_boundary) * lambda_other))) * area));
+            let _e230 = state[((idx * 9u) + 1u)];
+            let _e231 = lambda;
+            let _e239 = state[((other_idx * 9u) + 1u)];
+            let _e246 = state[((idx * 9u) + 1u)];
+            let _e253 = bc_value[((face_idx * 3u) + 1u)];
+            let _e260 = bc_kind[((face_idx * 3u) + 1u)];
+            let _e270 = state[((idx * 9u) + 1u)];
+            let _e277 = bc_value[((face_idx * 3u) + 1u)];
+            let _e286 = bc_kind[((face_idx * 3u) + 1u)];
+            let _e296 = grad_acc_1_;
+            grad_acc_1_ = (_e296 + ((normal_vec * ((_e230 * _e231) + (select(_e239, select(select(_e246, _e253, (_e260 == 1u)), (_e270 + (_e277 * d_own)), (_e286 == 2u)), is_boundary) * lambda_other))) * area));
+            let _e304 = state[((idx * 9u) + 2u)];
+            let _e305 = lambda;
+            let _e313 = state[((other_idx * 9u) + 2u)];
+            let _e320 = state[((idx * 9u) + 2u)];
+            let _e327 = bc_value[((face_idx * 3u) + 2u)];
+            let _e334 = bc_kind[((face_idx * 3u) + 2u)];
+            let _e344 = state[((idx * 9u) + 2u)];
+            let _e351 = bc_value[((face_idx * 3u) + 2u)];
+            let _e360 = bc_kind[((face_idx * 3u) + 2u)];
+            let _e370 = grad_acc_2_;
+            grad_acc_2_ = (_e370 + ((normal_vec * ((_e304 * _e305) + (select(_e313, select(select(_e320, _e327, (_e334 == 1u)), (_e344 + (_e351 * d_own)), (_e360 == 2u)), is_boundary) * lambda_other))) * area));
         }
         continuing {
-            let _e343 = k;
-            k = (_e343 + 1u);
+            let _e373 = k;
+            k = (_e373 + 1u);
         }
     }
-    let _e345 = grad_acc_0_;
-    let grad_out_0_ = ((_e345 * 1f) / vec2(max(vol, 0.000000000001f)));
+    let _e375 = grad_acc_0_;
+    let grad_out_0_ = ((_e375 * 1f) / vec2(max(vol, 0.000000000001f)));
     grad_state[((idx * 9u) + 0u)].x = grad_out_0_.x;
     grad_state[((idx * 9u) + 0u)].y = grad_out_0_.y;
-    let _e368 = grad_acc_1_;
-    let grad_out_1_ = ((_e368 * 1f) / vec2(max(vol, 0.000000000001f)));
+    let _e398 = grad_acc_1_;
+    let grad_out_1_ = ((_e398 * 1f) / vec2(max(vol, 0.000000000001f)));
     grad_state[((idx * 9u) + 1u)].x = grad_out_1_.x;
     grad_state[((idx * 9u) + 1u)].y = grad_out_1_.y;
-    let _e391 = grad_acc_2_;
-    let grad_out_2_ = ((_e391 * 1f) / vec2(max(vol, 0.000000000001f)));
+    let _e421 = grad_acc_2_;
+    let grad_out_2_ = ((_e421 * 1f) / vec2(max(vol, 0.000000000001f)));
     grad_state[((idx * 9u) + 2u)].x = grad_out_2_.x;
     grad_state[((idx * 9u) + 2u)].y = grad_out_2_.y;
     return;
@@ -364210,6 +363966,14 @@ pub mod bytemuck_impls {
     {
     }
     unsafe impl bytemuck::Zeroable
+        for generated::packed_state_gradients_generic_diffusion_demo_structured::StructuredGrid
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::packed_state_gradients_generic_diffusion_demo_structured::StructuredGrid
+    {
+    }
+    unsafe impl bytemuck::Zeroable
         for generated::packed_state_gradients_generic_diffusion_demo_structured::Constants
     {
     }
@@ -364226,6 +363990,14 @@ pub mod bytemuck_impls {
     {
     }
     unsafe impl bytemuck::Zeroable
+        for generated::packed_state_gradients_generic_diffusion_demo_structured_ibm::StructuredGrid
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::packed_state_gradients_generic_diffusion_demo_structured_ibm::StructuredGrid
+    {
+    }
+    unsafe impl bytemuck::Zeroable
         for generated::packed_state_gradients_generic_diffusion_demo_structured_ibm::Constants
     {
     }
@@ -364239,6 +364011,14 @@ pub mod bytemuck_impls {
     }
     unsafe impl bytemuck::Pod
         for generated::packed_state_gradients_generic_diffusion_demo_structured_mms::Vector2
+    {
+    }
+    unsafe impl bytemuck::Zeroable
+        for generated::packed_state_gradients_generic_diffusion_demo_structured_mms::StructuredGrid
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::packed_state_gradients_generic_diffusion_demo_structured_mms::StructuredGrid
     {
     }
     unsafe impl bytemuck::Zeroable
@@ -364313,6 +364093,14 @@ pub mod bytemuck_impls {
     }
     unsafe impl bytemuck::Pod
         for generated::packed_state_gradients_incompressible_momentum_structured::Vector2
+    {
+    }
+    unsafe impl bytemuck::Zeroable
+        for generated::packed_state_gradients_incompressible_momentum_structured::StructuredGrid
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::packed_state_gradients_incompressible_momentum_structured::StructuredGrid
     {
     }
     unsafe impl bytemuck::Zeroable

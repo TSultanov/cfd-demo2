@@ -15,6 +15,7 @@ pub mod reconstruction;
 pub mod rhs_only;
 pub mod rust_emit;
 pub mod state_access;
+pub mod structured_grid;
 pub mod time_integration;
 pub mod unified_assembly;
 pub mod wgsl;

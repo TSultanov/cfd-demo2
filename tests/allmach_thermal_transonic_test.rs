@@ -130,7 +130,6 @@ struct DuctResult {
 
 fn run_duct(air: &Fluid, psi: f64, inlet_v: f64, steps: usize) -> DuctResult {
     let mesh = converging_duct(64, 32);
-    let c_sound = 1.0 / psi.sqrt();
     let mut solver = build_duct(air, &mesh, psi, inlet_v);
 
     let mut diverged = false;
@@ -148,16 +147,25 @@ fn run_duct(air: &Fluid, psi: f64, inlet_v: f64, steps: usize) -> DuctResult {
     let u = pollster::block_on(solver.get_field_vec2("U")).expect("U");
     let t = pollster::block_on(solver.get_field_scalar("T")).expect("T");
     let rho = pollster::block_on(solver.get_field_scalar("rho")).expect("rho");
+    // `psi` is now recovered on-device as the LOCAL 1/c^2(T) = psi_ref*t_ref/T, so
+    // the sound speed varies with temperature. Read it back and form the Mach number
+    // against the LOCAL sound speed c = 1/sqrt(psi): M = speed * sqrt(psi).
+    let psi_local = pollster::block_on(solver.get_field_scalar("psi")).expect("psi");
 
     let finite = u.iter().all(|(a, b)| a.is_finite() && b.is_finite())
         && t.iter().all(|v| v.is_finite() && *v > 0.0)
-        && rho.iter().all(|v| v.is_finite() && *v > 0.0);
+        && rho.iter().all(|v| v.is_finite() && *v > 0.0)
+        && psi_local.iter().all(|v| v.is_finite() && *v > 0.0);
     if !finite {
         return DuctResult { inlet_v, converged: false, m_in: f64::NAN, m_throat: f64::NAN, t_out: f64::NAN, t_min: f64::NAN };
     }
 
     let speed: Vec<f64> = u.iter().map(|(a, b)| (a * a + b * b).sqrt()).collect();
-    let mach: Vec<f64> = speed.iter().map(|s| s / c_sound).collect();
+    let mach: Vec<f64> = speed
+        .iter()
+        .zip(psi_local.iter())
+        .map(|(s, ps)| s * ps.sqrt())
+        .collect();
     // Inlet region: first 15% of the length (mean ~ prescribed inlet Mach).
     // Throat: last 15% — take the peak (core) Mach, robust to the no-slip walls.
     let m_in = region_mean(&mesh, &mach, 0.0, 0.15 * LENGTH);

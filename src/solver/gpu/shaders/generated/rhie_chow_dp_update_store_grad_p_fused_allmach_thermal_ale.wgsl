@@ -23,8 +23,8 @@ struct Constants {
 @compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.y * constants.stride_x + global_id.x;
-    if (idx >= (arrayLength(&state) / 19u)) { return; }
-    let base = idx * 19u;
+    if (idx >= (arrayLength(&state) / 21u)) { return; }
+    let base = idx * 21u;
     // synthesized by fusion rule: rhie_chow:dp_update_store_grad_p_v1
     // begin fused segment: dp_update_from_diag
     let rho = max(constants.density, 0.000000000001);

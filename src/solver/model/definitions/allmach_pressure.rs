@@ -114,6 +114,21 @@ pub const ALLMACH_T_REF_FIELD: &str = "t_ref";
 /// `psi = psi_ref` is byte-unchanged. Thermal production variant only.
 pub const ALLMACH_PSI_REF_FIELD: &str = "psi_ref";
 
+/// Reference inlet-scale velocity `u_ref = k * U_inlet` (unit Velocity), seeded by
+/// the driver (`k` = the low-Mach Turkel floor multiplier). It sets the
+/// pseudo-acoustic floor `beta^2 = max(|U|^2, u_ref^2)` in the on-device
+/// `psi_precond` recovery so the pseudo-Mach stays <= 1 in quiescent regions.
+/// Thermal production variant only.
+pub const ALLMACH_U_REF_FIELD: &str = "u_ref";
+
+/// Low-Mach preconditioner enable mask (dimensionless 0/1), seeded by the driver to
+/// 1 when compressibility is on (`psi_ref > 0`) and 0 otherwise. It multiplies the
+/// on-device `psi_precond`, so the incompressible limit (`psi_ref = 0`) forces
+/// `psi_precond = 0` exactly (the `ddt(psi_precond,p)` acoustic term vanishes),
+/// reproducing the host `allmach_psi_precond`'s `real_psi <= 0 => 0` special case.
+/// Thermal production variant only.
+pub const ALLMACH_PRECOND_MASK_FIELD: &str = "precond_mask";
+
 /// Reference temperature of the thermal EOS linearization. The canonical value
 /// the MMS manufactured solution and the GUI default are derived from; seeders
 /// set `rho_t_ref = density * ALLMACH_T_REF`.
@@ -605,6 +620,12 @@ fn allmach_pressure_model_impl(
             // carries the LOCAL 1/c^2(T). Appended last so every prior field's offset
             // is unchanged (offsets are load-bearing).
             layout_fields.push(vol_scalar_dim::<Compressibility>(ALLMACH_PSI_REF_FIELD));
+            // Preconditioner inputs for the on-device psi_precond recovery: the
+            // inlet-scale velocity floor `u_ref` and the 0/1 enable `precond_mask`.
+            layout_fields.push(vol_scalar_dim::<Velocity>(ALLMACH_U_REF_FIELD));
+            layout_fields.push(vol_scalar_dim::<cfd2_ir::dimensions::Dimensionless>(
+                ALLMACH_PRECOND_MASK_FIELD,
+            ));
         }
     }
     if with_mms_source {
@@ -847,6 +868,65 @@ fn allmach_pressure_model_impl(
                 ALLMACH_U_DOT_GRAD_P_FIELD.to_string(),
                 Expr::ident("U_x") * Expr::ident("grad_p_x")
                     + Expr::ident("U_y") * Expr::ident("grad_p_y"),
+            );
+            // LOCAL sound speed (the "real sound speed"): psi = 1/c^2(T) =
+            // psi_ref * t_ref / T = 1/(gamma*R*T) (isentropic ideal-gas 1/c^2).
+            // Recovered on-device each outer iteration from T alone — it reads only
+            // the constant psi_ref/t_ref and the solved T, so there is NO psi<->rho
+            // cycle (rho uses the constant psi_ref), and it is division-only for
+            // cross-backend byte parity. As the gas accelerates and cools, psi rises
+            // (c falls) LOCALLY. The div_flux Newton Jacobian and the preconditioner
+            // read this state `psi` (one-outer-iteration Picard lag); the EOS
+            // coefficients keep the constant psi_ref (see the rho recovery above).
+            // SIGN SAFETY ONLY: clamp psi at a tiny positive floor. As T -> 0+ the
+            // local psi grows unboundedly, which is CORRECT and stabilising — a low
+            // local sound speed makes the gas "feel" more compressible and self-limits
+            // the acceleration at a cold exit. The only pathology is a transient T
+            // undershoot THROUGH zero, where psi_ref*t_ref/T flips sign and would invert
+            // the div_flux Jacobian; `max(..., psi_ref)` keeps psi >= the reference value
+            // (never negative) without capping the physical stiffening at small positive
+            // T. Inert wherever T >= t_ref.
+            derivations.insert(
+                "psi".to_string(),
+                Expr::call_named(
+                    "max",
+                    vec![
+                        Expr::ident(ALLMACH_PSI_REF_FIELD) * Expr::ident(ALLMACH_T_REF_FIELD)
+                            / Expr::ident(ALLMACH_TEMPERATURE_FIELD),
+                        Expr::ident(ALLMACH_PSI_REF_FIELD),
+                    ],
+                ),
+            );
+            // Low-Mach (Turkel) preconditioned pseudo-compressibility, moved on-device
+            // so the raw-solver nozzle tests exercise it (it was host-seeded before).
+            // psi_precond = precond_mask * max(psi, 1/beta^2), beta^2 =
+            // max(|U|^2, u_ref^2), using the LOCAL psi so the pseudo-acoustic scale
+            // tracks the true local sound speed (the plan's real-sound-speed
+            // preconditioner). NOTE the design trade-off: at a deeply-cooled exit the
+            // local psi grows, so the pressure ddt mass term over-damps the pseudo-time
+            // there — a benign, graceful slowdown (the exit develops slowly) rather
+            // than the catastrophic blow-up the bounded-reference variant produced on
+            // the over-driven GUI-default nozzle. The 0/1 precond_mask reproduces the
+            // incompressible special case exactly: psi_ref=0 => psi=0 but 1/beta^2 != 0,
+            // so mask=0 forces psi_precond=0 (the acoustic ddt term vanishes). Reads
+            // psi (ordered after it), U and the constants u_ref/precond_mask => acyclic.
+            // Unit: Compressibility reduces to 1/Velocity^2, so max(psi, 1/beta^2) is
+            // unit-consistent.
+            let beta2 = Expr::call_named(
+                "max",
+                vec![
+                    Expr::ident("U_x") * Expr::ident("U_x")
+                        + Expr::ident("U_y") * Expr::ident("U_y"),
+                    Expr::ident(ALLMACH_U_REF_FIELD) * Expr::ident(ALLMACH_U_REF_FIELD),
+                ],
+            );
+            derivations.insert(
+                "psi_precond".to_string(),
+                Expr::ident(ALLMACH_PRECOND_MASK_FIELD)
+                    * Expr::call_named(
+                        "max",
+                        vec![Expr::ident("psi"), Expr::lit_f32(1.0) / beta2],
+                    ),
             );
         }
         PrimitiveDerivations { derivations }

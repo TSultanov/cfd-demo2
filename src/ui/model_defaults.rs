@@ -63,6 +63,12 @@ pub struct ModelGuiDefaults {
     /// supersonic-nozzle demo uses a negative value to pull the diverging section
     /// past Mach 1. Applied to the gauge-pressure (`allmach_*`) models only.
     pub outlet_back_pressure: f32,
+    /// Minimum preconditioner reference velocity (all-Mach only) — the pseudo-sound
+    /// floor that both stops the compressible-ALE outlet divergence and (raised
+    /// toward ~1.0) cleans the residual standing pressure mode toward the
+    /// incompressible field. See [`RuntimeParams::allmach_precond_uref_min`]. `0.0`
+    /// for non-all-Mach models (ignored); the all-Mach presets set it explicitly.
+    pub allmach_precond_uref_min: f32,
     /// Drive the CD nozzle with a pressure inlet + supersonic (extrapolated) outlet
     /// instead of the velocity-inlet / pressure-outlet default. See
     /// [`RuntimeParams::pressure_inlet`]. `false` for every standard case.
@@ -112,6 +118,7 @@ impl ModelGuiDefaults {
             // EOS (all-Mach recovers incompressible), real 1/c^2 for a gas.
             compressibility_psi: eos.compressibility(density as f64) as f32,
             outlet_back_pressure: self.outlet_back_pressure,
+            allmach_precond_uref_min: self.allmach_precond_uref_min,
             pressure_inlet: self.pressure_inlet,
             inlet_pressure: self.inlet_pressure,
         }
@@ -159,6 +166,7 @@ const INCOMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     // the 2D-laminar vortex-shedding band, no viscosity floor.
     inlet_velocity: 0.011,
     outlet_back_pressure: 0.0,
+    allmach_precond_uref_min: 0.0, // non-all-Mach: ignored
     pressure_inlet: false,
     inlet_pressure: 0.0,
 };
@@ -197,6 +205,7 @@ const COMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     low_mach_pressure_coupling_alpha: 0.01,
     inlet_velocity: 0.002,
     outlet_back_pressure: 0.0,
+    allmach_precond_uref_min: 0.0, // density-based compressible: floor unused
     pressure_inlet: false,
     inlet_pressure: 0.0,
 };
@@ -239,6 +248,12 @@ const ALLMACH: ModelGuiDefaults = ModelGuiDefaults {
     inlet_velocity: 0.011,
     // Standard outlet for the channel/backstep cases (the nozzle demo overrides this).
     outlet_back_pressure: 0.0,
+    // Preconditioner floor 1.0 (not the bare-stability 0.2): under the adaptive dt the
+    // larger developed timestep + this lower psi_precond make the pressure nearly
+    // elliptic, collapsing the residual standing pseudo-acoustic mode onto the
+    // incompressible field (the "pressure looks wrong" cure). Step-0 safe via the
+    // moving driver's startup dt growth-cap. GUI-tunable via the all-Mach floor slider.
+    allmach_precond_uref_min: 1.0,
     pressure_inlet: false,
     inlet_pressure: 0.0,
 };
@@ -283,6 +298,9 @@ pub const ALLMACH_THERMAL_NOZZLE: ModelGuiDefaults = ModelGuiDefaults {
     // Velocity-inlet fallback back-pressure (gauge); the default driving is the
     // pressure inlet below.
     outlet_back_pressure: -0.045,
+    // Inert here: the throughflow scale (inlet_velocity 313) dominates this floor, so
+    // the preconditioner never binds to it and the ramp is a no-op for the nozzle.
+    allmach_precond_uref_min: 0.2,
     // Pressure inlet + supersonic (extrapolated) outlet at the real sound speed: the
     // gauge anchors at the inlet, the outlet floats. The elliptic pressure row is made
     // well-posed at the supersonic exit by the pressure-flux Newton linearization;

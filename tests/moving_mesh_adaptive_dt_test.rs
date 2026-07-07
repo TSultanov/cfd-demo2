@@ -65,6 +65,7 @@ fn base_params(dt: f32, time_scheme: TimeScheme, psi: f32) -> RuntimeParams {
         eos: EosSpec::Constant,
         compressibility_psi: psi,
         outlet_back_pressure: 0.0,
+        allmach_precond_uref_min: 0.2,
         pressure_inlet: false,
         inlet_pressure: 0.0,
     }

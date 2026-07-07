@@ -34,6 +34,17 @@ mod probe {
     const INLET: f32 = 0.011;
     const STEPS: usize = 300;
 
+    /// Initial mesh cell size, overridable via `PROBE_DIPOLE_H` (default [`H`]).
+    /// Used to calibrate the mesh-aware preconditioner floor: coarser initial
+    /// meshes lose step-0 acoustic damping margin at higher floors.
+    fn probe_h() -> f64 {
+        std::env::var("PROBE_DIPOLE_H")
+            .ok()
+            .and_then(|s| s.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v > 0.0)
+            .unwrap_or(H)
+    }
+
     fn gui_params() -> RuntimeParams {
         RuntimeParams {
             adaptive_dt: false,
@@ -58,6 +69,7 @@ mod probe {
             eos: EosSpec::Constant,
             compressibility_psi: 0.0,
             outlet_back_pressure: 0.0,
+            allmach_precond_uref_min: 0.2,
             pressure_inlet: false,
             inlet_pressure: 0.0,
         }
@@ -75,7 +87,7 @@ mod probe {
             obstacle_center: Point2::new(1.0, 0.51),
             obstacle_radius: 0.1,
         };
-        let cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+        let cvt = generate_cvt_mesh_with_seeds(&geo, probe_h(), probe_h(), 1.2, domain, &LloydConfig::default());
         let n = cvt.mesh.num_cells();
 
         // Initial-mesh anatomy: volume extremes + where they live.
@@ -302,13 +314,13 @@ mod probe {
                 obstacle_center: Point2::new(1.0, 0.51),
                 obstacle_radius: 0.1,
             };
-            generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default())
+            generate_cvt_mesh_with_seeds(&geo, probe_h(), probe_h(), 1.2, domain, &LloydConfig::default())
         } else {
             let geo = RectangularChannel {
                 length: LX,
                 height: LY,
             };
-            generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default())
+            generate_cvt_mesh_with_seeds(&geo, probe_h(), probe_h(), 1.2, domain, &LloydConfig::default())
         };
         let mesh = cvt.mesh;
         let n = mesh.num_cells();
@@ -371,7 +383,7 @@ mod probe {
             obstacle_center: Point2::new(1.0, 0.51),
             obstacle_radius: 0.1,
         };
-        let cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+        let cvt = generate_cvt_mesh_with_seeds(&geo, probe_h(), probe_h(), 1.2, domain, &LloydConfig::default());
         let n = cvt.mesh.num_cells();
         let mesh = cvt.mesh.clone();
         let params = gui_params();
@@ -441,7 +453,7 @@ mod probe {
             obstacle_center: Point2::new(1.0, 0.51),
             obstacle_radius: 0.1,
         };
-        let cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+        let cvt = generate_cvt_mesh_with_seeds(&geo, probe_h(), probe_h(), 1.2, domain, &LloydConfig::default());
         let mesh = cvt.mesh;
         let n = mesh.num_cells();
         let params = gui_params();
@@ -539,7 +551,7 @@ mod probe {
             obstacle_center: Point2::new(1.0, 0.51),
             obstacle_radius: 0.1,
         };
-        let cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+        let cvt = generate_cvt_mesh_with_seeds(&geo, probe_h(), probe_h(), 1.2, domain, &LloydConfig::default());
         let n = cvt.mesh.num_cells();
         let params = gui_params();
         let initial_u = vec![(INLET as f64, 0.0); n];
@@ -635,7 +647,7 @@ mod probe {
             obstacle_center: Point2::new(ocx, ocy),
             obstacle_radius: orad,
         };
-        let cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+        let cvt = generate_cvt_mesh_with_seeds(&geo, probe_h(), probe_h(), 1.2, domain, &LloydConfig::default());
         let n0 = cvt.mesh.num_cells();
         // PROBE_DIPOLE_FAMILY=allmach runs the COMPRESSIBLE thermal all-Mach
         // ALE family (same recipe knobs as the visual probe's GUI regime) —
@@ -805,6 +817,18 @@ mod probe {
         let (mut outlet_iso_worst, mut outlet_vr_worst, mut outlet_skew_worst) =
             (0.0f64, f64::INFINITY, 0.0f64);
         let mut outlet_iso_top = (0.0f64, 0usize, 0.0f64, 0.0f64);
+        // STANDING-MODE AMPLITUDE (phase-robust): pressure spread in the
+        // UPSTREAM inlet strip (x<0.9, upstream of the obstacle at x≈1.1) has
+        // NO physical wake — any large max-min there is the domain-scale
+        // pseudo-acoustic standing mode. Track running mean/max over the
+        // developed regime (step>=200) so the metric is a phase-independent
+        // amplitude, not a single-snapshot phase.
+        let (mut ff_sum, mut ff_max, mut ff_n) = (0.0f64, 0.0f64, 0usize);
+        // Late window (final 200 steps): with PROBE_DIPOLE_FREEZE set before it,
+        // this is the POST-freeze amplitude — if the standing mode is fed by the
+        // adaptation transfer, it decays here relative to the full-run mean.
+        let late_from = steps.saturating_sub(200);
+        let (mut ff_late_sum, mut ff_late_n) = (0.0f64, 0usize);
         for step in 0..steps {
             if freeze_at == Some(step) {
                 if freeze_mode != "smooth" {
@@ -833,6 +857,7 @@ mod probe {
                 let mut rhomax = (0.0f64, 0usize);
                 let mut umax = (0.0f64, 0usize);
                 let mut pmin = (f64::INFINITY, 0usize);
+                let (mut p_in_lo, mut p_in_hi) = (f64::INFINITY, f64::NEG_INFINITY);
                 for c in 0..nn {
                     if let Some(to) = t_off {
                         let t = st[c * stride + to] as f64;
@@ -846,6 +871,21 @@ mod probe {
                     if uu > umax.0 { umax = (uu, c); }
                     let pp = st[c * stride + p_off] as f64;
                     if pp < pmin.0 { pmin = (pp, c); }
+                    // Upstream-strip pressure spread (standing-mode amplitude).
+                    if m.cell_cx[c] < 0.9 {
+                        p_in_lo = p_in_lo.min(pp);
+                        p_in_hi = p_in_hi.max(pp);
+                    }
+                }
+                if step >= 200 && p_in_hi > p_in_lo {
+                    let sp = p_in_hi - p_in_lo;
+                    ff_sum += sp;
+                    ff_max = ff_max.max(sp);
+                    ff_n += 1;
+                    if step >= late_from {
+                        ff_late_sum += sp;
+                        ff_late_n += 1;
+                    }
                 }
                 let loc = |c: usize| (m.cell_cx[c], m.cell_cy[c], m.cell_vol[c]);
                 let diverged = outcome.diverged.is_some()
@@ -1145,10 +1185,76 @@ mod probe {
                 );
             }
         }
+        // STREAMWISE PROFILE (final field): mean p and mean |U| in 0.5-wide x
+        // bands, plus the outlet-corner |U|. Diagnoses the pressure-gradient
+        // SIGN (favorable = p falls toward the outlet) and whether the flow
+        // sustains its inlet flux downstream or decays.
+        {
+            let st = pollster::block_on(moving.driver().solver().read_state_f32());
+            let m = moving.mesh();
+            let nn = m.num_cells();
+            let uo = layout.offset_for("U").expect("U") as usize;
+            let nb = (LX / 0.5).ceil() as usize;
+            let mut psum = vec![0.0f64; nb];
+            let mut usum = vec![0.0f64; nb];
+            let mut cnt = vec![0usize; nb];
+            let (mut corner_tr, mut corner_br) = (0.0f64, 0.0f64);
+            for c in 0..nn {
+                let (x, y) = (m.cell_cx[c], m.cell_cy[c]);
+                let b = ((x / 0.5) as usize).min(nb - 1);
+                let p = st[c * stride + p_off] as f64;
+                let um = (st[c * stride + uo] as f64).hypot(st[c * stride + uo + 1] as f64);
+                psum[b] += p;
+                usum[b] += um;
+                cnt[b] += 1;
+                if x > LX - 0.15 && y > LY - 0.15 {
+                    corner_tr = corner_tr.max(um);
+                }
+                if x > LX - 0.15 && y < 0.15 {
+                    corner_br = corner_br.max(um);
+                }
+            }
+            let pmean: Vec<String> = (0..nb)
+                .map(|b| format!("{:.2e}", psum[b] / cnt[b].max(1) as f64))
+                .collect();
+            let umean: Vec<String> = (0..nb)
+                .map(|b| format!("{:.2e}", usum[b] / cnt[b].max(1) as f64))
+                .collect();
+            println!("[profile] p(x-bands 0..{LX}): [{}]", pmean.join(", "));
+            println!("[profile] |U|(x-bands): [{}]", umean.join(", "));
+            println!(
+                "[profile] outlet-corner |U|max: top-right={corner_tr:.3e} bottom-right={corner_br:.3e} (inlet {inlet:.3e})"
+            );
+            // PROBE_DIPOLE_FINAL_PNG=<tag>: dump the final pressure + |U| field
+            // (full domain and an outlet-corner zoom) so the rendered solution
+            // can be eyeballed the way the GUI shows it. Autoscaled per image.
+            if let Ok(tag) = std::env::var("PROBE_DIPOLE_FINAL_PNG") {
+                let p_fld = |c: usize| st[c * stride + p_off] as f64;
+                let u_fld = |c: usize| {
+                    (st[c * stride + uo] as f64).hypot(st[c * stride + uo + 1] as f64)
+                };
+                render_voronoi_field(m, &p_fld, (ocx, ocy, orad), &out_dir.join(format!("final_p_{tag}.png")));
+                render_voronoi_field(m, &u_fld, (ocx, ocy, orad), &out_dir.join(format!("final_u_{tag}.png")));
+                // Outlet strip zoom (x in [LX-0.6, LX], full height) — where the
+                // reported "weirdness" lives.
+                let win = (LX - 0.6, LX, 0.0, LY);
+                render_voronoi_window(m, &p_fld, &out_dir.join(format!("outlet_p_{tag}.png")), win, (360, 300));
+                render_voronoi_window(m, &u_fld, &out_dir.join(format!("outlet_u_{tag}.png")), win, (360, 300));
+                println!("[final-png] wrote final_{{p,u}}_{tag}.png + outlet_{{p,u}}_{tag}.png to {}", out_dir.display());
+            }
+        }
         println!(
             "[dipole-watch] AMBIENT worst dip (steps 30..{steps}, faces beyond \
              {EVENT_R_CELLS} local spacings of any event younger than {EVENT_AGE} steps): \
              {ambient_worst:.3}"
+        );
+        println!(
+            "[standing-mode] upstream-strip (x<0.9) pressure spread over steps 200..{steps}: \
+             mean={:.3e} max={:.3e} (n={ff_n}) | late[{late_from}..{steps}] mean={:.3e} (n={ff_late_n}) \
+             — phase-robust standing pseudo-acoustic amplitude",
+            if ff_n > 0 { ff_sum / ff_n as f64 } else { 0.0 },
+            ff_max,
+            if ff_late_n > 0 { ff_late_sum / ff_late_n as f64 } else { 0.0 },
         );
         // Full OSC series to the log (one line per step) so any window can
         // be analyzed offline — the phantom-dipole-specific A/B needs
@@ -1425,7 +1531,7 @@ mod probe {
             obstacle_center: Point2::new(ocx, ocy),
             obstacle_radius: orad,
         };
-        let cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+        let cvt = generate_cvt_mesh_with_seeds(&geo, probe_h(), probe_h(), 1.2, domain, &LloydConfig::default());
         let n0 = cvt.mesh.num_cells();
         // PROBE_VISUAL_FAMILY=allmach runs the thermal all-Mach ALE family
         // (the GUI screenshot regime) with its proven recipe knobs; default
@@ -1714,7 +1820,7 @@ mod probe {
                 obstacle_radius: 0.1,
             };
             let cvt =
-                generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+                generate_cvt_mesh_with_seeds(&geo, probe_h(), probe_h(), 1.2, domain, &LloydConfig::default());
             let n0 = cvt.mesh.num_cells();
             let params = gui_params();
             let mut moving = pollster::block_on(MovingMeshDriver::build(
@@ -1986,7 +2092,7 @@ mod probe {
             length: LX,
             height: LY,
         };
-        let cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
+        let cvt = generate_cvt_mesh_with_seeds(&geo, probe_h(), probe_h(), 1.2, domain, &LloydConfig::default());
         let n = cvt.mesh.num_cells();
         fn retag(mesh: &mut cfd2::solver::mesh::Mesh) {
             let eps = 1e-4;

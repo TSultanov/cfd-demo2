@@ -704,6 +704,11 @@ pub struct CFDApp {
     /// standard outlet; the supersonic-nozzle demo sets a negative value to pull the
     /// diverging section past Mach 1. Applied per-case via the GUI defaults.
     outlet_back_pressure: f32,
+    /// All-Mach preconditioner reference-velocity floor (see
+    /// [`crate::sim::RuntimeParams::allmach_precond_uref_min`]). Higher (~1.0) cleans
+    /// the residual standing pressure mode toward the incompressible field; 0.2 is the
+    /// bare-stability floor. Live slider (no rebuild).
+    allmach_precond_uref_min: f32,
     /// Drive the CD nozzle with a pressure inlet + supersonic outlet (see
     /// `RuntimeParams::pressure_inlet`). Set per-case via the GUI defaults.
     pressure_inlet: bool,
@@ -876,6 +881,7 @@ impl CFDApp {
             inlet_velocity: 1.0,
             compressibility_psi: 0.0,
             outlet_back_pressure: 0.0,
+            allmach_precond_uref_min: 0.2,
             pressure_inlet: false,
             inlet_pressure: 0.0,
             selected_preconditioner: PreconditionerType::Jacobi,
@@ -923,6 +929,7 @@ impl CFDApp {
             eos: self.current_fluid.eos,
             compressibility_psi: self.compressibility_psi,
             outlet_back_pressure: self.outlet_back_pressure,
+            allmach_precond_uref_min: self.allmach_precond_uref_min,
             pressure_inlet: self.pressure_inlet,
             inlet_pressure: self.inlet_pressure,
         }
@@ -980,6 +987,7 @@ impl CFDApp {
         self.compressibility_psi = self.current_fluid.compressibility() as f32;
         // Outlet back-pressure: negative only for the supersonic-nozzle case (above).
         self.outlet_back_pressure = d.outlet_back_pressure;
+        self.allmach_precond_uref_min = d.allmach_precond_uref_min;
         self.pressure_inlet = d.pressure_inlet;
         self.inlet_pressure = d.inlet_pressure;
     }
@@ -3453,6 +3461,31 @@ impl eframe::App for CFDApp {
                                  · inlet Mach ≈ {mach_real:.2e}",
                                 self.current_fluid.compressibility()
                             ));
+                            // Preconditioner floor (pressure smoothness). Live via
+                            // `apply_params` (no rebuild). Raising it toward ~1.0
+                            // collapses the residual standing pseudo-acoustic pressure
+                            // mode onto the incompressible field; 0.2 is the bare
+                            // divergence-stability floor. Step-0 safe via the moving
+                            // driver's startup dt growth-cap.
+                            let mut floor = self.allmach_precond_uref_min;
+                            if ui
+                                .add(
+                                    adaptive_slider(&mut floor, 0.2..=2.0)
+                                        .text("Preconditioner floor (pressure smoothness)"),
+                                )
+                                .on_hover_text(
+                                    "Low-Mach preconditioner reference-velocity floor. \
+                                     Higher (~1.0) makes the pressure nearly elliptic under \
+                                     the adaptive dt, cleaning the residual standing pressure \
+                                     mode toward the incompressible field; 0.2 is the minimum \
+                                     that stops the compressible outlet divergence. Live, no \
+                                     rebuild; step-0 safe via the startup dt cap.",
+                                )
+                                .changed()
+                            {
+                                self.allmach_precond_uref_min = floor.max(0.0);
+                                self.sync_worker_params();
+                            }
                         }
 
                         // Supersonic-nozzle driver: a sub-critical (negative gauge)
@@ -4515,6 +4548,7 @@ fn solver_worker_main(
         eos: crate::solver::model::eos::EosSpec::Constant,
         compressibility_psi: 0.0,
         outlet_back_pressure: 0.0,
+        allmach_precond_uref_min: 0.2,
         pressure_inlet: false,
         inlet_pressure: 0.0,
     };

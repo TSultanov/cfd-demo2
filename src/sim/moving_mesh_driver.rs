@@ -4794,7 +4794,20 @@ impl MovingMeshDriver {
             return None;
         }
         let mut dt = target_cfl / rate;
-        if let Some(prev) = self.last_pinned_dt {
+        // Growth cap: dt grows at most 1.2× the last COMMITTED pinned dt. At step 0
+        // there is no prior committed dt. For ALL-MACH models, cap the FIRST step from
+        // the configured seed dt instead of leaving it uncapped: a slow near-incompressible
+        // inlet makes the flow-CFL candidate `min_h/|U_in|` a large first step (~10-20×
+        // the seed), whose impulsive-start acoustic transient a RAISED preconditioner
+        // floor (lower psi_precond) under-damps into a step-0 velocity spike. Capping the
+        // first step to `seed·1.2` keeps the from-rest acoustics in-bounds while the dt
+        // self-recovers (grows 1.2×/step to the flow-CFL value) — the same discipline the
+        // supersonic-nozzle seed (1e-5) already relies on. Non-all-Mach models are
+        // BIT-IDENTICAL (no cap when `last_pinned_dt` is None).
+        let growth_ref = self
+            .last_pinned_dt
+            .or_else(|| self.driver.is_allmach().then_some(self.configured_dt));
+        if let Some(prev) = growth_ref {
             dt = dt.min(prev * 1.2);
         }
         Some(dt.clamp(1e-9, 100.0))

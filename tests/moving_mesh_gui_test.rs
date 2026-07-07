@@ -53,6 +53,7 @@ fn ale_params() -> RuntimeParams {
         eos: EosSpec::Constant,
         compressibility_psi: 0.0,
         outlet_back_pressure: 0.0,
+        allmach_precond_uref_min: 0.2,
         pressure_inlet: false,
         inlet_pressure: 0.0,
     }

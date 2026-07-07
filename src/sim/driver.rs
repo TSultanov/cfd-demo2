@@ -76,10 +76,40 @@ const ALLMACH_PRECOND_MACH_K: f64 = 2.0;
 /// convects out of an LX≈3 domain in ~8 flow-times (~230 steps) instead of
 /// standing at the outlet and being re-excited every adaptation step — the
 /// compressible-ALE outlet divergence. It is FAR below any real-flow reference
-/// the shipping cases use (supersonic nozzle U_ref≈313, standard obstacle 0.4),
-/// so those are bit-identical; only inlets below 0.2 are lifted. `psi_precond`
-/// is a TRANSIENT (ddt-only) term, so steady/MMS results are unchanged.
-/// Overridable via `ALLMACH_PRECOND_UREF_MIN`.
+/// the shipping cases use (supersonic nozzle U_ref≈313, subsonic ≈130), so
+/// those are bit-identical; only inlets below 0.2 are lifted. `psi_precond` is a
+/// TRANSIENT (ddt-only) term, so steady/MMS results are unchanged. Overridable
+/// via `ALLMACH_PRECOND_UREF_MIN`.
+///
+/// The VALUE is a TWO-SIDED window, not "higher is better". Raising the floor
+/// shrinks the developed standing pseudo-acoustic mode (upstream x<0.9 pressure
+/// spread, mean over steps 200–1200: 8.3e-4 → 6.5e-4 → 5.5e-4 → 4.0e-4 at floor
+/// 0.2 → 0.5 → 1.0 → 2.0, vs the incompressible 2.1e-4 baseline) — but (a) it
+/// raises the finest-cell pseudo-acoustic CFL `beta·dt/h_min`, re-introducing
+/// local fine-cell pressure noise (osc rises at floor 2.0), and (b) it lowers the
+/// step-0 artificial compressibility, so the impulsive-start acoustic transient
+/// is under-damped on coarse/aggressive configs — floor 1.0 spikes the coarse
+/// `moving_mesh_thermal_outlet_test` config to 17× inlet at step 0, while 0.2–0.7
+/// stay bounded (2–4× inlet). `0.2` is the conservative default with the widest
+/// robustness margin.
+///
+/// HOWEVER, under the GUI's flow-CFL ADAPTIVE dt (the moving path), raising the
+/// floor to ~1.0 shrinks the standing pseudo-acoustic mode essentially onto the
+/// incompressible field (upstream spread 1.96e-4 at floor 1.0 vs 3.12e-4 at 0.2,
+/// vs incompressible 2.10e-4 — the "pressure looks wrong" cure): the larger
+/// developed dt shrinks the `ddt(psi_precond,p)` coefficient and the lower
+/// `psi_precond` compounds it, so the pressure is nearly elliptic. The only cost
+/// is the STEP-0 impulsive-start transient (the adaptive dt takes a large FIRST
+/// step — uncapped because there is no prior committed dt to grow-limit from —
+/// that a low `psi_precond` under-damps), which the moving driver's startup dt
+/// growth-cap removes (`flow_adaptive_dt` caps step 0 from the configured seed dt
+/// for all-Mach models). So this is a runtime-tunable knob
+/// (`RuntimeParams::allmach_precond_uref_min`, GUI slider) whose GUI default is
+/// raised toward the clean value; the const is only the fallback / non-GUI default.
+// The canonical value now lives on `RuntimeParams::allmach_precond_uref_min`
+// (per-preset in `model_defaults.rs`); this const documents the conservative
+// baseline and its rationale in one place.
+#[allow(dead_code)]
 const ALLMACH_PRECOND_UREF_MIN_DEFAULT: f64 = 0.2;
 
 /// Absolute-pressure floor for the all-Mach EOS (Pascals, gauge-referenced as
@@ -108,7 +138,9 @@ const ALLMACH_ABS_PRESSURE_FLOOR: f64 = 1.0e-5;
 /// the REAL Mach >= 1 (`1/|U|^2 <= real_psi` => `psi_precond = real_psi` => full physical
 /// acoustics). When `real_psi == 0` (incompressible limit) it returns 0, keeping the
 /// model byte-identical to the incompressible solver (the acoustic term vanishes).
-fn allmach_psi_precond(u: &[(f64, f64)], real_psi: f64, u_ref: f64) -> Vec<f64> {
+/// `uref_min` is the effective floor the caller resolved via
+/// [`allmach_precond_uref_target`] (runtime param, env-overridable).
+fn allmach_psi_precond(u: &[(f64, f64)], real_psi: f64, u_ref: f64, uref_min: f64) -> Vec<f64> {
     if real_psi <= 0.0 {
         return vec![0.0; u.len()];
     }
@@ -122,9 +154,7 @@ fn allmach_psi_precond(u: &[(f64, f64)], real_psi: f64, u_ref: f64) -> Vec<f64> 
     // WITHOUT adding numerical dissipation (unlike a pseudo-transient dtau, which
     // over-damps the wake). It is far below any real-flow reference used by the
     // shipping cases (supersonic nozzle U_ref~313, standard obstacle 0.4), so
-    // those are unaffected; it only lifts the pathologically-slow near-zero
-    // inlet. Env-tunable for validation; `0` = the original (unfloored) behaviour.
-    let uref_min = allmach_precond_uref_min();
+    // those are unaffected; it only lifts the pathologically-slow near-zero inlet.
     let u_ref_eff = u_ref.abs().max(uref_min);
     let conv_floor2 = (ALLMACH_PRECOND_MACH_K * u_ref_eff).powi(2);
     u.iter()
@@ -137,17 +167,18 @@ fn allmach_psi_precond(u: &[(f64, f64)], real_psi: f64, u_ref: f64) -> Vec<f64> 
         .collect()
 }
 
-/// Minimum preconditioner reference velocity (see [`allmach_psi_precond`]),
-/// overridable via `ALLMACH_PRECOND_UREF_MIN` for validation. Read once.
-fn allmach_precond_uref_min() -> f64 {
-    static V: std::sync::OnceLock<f64> = std::sync::OnceLock::new();
-    *V.get_or_init(|| {
+/// Resolve the preconditioner floor TARGET: the env `ALLMACH_PRECOND_UREF_MIN`
+/// (read once) overrides the runtime-param value for validation sweeps; otherwise
+/// the runtime param (GUI slider / model default) drives it.
+fn allmach_precond_uref_target(param_floor: f64) -> f64 {
+    static ENV: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
+    let env = *ENV.get_or_init(|| {
         std::env::var("ALLMACH_PRECOND_UREF_MIN")
             .ok()
             .and_then(|v| v.trim().parse::<f64>().ok())
             .filter(|v| v.is_finite() && *v >= 0.0)
-            .unwrap_or(ALLMACH_PRECOND_UREF_MIN_DEFAULT)
-    })
+    });
+    env.unwrap_or(param_floor).max(0.0)
 }
 
 /// Construct a CPU-backend [`UnifiedSolver`] regardless of `CFD2_BACKEND`.
@@ -361,8 +392,12 @@ impl SolverDriver {
                 // the IC velocity floored at k*U_inlet so step 0 is acoustic-CFL ~O(1),
                 // not ~667 — the cure for the real-psi step-0 blow-up. `set_field_scalar`
                 // (IC semantics) matches the other seeds here; readback refreshes per-cell.
-                let psi_precond =
-                    allmach_psi_precond(initial_u, psi, params.inlet_velocity.abs() as f64);
+                let psi_precond = allmach_psi_precond(
+                    initial_u,
+                    psi,
+                    params.inlet_velocity.abs() as f64,
+                    allmach_precond_uref_target(params.allmach_precond_uref_min as f64),
+                );
                 let _ = solver.set_field_scalar("psi_precond", &psi_precond);
                 let _ = solver.set_field_scalar("rho", &vec![params.density as f64; n_cells]);
                 let _ = solver.set_field_scalar("dt_local", &vec![0.0; n_cells]);
@@ -492,8 +527,12 @@ impl SolverDriver {
             // Keep psi_precond consistent with the new psi using the last-known velocity
             // scale (uniform); the next readback refreshes it per-cell. Ensures the ddt
             // coefficient stays >= the physical psi after a slider change.
-            let psi_precond =
-                allmach_psi_precond(&vec![(self.prev_max_vel, 0.0); n], psi, params.inlet_velocity.abs() as f64);
+            let psi_precond = allmach_psi_precond(
+                &vec![(self.prev_max_vel, 0.0); n],
+                psi,
+                params.inlet_velocity.abs() as f64,
+                allmach_precond_uref_target(params.allmach_precond_uref_min as f64),
+            );
             let _ = solver.set_field_scalar_current("psi_precond", &psi_precond);
             // Keep the EOS density floor (= psi * absolute-pressure floor) consistent with
             // the new psi. A no-op for non-thermal / non-allmach (no `rho_floor` field).
@@ -679,8 +718,12 @@ impl SolverDriver {
             // (one-snapshot lag, same discipline + correctness argument as `rho`: a
             // current-time coefficient never read from BDF history). Tracks the wake so
             // the pseudo-Mach stays ~<=1 as the flow develops.
-            let psi_precond =
-                allmach_psi_precond(&u, psi, self.params.inlet_velocity.abs() as f64);
+            let psi_precond = allmach_psi_precond(
+                &u,
+                psi,
+                self.params.inlet_velocity.abs() as f64,
+                allmach_precond_uref_target(self.params.allmach_precond_uref_min as f64),
+            );
             let _ = self.solver.set_field_scalar_current("psi_precond", &psi_precond);
             Some((lo, hi))
         } else if self.compressible {
@@ -902,6 +945,13 @@ impl SolverDriver {
     /// handled implicitly by `psi_precond`).
     pub fn supports_sound_speed(&self) -> bool {
         self.supports_sound_speed
+    }
+
+    /// The model is a pressure-based all-Mach family (`allmach_pressure`/`allmach_thermal`):
+    /// carries the low-Mach `psi_precond` whose step-0 impulsive-start transient the
+    /// moving driver's startup dt growth-cap guards.
+    pub fn is_allmach(&self) -> bool {
+        self.allmach
     }
 
     /// Pin the fixed timestep (the moving-mesh dt handshake). Sets both the

@@ -50,6 +50,18 @@ pub struct RuntimeParams {
     /// past Mach 1 (see the supersonic-nozzle demo). Applied by the driver to the
     /// gauge-pressure (`allmach_*`) models only.
     pub outlet_back_pressure: f32,
+    /// Minimum preconditioner reference velocity for the all-Mach low-Mach
+    /// preconditioner (units Velocity). Floors the pseudo-sound `beta = k*U_ref`
+    /// so a pathologically-slow near-incompressible inlet's low-Mach pressure
+    /// mode convects out instead of standing (see `allmach_psi_precond` in
+    /// `driver.rs`). `0.2` is the conservative default that stops the
+    /// compressible-ALE outlet divergence on every mesh; RAISING it (toward ~1.0)
+    /// shrinks the residual standing pseudo-acoustic pressure mode toward the
+    /// incompressible field (the "pressure looks wrong" cure), at the cost of
+    /// step-0 startup damping — which the moving driver's startup dt growth-cap
+    /// (`flow_adaptive_dt`) restores, so a higher value is safe. Ignored by
+    /// non-all-Mach models. Env override: `ALLMACH_PRECOND_UREF_MIN`.
+    pub allmach_precond_uref_min: f32,
     /// Drive the all-Mach CD nozzle with a PRESSURE INLET + SUPERSONIC (extrapolated)
     /// OUTLET instead of the default velocity-inlet / pressure-outlet. When true, the
     /// driver flips the Inlet/Outlet boundary KINDS (via

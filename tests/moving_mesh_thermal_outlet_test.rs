@@ -133,6 +133,12 @@ fn movingmesh_thermal_adapt_recycle_reorder_outlet_stable() {
         eos: EosSpec::Constant,
         compressibility_psi: 8.3e-6,
         outlet_back_pressure: 0.0,
+        // The SHIPPED GUI default (cleans the standing pressure mode). At this
+        // COARSE cell size (0.035) the raised floor's step-0 impulsive-start
+        // transient would spike |U| to ~17x inlet WITHOUT the moving driver's
+        // startup dt growth-cap — so this gates BOTH the divergence cure and the
+        // dt-cap that makes the clean floor step-0-safe on a coarse mesh.
+        allmach_precond_uref_min: 1.0,
         pressure_inlet: false,
         inlet_pressure: 0.0,
     };

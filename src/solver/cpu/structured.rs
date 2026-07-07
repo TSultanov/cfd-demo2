@@ -1356,6 +1356,55 @@ mod tests {
         }
     }
 
+    /// End-to-end smoke of the density-based COMPRESSIBLE structured pipeline:
+    /// a uniform gas at rest (rho=1, rho_u=0, rho_e=2.5 for p=1, gamma=1.4) in a
+    /// box with the boundaries pinned to that state must stay uniform and bounded
+    /// while the full structured conserved (rho, rho_u, rho_e) central-upwind
+    /// operator runs. Proves compressible SOLVES structured on CPU (the
+    /// expression-BC closure `bc_expr` is skipped — a documented follow-up).
+    #[test]
+    fn structured_compressible_uniform_box_runs() {
+        use crate::solver::model::compressible_structured_model;
+        let (nx, ny) = (16, 16);
+        let grid = StructuredGrid::new(nx, ny, 1.0, 1.0);
+        let model = compressible_structured_model().unwrap();
+        let s = model.system.unknowns_per_cell() as usize; // rho, rho_ux, rho_uy, rho_e
+        let mut solver = StructuredModelSolver::new(grid, &model, 0.01, 1).unwrap();
+        solver.set_fluid(1.0, 0.0); // inviscid
+        // Gas at rest: rho=1, rho_u=0, rho_e = p/(g-1) = 1/0.4 = 2.5.
+        let (rho0, e0, p0) = (1.0, 2.5, 1.0);
+        solver.set_named_field("rho", |_, _| rho0);
+        solver.set_named_field("rho_e", |_, _| e0);
+        solver.set_named_field("p", |_, _| p0);
+        solver.set_named_field("T", |_, _| 1.0);
+        if solver.field_offset("mu").is_some() {
+            solver.set_named_field("mu", |_, _| 0.0);
+        }
+        // Boundaries pinned (Dirichlet) to the uniform conserved state.
+        solver.set_boundaries(move |_edge, _x, _y| {
+            let mut v = vec![
+                BcComp { kind: 1, value: rho0 as f32 },
+                BcComp { kind: 1, value: 0.0 },
+                BcComp { kind: 1, value: 0.0 },
+            ];
+            if s >= 4 {
+                v.push(BcComp { kind: 1, value: e0 as f32 });
+            }
+            v
+        });
+
+        for _ in 0..20 {
+            solver.step();
+        }
+        let rho = solver.state_field(solver.field_offset("rho").unwrap());
+        let rho_e = solver.state_field(solver.field_offset("rho_e").unwrap());
+        for (&r, &re) in rho.iter().zip(&rho_e) {
+            assert!(r.is_finite() && re.is_finite(), "compressible state diverged");
+            assert!(r > 0.5 && r < 2.0, "compressible density drifted: {r}");
+            assert!(re > 1.0 && re < 5.0, "compressible energy drifted: {re}");
+        }
+    }
+
     /// Not an assertion — prints an ASCII heat map of the structured IBM solve so
     /// the immersed cold obstacle in a hot field is visible by eye. Run with:
     /// `cargo test --features cpu --lib structured::tests::structured_ibm_ascii -- --ignored --nocapture`

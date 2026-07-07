@@ -1454,8 +1454,8 @@ impl MovingMeshDriver {
                 let targets = self.adapt_target_vols()?;
                 let (mut kills, mut births) = self.plan_adaptation(&targets)?;
                 let wall_segs = self.plan_wall_refinement(&targets);
-                self.recycle_via_resize =
-                    self.plan_recycle_resize(&targets, &mut kills, &mut births) > 0;
+                self.plan_recycle_resize(&targets, &mut kills, &mut births);
+                self.recycle_via_resize = self.seed_recycling;
                 if kills.is_empty() && births.is_empty() && wall_segs.is_empty() {
                     // Nothing to adapt: accept the trial as the step.
                     self.adapt_targets = Some(targets);
@@ -1489,9 +1489,14 @@ impl MovingMeshDriver {
                 // Fold the outlet exports into this resize event — the
                 // between-steps placement gives them the full transfer +
                 // projection + two-level re-solve discipline the mid-step
-                // teleport cannot have.
-                self.recycle_via_resize =
-                    self.plan_recycle_resize(&targets, &mut kills, &mut births) > 0;
+                // teleport cannot have. The mid-step relabel is suppressed
+                // on EVERY adapt step (not just when pairs were planned):
+                // a cell that crosses the trigger during the step waits one
+                // step for the next resize instead of teleporting
+                // undisciplined — the residual mid-step teleports were the
+                // last remaining corner-flare channel.
+                self.plan_recycle_resize(&targets, &mut kills, &mut births);
+                self.recycle_via_resize = self.seed_recycling;
                 if !kills.is_empty() || !births.is_empty() || !wall_segs.is_empty() {
                     let wall_born = self.resize_cells_impl(&kills, &births, &wall_segs)?;
                     cells_born = births.len() + wall_born;

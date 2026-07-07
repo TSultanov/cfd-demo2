@@ -401,6 +401,271 @@ fn banded_cg(a: &[f32], b: &[f32], nx: usize, ny: usize, tol: f64, max_iter: usi
     x.iter().map(|&v| v as f32).collect()
 }
 
+// ===========================================================================
+// Coupled (block) banded matrix-free solver — for the structured incompressible
+// momentum system (block stride 3: Ux, Uy, p). The assembled operator is a
+// fixed 5-point band of `s x s` blocks: `matrix_values[p*5*s*s + r*(5*s) + b*s + c]`
+// is block-band `b` (S,W,diag,E,N), row `r`, col `c` of cell `p` — the SoA layout
+// the codegen emits (start_row_r = p*5*s*s + 5*s*r). The U–p system is a
+// saddle point (indefinite), so we use restarted GMRES with a block-Jacobi
+// (per-cell s x s block inverse) preconditioner rather than CG.
+// ===========================================================================
+
+/// Block-banded matrix-free operator over a structured grid.
+pub struct BandedBlockOperator<'a> {
+    a: &'a [f32],
+    nx: usize,
+    ny: usize,
+    s: usize, // block stride (unknowns per cell)
+}
+
+impl<'a> BandedBlockOperator<'a> {
+    fn n(&self) -> usize {
+        self.nx * self.ny * self.s
+    }
+
+    #[inline]
+    fn block(&self, p: usize, band: usize, r: usize, c: usize) -> f64 {
+        // start_row_r = p*5*s*s + 5*s*r ; entry = start_row_r + band*s + c
+        let s = self.s;
+        self.a[p * 5 * s * s + 5 * s * r + band * s + c] as f64
+    }
+
+    /// `y = A x` over the 5-point block stencil (edge neighbours skipped — their
+    /// bands are zero, closed via the diagonal + RHS by the assembly).
+    fn spmv(&self, x: &[f64]) -> Vec<f64> {
+        let (nx, ny, s) = (self.nx, self.ny, self.s);
+        let mut y = vec![0.0f64; self.n()];
+        for j in 0..ny {
+            for i in 0..nx {
+                let p = j * nx + i;
+                // (band, neighbour cell) pairs present at this cell.
+                let mut nbrs: Vec<(usize, usize)> = vec![(BAND_DIAG, p)];
+                if j > 0 {
+                    nbrs.push((BAND_SOUTH, p - nx));
+                }
+                if i > 0 {
+                    nbrs.push((BAND_WEST, p - 1));
+                }
+                if i + 1 < nx {
+                    nbrs.push((BAND_EAST, p + 1));
+                }
+                if j + 1 < ny {
+                    nbrs.push((BAND_NORTH, p + nx));
+                }
+                for r in 0..s {
+                    let mut acc = 0.0;
+                    for &(band, q) in &nbrs {
+                        for c in 0..s {
+                            acc += self.block(p, band, r, c) * x[q * s + c];
+                        }
+                    }
+                    y[p * s + r] = acc;
+                }
+            }
+        }
+        y
+    }
+
+    /// Per-cell block-Jacobi preconditioner: the inverse of each cell's diagonal
+    /// `s x s` block. Returns a flat `[N/s][s*s]` array of inverted blocks.
+    fn block_jacobi_inverses(&self) -> Vec<[f64; 9]> {
+        let ncells = self.nx * self.ny;
+        let s = self.s;
+        let mut inv = vec![[0.0f64; 9]; ncells];
+        for p in 0..ncells {
+            let mut m = [0.0f64; 9];
+            for r in 0..s {
+                for c in 0..s {
+                    m[r * s + c] = self.block(p, BAND_DIAG, r, c);
+                }
+            }
+            inv[p] = invert_small(&m, s);
+        }
+        inv
+    }
+
+    fn apply_block_jacobi(&self, minv: &[[f64; 9]], r: &[f64]) -> Vec<f64> {
+        let s = self.s;
+        let ncells = self.nx * self.ny;
+        let mut z = vec![0.0f64; self.n()];
+        for p in 0..ncells {
+            for i in 0..s {
+                let mut acc = 0.0;
+                for k in 0..s {
+                    acc += minv[p][i * s + k] * r[p * s + k];
+                }
+                z[p * s + i] = acc;
+            }
+        }
+        z
+    }
+}
+
+/// Invert an `s x s` (s ≤ 3) matrix stored row-major in the first `s*s` slots;
+/// falls back to the pseudo-diagonal when singular (keeps the preconditioner
+/// well-defined for saddle rows with a weak pressure block).
+fn invert_small(m: &[f64; 9], s: usize) -> [f64; 9] {
+    let mut out = [0.0f64; 9];
+    match s {
+        1 => {
+            out[0] = if m[0].abs() > 1e-30 { 1.0 / m[0] } else { 0.0 };
+        }
+        2 => {
+            let det = m[0] * m[3] - m[1] * m[2];
+            if det.abs() > 1e-30 {
+                let id = 1.0 / det;
+                out[0] = m[3] * id;
+                out[1] = -m[1] * id;
+                out[2] = -m[2] * id;
+                out[3] = m[0] * id;
+            } else {
+                for k in 0..s {
+                    out[k * s + k] = if m[k * s + k].abs() > 1e-30 { 1.0 / m[k * s + k] } else { 0.0 };
+                }
+            }
+        }
+        _ => {
+            // 3x3 cofactor inverse.
+            let det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6])
+                + m[2] * (m[3] * m[7] - m[4] * m[6]);
+            if det.abs() > 1e-30 {
+                let id = 1.0 / det;
+                out[0] = (m[4] * m[8] - m[5] * m[7]) * id;
+                out[1] = (m[2] * m[7] - m[1] * m[8]) * id;
+                out[2] = (m[1] * m[5] - m[2] * m[4]) * id;
+                out[3] = (m[5] * m[6] - m[3] * m[8]) * id;
+                out[4] = (m[0] * m[8] - m[2] * m[6]) * id;
+                out[5] = (m[2] * m[3] - m[0] * m[5]) * id;
+                out[6] = (m[3] * m[7] - m[4] * m[6]) * id;
+                out[7] = (m[1] * m[6] - m[0] * m[7]) * id;
+                out[8] = (m[0] * m[4] - m[1] * m[3]) * id;
+            } else {
+                for k in 0..3 {
+                    out[k * 3 + k] = if m[k * 3 + k].abs() > 1e-30 { 1.0 / m[k * 3 + k] } else { 0.0 };
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Restarted, block-Jacobi-preconditioned GMRES on the banded block operator.
+/// Handles the indefinite (saddle-point) U–p system the scalar CG cannot.
+/// Returns `(x, relative_residual)`.
+fn banded_block_gmres(
+    op: &BandedBlockOperator,
+    b: &[f32],
+    restart: usize,
+    max_outer: usize,
+    tol: f64,
+) -> (Vec<f32>, f64) {
+    let n = op.n();
+    let minv = op.block_jacobi_inverses();
+    let b64: Vec<f64> = b.iter().map(|&v| v as f64).collect();
+    let bnorm = norm(&b64).max(1e-30);
+    let mut x = vec![0.0f64; n];
+
+    for _outer in 0..max_outer {
+        // r0 = M^{-1}(b - A x)
+        let ax = op.spmv(&x);
+        let r0: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
+        let mut r = op.apply_block_jacobi(&minv, &r0);
+        let beta = norm(&r);
+        if beta / bnorm <= tol {
+            return (x.iter().map(|&v| v as f32).collect(), beta / bnorm);
+        }
+
+        let m = restart;
+        let mut v: Vec<Vec<f64>> = Vec::with_capacity(m + 1);
+        v.push(scale(&r, 1.0 / beta));
+        let mut h = vec![vec![0.0f64; m]; m + 1];
+        let mut g = vec![0.0f64; m + 1];
+        g[0] = beta;
+        let mut cs = vec![0.0f64; m];
+        let mut sn = vec![0.0f64; m];
+        let mut k_used = 0;
+
+        for k in 0..m {
+            // w = M^{-1} A v_k
+            let av = op.spmv(&v[k]);
+            let mut w = op.apply_block_jacobi(&minv, &av);
+            // Arnoldi (modified Gram–Schmidt).
+            for i in 0..=k {
+                h[i][k] = dot(&w, &v[i]);
+                axpy(&mut w, -h[i][k], &v[i]);
+            }
+            h[k + 1][k] = norm(&w);
+            if h[k + 1][k] > 1e-14 {
+                v.push(scale(&w, 1.0 / h[k + 1][k]));
+            } else {
+                v.push(vec![0.0f64; n]);
+            }
+            // Apply previous Givens rotations, then a new one.
+            for i in 0..k {
+                let temp = cs[i] * h[i][k] + sn[i] * h[i + 1][k];
+                h[i + 1][k] = -sn[i] * h[i][k] + cs[i] * h[i + 1][k];
+                h[i][k] = temp;
+            }
+            let denom = (h[k][k] * h[k][k] + h[k + 1][k] * h[k + 1][k]).sqrt();
+            if denom < 1e-300 {
+                k_used = k;
+                break;
+            }
+            cs[k] = h[k][k] / denom;
+            sn[k] = h[k + 1][k] / denom;
+            h[k][k] = cs[k] * h[k][k] + sn[k] * h[k + 1][k];
+            h[k + 1][k] = 0.0;
+            g[k + 1] = -sn[k] * g[k];
+            g[k] = cs[k] * g[k];
+            k_used = k + 1;
+            if g[k + 1].abs() / bnorm <= tol {
+                break;
+            }
+        }
+
+        // Back-substitute for y, update x = x + V y.
+        let kk = k_used;
+        let mut y = vec![0.0f64; kk];
+        for i in (0..kk).rev() {
+            let mut s = g[i];
+            for j in (i + 1)..kk {
+                s -= h[i][j] * y[j];
+            }
+            y[i] = if h[i][i].abs() > 1e-300 { s / h[i][i] } else { 0.0 };
+        }
+        for i in 0..kk {
+            axpy(&mut x, y[i], &v[i]);
+        }
+
+        // Convergence check on the true residual.
+        let ax = op.spmv(&x);
+        let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
+        if norm(&res) / bnorm <= tol {
+            return (x.iter().map(|&v| v as f32).collect(), norm(&res) / bnorm);
+        }
+    }
+    let ax = op.spmv(&x);
+    let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
+    (x.iter().map(|&v| v as f32).collect(), norm(&res) / bnorm)
+}
+
+// Small dense-vector helpers (f64).
+fn dot(a: &[f64], b: &[f64]) -> f64 {
+    a.iter().zip(b).map(|(&x, &y)| x * y).sum()
+}
+fn norm(a: &[f64]) -> f64 {
+    dot(a, a).sqrt()
+}
+fn scale(a: &[f64], s: f64) -> Vec<f64> {
+    a.iter().map(|&x| x * s).collect()
+}
+fn axpy(y: &mut [f64], a: f64, x: &[f64]) {
+    for (yi, &xi) in y.iter_mut().zip(x) {
+        *yi += a * xi;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,6 +847,64 @@ mod tests {
         assert!(
             n_cold_in_solid as f64 > 0.9 * n_solid as f64,
             "only {n_cold_in_solid}/{n_solid} interior-solid cells were masked"
+        );
+    }
+
+    /// The block-banded GMRES + block-Jacobi solver must invert a coupled
+    /// (velocity–pressure-like) 3x3-block 5-point system — the indefinite saddle
+    /// structure the scalar CG cannot handle. Build a diagonally-dominant block
+    /// operator with intra-block U–p coupling, pick a known solution, and verify
+    /// GMRES recovers it (and drives the residual down).
+    #[test]
+    fn banded_block_gmres_inverts_a_coupled_system() {
+        let (nx, ny, s) = (6usize, 5usize, 3usize);
+        let ncells = nx * ny;
+        // Diagonal block with U(0,1)–p(2) coupling (non-symmetric, saddle-like).
+        let dblock = [6.0, 0.0, 1.0, 0.0, 6.0, 1.0, -1.0, -1.0, 6.0];
+        let mut a = vec![0.0f32; ncells * 5 * s * s];
+        let set = |a: &mut [f32], p: usize, band: usize, r: usize, c: usize, v: f32| {
+            a[p * 5 * s * s + 5 * s * r + band * s + c] = v;
+        };
+        for j in 0..ny {
+            for i in 0..nx {
+                let p = j * nx + i;
+                for r in 0..s {
+                    for c in 0..s {
+                        set(&mut a, p, BAND_DIAG, r, c, dblock[r * s + c] as f32);
+                    }
+                }
+                // Off-diagonal bands: -I on existing neighbours (a block Laplacian).
+                let mut band_of = |band: usize, exists: bool| {
+                    if exists {
+                        for d in 0..s {
+                            set(&mut a, p, band, d, d, -1.0);
+                        }
+                    }
+                };
+                band_of(BAND_SOUTH, j > 0);
+                band_of(BAND_WEST, i > 0);
+                band_of(BAND_EAST, i + 1 < nx);
+                band_of(BAND_NORTH, j + 1 < ny);
+            }
+        }
+
+        // Known solution, deterministic; b = A x*.
+        let xstar: Vec<f64> = (0..ncells * s)
+            .map(|k| ((k * 37 % 11) as f64 - 5.0) * 0.1)
+            .collect();
+        let op = BandedBlockOperator { a: &a, nx, ny, s };
+        let b64 = op.spmv(&xstar);
+        let b: Vec<f32> = b64.iter().map(|&v| v as f32).collect();
+
+        let (x, rel_res) = banded_block_gmres(&op, &b, 40, 200, 1e-10);
+        assert!(rel_res < 1e-8, "GMRES residual too large: {rel_res}");
+        let mut max_err = 0.0f64;
+        for k in 0..ncells * s {
+            max_err = max_err.max((x[k] as f64 - xstar[k]).abs());
+        }
+        assert!(
+            max_err < 1e-5,
+            "GMRES did not recover the known solution (max err {max_err}, res {rel_res})"
         );
     }
 

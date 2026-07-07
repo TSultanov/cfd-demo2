@@ -307,7 +307,13 @@ fn build_allmach_system(
     // unchanged. Omitted on the `_mms` variant; identically zero when `psi = 0`.
     let p_div_flux_term = {
         let term = typed_fvm::div_flux(phi_typed, p_typed);
-        let term = if strip_all {
+        // The deferred-Newton pressure-flux linearization is a CONVERGENCE aid for the
+        // supersonic outlet; it cancels at convergence and is NOT needed for accuracy.
+        // Omit it on EVERY manufactured-solution path (barotropic AND compressible mms):
+        // gated on `with_mms_source`, not `strip_all`, so the compressible mms verifies
+        // the real spatial operator without the linearization perturbing the steady
+        // pressure row (which otherwise strands the manufactured velocity).
+        let term = if with_mms_source {
             term
         } else {
             let psi_lin = TypedCoeff::from_field(TypedFieldRef::<Compressibility, Scalar>::new(
@@ -369,7 +375,14 @@ fn build_allmach_system(
         // defect (ddt(rho,T)+div(phi,T) = rho*DT/Dt - T*d(rho)/dt). The `_mms`
         // variant keeps the conservative form (compression terms zero at steady state).
         let t_div = {
-            let d = if strip_all {
+            // Conservative div(phi,T) on EVERY manufactured-solution path (gated on
+            // with_mms_source, not strip_all). The production BOUNDED form subtracts
+            // T*div(phi); for a manufactured flow with a forced div(phi)=div(m*)!=0 that
+            // correction is O(T*·div(m*)), which is significant because T is O(1) (unlike
+            // the O(0.1) velocity, where the analogous bounded momentum correction is
+            // negligible) — it would leave a constant T error. Conservative div(m*T*) is
+            // what the FD manufactured source expresses and matches the barotropic mms.
+            let d = if with_mms_source {
                 typed_fvm::div(phi_typed, t_typed)
             } else {
                 typed_fvm::div(phi_typed, t_typed).bounded()

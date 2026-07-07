@@ -455,6 +455,121 @@ fn moving_mesh_gui_worker_gpu_backend() {
     std::env::remove_var("CFD2_CPU_ENGINE");
 }
 
+/// The GUI adaptation config exercised end-to-end on ONE backend: build the
+/// ChannelWithObstacle FlowCoupled driver exactly as `build_moving_init` does
+/// (same setter suite the GUI calls: per-step adaptive sizing + band + budget
+/// + per-step smoothing), step it, and assert the RESIZE DISCIPLINE held:
+/// no divergence, real birth/kill events fired, and — the cured GPU gap —
+/// the solver's stepping state SURVIVED every rebuild (`step_count` keeps
+/// counting instead of resetting to 0, which is what published each resize
+/// as a backward-Euler restart + interpolated state = the GUI's phantom
+/// pressure dipoles).
+fn adaptation_discipline_case(label: &str, steps: usize) {
+    let domain = Vector2::new(3.0, 1.0);
+    let geo = ChannelWithObstacle {
+        length: 3.0,
+        height: 1.0,
+        obstacle_center: Point2::new(1.0, 0.51),
+        obstacle_radius: 0.1,
+    };
+    let cvt = cfd2::meshgen::meshless::generate_cvt_mesh_with_seeds(
+        &geo,
+        0.06,
+        0.06,
+        1.0,
+        domain,
+        &LloydConfig::default(),
+    );
+    let n0 = cvt.mesh.num_cells();
+    let params = ale_params();
+    let mut driver = pollster::block_on(MovingMeshDriver::build(
+        cvt,
+        &params,
+        MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+        &vec![(params.inlet_velocity as f64, 0.0); n0],
+        &vec![0.0; n0],
+        None,
+        None,
+    ))
+    .expect("MovingMeshDriver::build (adaptation discipline) must succeed");
+    driver.driver_mut().apply_params(&params);
+    // The GUI's moving-mesh setter suite (`build_moving_init`) at an
+    // every-step adaptation config, band scaled to this coarse test mesh.
+    driver.set_smoothing(1, 1, 0.5);
+    driver.set_adaptive_sizing(1);
+    driver.set_adaptive_sizing_band(Some((0.02, 0.12)));
+    driver.set_adaptive_budget_factor(3.0);
+    driver.set_adaptive_indicator_thresholds(1.0, 1.0, 1.0);
+    // The GUI always applies the implicit-motion iterations (slider 1..=5);
+    // >1 exercises the full-history motion-checkpoint rewind — the second
+    // snapshot/restore seam that must hold on BOTH backends.
+    driver.set_implicit_mesh_motion(2, 0.02);
+
+    let (mut born, mut killed) = (0usize, 0usize);
+    for s in 0..steps {
+        let (outcome, stats) = driver
+            .step(false)
+            .unwrap_or_else(|e| panic!("[{label}] adaptation step {s} failed: {e}"));
+        assert!(
+            outcome.diverged.is_none(),
+            "[{label}] diverged at step {s}: {:?}",
+            outcome.diverged
+        );
+        born += stats.cells_born;
+        killed += stats.cells_killed;
+    }
+    assert!(
+        born + killed > 0,
+        "[{label}] the adaptation config must exercise the birth/kill resize path \
+         (born {born}, killed {killed})"
+    );
+    let snap = driver.driver().snapshot();
+    assert!(snap.has_history, "[{label}] snapshot must carry full history");
+    assert!(
+        snap.step_count >= steps as u64,
+        "[{label}] BDF continuity across resizes: step_count must survive the \
+         solver rebuilds (got {} after {steps} steps — a reset-to-0 republishes \
+         every resize as an integrator restart, the phantom-dipole mechanism)",
+        snap.step_count
+    );
+    let state = pollster::block_on(driver.driver().solver().read_state_f32());
+    assert!(
+        state.iter().all(|v| v.is_finite()),
+        "[{label}] non-finite state after {steps} adaptation steps"
+    );
+    println!(
+        "[moving-gui][{label}] {steps} adaptation steps: born {born} killed {killed} \
+         step_count {} cells {} (from {n0})",
+        snap.step_count,
+        driver.mesh().num_cells()
+    );
+}
+
+/// GUI adaptation config on the CPU backend.
+#[test]
+fn moving_mesh_gui_adaptation_discipline_cpu() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    std::env::set_var("CFD2_BACKEND", "cpu");
+    std::env::remove_var("CFD2_CPU_ENGINE");
+    adaptation_discipline_case("adapt-cpu", 25);
+    std::env::remove_var("CFD2_BACKEND");
+}
+
+/// GUI adaptation config on the GPU backend — the configuration whose missing
+/// resize discipline (flat-history reinit, no re-solve) WAS the GUI's phantom
+/// pressure dipoles. Skips cleanly without a GPU adapter.
+#[test]
+fn moving_mesh_gui_adaptation_discipline_gpu() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    if !gpu_adapter_available() {
+        eprintln!("[moving-gui][adapt-gpu] no GPU adapter present; skipping");
+        return;
+    }
+    std::env::remove_var("CFD2_BACKEND");
+    std::env::remove_var("CFD2_CPU_ENGINE");
+    adaptation_discipline_case("adapt-gpu", 25);
+}
+
 /// The GPU-backend worker path with ON-DEVICE mesh reconstruction — the exact
 /// configuration the GUI now enables by default on the GPU backend for a
 /// moving-mesh run ("On-device mesh regen (GPU)" + oscillating obstacle):

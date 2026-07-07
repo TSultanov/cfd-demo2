@@ -1119,7 +1119,7 @@ impl MovingMeshDriver {
         self.transfer_projection = on;
     }
 
-    /// TRIAL-STEP adaptation (default off; CPU backend, inert elsewhere):
+    /// TRIAL-STEP adaptation (default off; both backends):
     /// decide each adapt event's plan from the UPCOMING solution — trial-
     /// solve the step, plan from its end state, rewind, resize, re-solve on
     /// the final mesh. One extra solve per acting adapt event.
@@ -1444,7 +1444,7 @@ impl MovingMeshDriver {
         self.last_kill_sites.clear();
         self.recycle_via_resize = false;
         if self.adapt_fires_this_step() {
-            if self.trial_step_adaptation && self.driver.solver().is_cpu() {
+            if self.trial_step_adaptation {
                 let checkpoint = self.motion_checkpoint();
                 let trial = self.step_after_adapt(readback)?;
                 if trial.0.diverged.is_some() {
@@ -1510,15 +1510,45 @@ impl MovingMeshDriver {
                     self.adapt_targets = Some(targets);
                 }
             }
+        } else if self.seed_recycling && !matches!(self.motion, MeshMotionSpec::Prescribed(_)) {
+            // NON-adapt steps recycle through the SAME between-steps resize
+            // event (count-neutral kill+birth pairs): the mid-step relabel
+            // teleport is a topology event INSIDE the step — the published
+            // BDF2 references pre-teleport history at the drained hole and
+            // the respawn ring, and its 1-3-frame settling is the
+            // outlet-corner pressure flare (causally proven by the freeze
+            // discriminator: disable adaptation and the teleports return
+            // with 2.0x flares within two steps). Configurations that never
+            // adapt (the GUI default) get the full cured discipline —
+            // transfer, mass-row projection, birth pre-relax, two-level
+            // re-solve — at the cost of one solver rebuild per recycle
+            // event. Prescribed motion keeps the legacy teleport (resize
+            // re-anchors the t=0 seed labels its law samples).
+            let targets = self.adapt_targets.take();
+            let mut kills = Vec::new();
+            let mut births = Vec::new();
+            let planned = self.plan_recycle_resize(
+                targets.as_deref().unwrap_or(&[]),
+                &mut kills,
+                &mut births,
+            );
+            self.adapt_targets = targets;
+            if planned > 0 {
+                self.resize_cells_impl(&kills, &births, &[])?;
+                cells_born = births.len();
+                cells_killed = kills.len();
+                transfer_defect = self.last_transfer_projection;
+            }
+            self.recycle_via_resize = true;
         }
 
-        // IMPLICIT (fixed-point) mesh motion — FlowCoupled + CPU backend +
-        // opt-in (`set_implicit_mesh_motion`): iterate {advect with the
-        // previous attempt's end-of-step velocity → regen → ALE solve} from
-        // a byte-exactly rewound t^n state, until the planned seed set
+        // IMPLICIT (fixed-point) mesh motion — FlowCoupled + opt-in
+        // (`set_implicit_mesh_motion`), both backends: iterate {advect with
+        // the previous attempt's end-of-step velocity → regen → ALE solve}
+        // from a byte-exactly rewound t^n state, until the planned seed set
         // converges or the attempt cap. Every attempt is a fully
         // GCL-consistent ALE step; discarded attempts leave no trace (the
-        // full-history CPU snapshot rewinds state, time levels, warm start,
+        // full-history snapshot rewinds state, time levels, warm start,
         // volume history AND current volumes). The adaptation event above
         // deliberately stays OUTSIDE the loop: a resize rebuilds the
         // solver, which would invalidate the checkpoint.
@@ -1543,7 +1573,6 @@ impl MovingMeshDriver {
     ) -> Result<(StepOutcome, MovingMeshStats), String> {
         let outer = if self.motion_outer_iters > 1
             && matches!(self.motion, MeshMotionSpec::FlowCoupled { .. })
-            && self.driver.solver().is_cpu()
         {
             self.motion_outer_iters
         } else {
@@ -3419,9 +3448,9 @@ impl MovingMeshDriver {
             }
         }
 
-        // BDF CONTINUITY across the rebuild (CPU backend): the fresh solver
-        // starts at step_count = 0 with flat history, so the ENTIRE field
-        // takes a backward-Euler step on every resize event — under
+        // BDF CONTINUITY across the rebuild (BOTH backends): the fresh
+        // solver starts at step_count = 0 with flat history, so the ENTIRE
+        // field takes a backward-Euler step on every resize event — under
         // every-step adaptation the integrator effectively never runs BDF2,
         // and the BDF1-vs-BDF2 solution difference concentrates at the
         // steepest transients (measured as recurring above-floor pressure
@@ -3433,9 +3462,12 @@ impl MovingMeshDriver {
         // step, exactly like the reinit seam): a fresh cell has no
         // meaningful V^{n-1}, and flat volumes keep the GCL cancellation
         // intact — the STATE history is what BDF2's temporal order needs.
-        // GPU keeps the flat-history reinit (its snapshot has no history).
-        #[cfg(feature = "cpu")]
-        if driver.solver().is_cpu() {
+        // (The GPU backend used to keep a flat-history reinit here because
+        // its snapshot carried no history; that gap WAS the GUI's phantom
+        // dipoles — every per-step resize published the interpolated state
+        // and restarted the integrator, and the outlet checkerboard grew
+        // without bound instead of settling.)
+        {
             let old_snap = self.driver.snapshot();
             if old_snap.has_history
                 && old_snap.state_old.len() == n * stride
@@ -3458,16 +3490,14 @@ impl MovingMeshDriver {
                 };
                 let state_old = transfer_level(&old_snap.state_old);
                 let state_old_old = transfer_level(&old_snap.state_old_old);
+                // Warm-start x packing (equation-target order) — model-
+                // derived, identical on both backends.
                 let offsets: Vec<usize> = driver
-                    .solver_mut()
-                    .cpu_solver_mut()
-                    .map(|c| {
-                        c.unknown_state_offsets()
-                            .iter()
-                            .map(|&o| o as usize)
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                    .solver()
+                    .unknown_state_offsets()
+                    .iter()
+                    .map(|&o| o as usize)
+                    .collect();
                 let s_unk = offsets.len();
                 let mut x = vec![0.0f32; n_new * s_unk];
                 for c in 0..n_new {

@@ -1447,6 +1447,167 @@ pub(crate) fn spec_reinit_cells(
     Ok(())
 }
 
+/// Full-history snapshot of the GPU stepping state — the parity twin of
+/// `CpuSolver::snapshot`. Reads back all three ping-pong state levels (in
+/// LOGICAL current/old/old_old order — index-agnostic), the warm-start `x`,
+/// the current volumes + ALE volume history, the mesh fluxes, and the scalar
+/// counters from [`TimeIntegrationModule`]. Two CPU fields have no GPU
+/// plumbing: `schur_amg_active` (the GPU Schur Chebyshev→AMG cadence counter
+/// lives inside the preconditioner and resets with any rebuild) is reported
+/// `false`, and `last_rel_delta` (a CPU Schur diagnostic) is `∞`. Neither
+/// affects the stepping state a restore must reproduce.
+pub(crate) fn spec_snapshot_full(plan: &GpuProgramPlan) -> crate::solver::SolverStateSnapshot {
+    let r = res(plan);
+    let n = r.runtime.common.num_cells as usize;
+    let stride = plan.model.state_layout.stride() as usize;
+    let s_unk = r.recipe.unknowns_per_cell as usize;
+    let num_faces = r.runtime.common.num_faces as usize;
+    let read_f32 = |buf: &wgpu::Buffer, len: usize, label: &'static str| -> Vec<f32> {
+        let raw = pollster::block_on(r.runtime.common.read_buffer(buf, (len * 4) as u64, label));
+        bytemuck::cast_slice(&raw).to_vec()
+    };
+    let mesh = &r.runtime.common.mesh;
+    crate::solver::SolverStateSnapshot {
+        num_cells: n,
+        num_faces,
+        state_stride: stride as u32,
+        unknowns_per_cell: s_unk,
+        state: read_f32(r.fields.state.state(), n * stride, "snapshot:state"),
+        state_old: read_f32(r.fields.state.state_old(), n * stride, "snapshot:state_old"),
+        state_old_old: read_f32(
+            r.fields.state.state_old_old(),
+            n * stride,
+            "snapshot:state_old_old",
+        ),
+        x: if s_unk > 0 {
+            read_f32(
+                r.runtime
+                    .linear_port_space
+                    .buffer(r.runtime.linear_ports.x),
+                n * s_unk,
+                "snapshot:x",
+            )
+        } else {
+            Vec::new()
+        },
+        cell_vols: read_f32(&mesh.b_cell_vols, n, "snapshot:cell_vols"),
+        cell_vols_old: read_f32(&mesh.b_cell_vols_old, n, "snapshot:cell_vols_old"),
+        cell_vols_old_old: read_f32(&mesh.b_cell_vols_old_old, n, "snapshot:cell_vols_old_old"),
+        mesh_fluxes: read_f32(&mesh.b_mesh_fluxes, num_faces, "snapshot:mesh_fluxes"),
+        time: r.time_integration.time as f32,
+        dt: r.time_integration.dt,
+        dt_old: r.time_integration.dt_old,
+        dtau: r.fields.constants.values().dtau,
+        step_count: r.time_integration.step_count,
+        last_rel_delta: f64::INFINITY,
+        schur_amg_active: false,
+        has_history: true,
+    }
+}
+
+/// Restore a full-history snapshot into this (possibly freshly rebuilt) GPU
+/// solver: the parity twin of `CpuSolver::restore`. State levels are written
+/// through the LOGICAL ping-pong mapping (the shared step index is left
+/// untouched — the pre-built per-phase bind groups stay valid), the
+/// warm-start `x` / volume history / mesh fluxes are uploaded verbatim, and
+/// the scalar counters go through [`TimeIntegrationModule::restore`] (which
+/// also syncs the GPU constants uniform, so the next `host_prepare_step`
+/// sees the restored `dt/dt_old/step_count` and picks the right BDF2/Euler
+/// startup arm). The face-indexed `mesh_fluxes` is only restored when the
+/// face count matches (a remesh recomputes it anyway).
+pub(crate) fn spec_restore_full(
+    plan: &mut GpuProgramPlan,
+    snap: &crate::solver::SolverStateSnapshot,
+) -> Result<(), String> {
+    let stride = plan.model.state_layout.stride();
+    {
+        let r = res(plan);
+        snap.check_compatible(r.runtime.common.num_cells as usize, stride)?;
+    }
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    let n = r.runtime.common.num_cells as usize;
+    let s_unk = r.recipe.unknowns_per_cell as usize;
+    let expect = |name: &str, len: usize, want: usize| -> Result<(), String> {
+        if len != want {
+            return Err(format!(
+                "restore: snapshot {name} length {len} != expected {want}"
+            ));
+        }
+        Ok(())
+    };
+    expect("state_old", snap.state_old.len(), n * stride as usize)?;
+    expect(
+        "state_old_old",
+        snap.state_old_old.len(),
+        n * stride as usize,
+    )?;
+    queue.write_buffer(r.fields.state.state(), 0, bytemuck::cast_slice(&snap.state));
+    queue.write_buffer(
+        r.fields.state.state_old(),
+        0,
+        bytemuck::cast_slice(&snap.state_old),
+    );
+    queue.write_buffer(
+        r.fields.state.state_old_old(),
+        0,
+        bytemuck::cast_slice(&snap.state_old_old),
+    );
+    if s_unk > 0 && !snap.x.is_empty() {
+        expect("x", snap.x.len(), n * s_unk)?;
+        queue.write_buffer(
+            r.runtime
+                .linear_port_space
+                .buffer(r.runtime.linear_ports.x),
+            0,
+            bytemuck::cast_slice(&snap.x),
+        );
+    }
+    let mesh = &r.runtime.common.mesh;
+    if !snap.cell_vols.is_empty() {
+        expect("cell_vols", snap.cell_vols.len(), n)?;
+        queue.write_buffer(&mesh.b_cell_vols, 0, bytemuck::cast_slice(&snap.cell_vols));
+    }
+    if !snap.cell_vols_old.is_empty() {
+        expect("cell_vols_old", snap.cell_vols_old.len(), n)?;
+        queue.write_buffer(
+            &mesh.b_cell_vols_old,
+            0,
+            bytemuck::cast_slice(&snap.cell_vols_old),
+        );
+    }
+    if !snap.cell_vols_old_old.is_empty() {
+        expect("cell_vols_old_old", snap.cell_vols_old_old.len(), n)?;
+        queue.write_buffer(
+            &mesh.b_cell_vols_old_old,
+            0,
+            bytemuck::cast_slice(&snap.cell_vols_old_old),
+        );
+    }
+    if snap.num_faces == r.runtime.common.num_faces as usize && !snap.mesh_fluxes.is_empty() {
+        queue.write_buffer(
+            &mesh.b_mesh_fluxes,
+            0,
+            bytemuck::cast_slice(&snap.mesh_fluxes),
+        );
+    }
+    r.time_integration.restore(
+        snap.time as f64,
+        snap.dt,
+        snap.dt_old,
+        snap.step_count,
+        &mut r.fields.constants,
+        &queue,
+    );
+    {
+        let values = r.fields.constants.values_mut();
+        values.dtau = snap.dtau;
+    }
+    r.fields.constants.write(&queue);
+    plan.current_dtau = Some(snap.dtau);
+    Ok(())
+}
+
 pub(crate) fn spec_set_bc_value(
     plan: &GpuProgramPlan,
     boundary: crate::solver::gpu::enums::GpuBoundaryType,

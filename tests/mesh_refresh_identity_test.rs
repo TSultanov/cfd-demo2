@@ -517,13 +517,18 @@ fn geometry_refresh_perturbed_smoke_gpu() {
     println!("[mesh-refresh] perturbed-geometry refresh ran 10 finite steps (GPU)");
 }
 
-/// GPU snapshot/restore roundtrip preserves the CURRENT state exactly. The GPU
-/// capture is current-state-only (`has_history == false`); its restore uses the
-/// exact `write_state`/`read_state` path, so a fresh solver restored from a
-/// snapshot has bit-identical CURRENT state. (The byte-exact next-step proof
-/// lives on the CPU above, which captures full history.)
+/// GPU snapshot/restore roundtrip: the GPU capture now carries FULL history
+/// (all three state time levels, warm-start x, volume history, mesh fluxes,
+/// scalar counters — the seam the moving-mesh resize BDF-continuity +
+/// re-solve discipline rides on the GPU backend). Restoring into a FRESH
+/// solver and re-capturing must reproduce every buffer and counter
+/// bit-exactly, and the restored solver's next step must be finite. (The
+/// byte-exact NEXT-STEP proof lives on the CPU above: a rebuilt GPU solver
+/// legitimately takes a different — equally converged — first linear-solve
+/// iterate path, because the Schur Chebyshev→AMG cadence counter and the
+/// dp-init flag reset with the rebuild.)
 #[test]
-fn snapshot_restore_current_state_roundtrip_gpu() {
+fn snapshot_restore_full_history_roundtrip_gpu() {
     let _guard = lock_env();
     std::env::remove_var("CFD2_BACKEND");
 
@@ -540,16 +545,53 @@ fn snapshot_restore_current_state_roundtrip_gpu() {
     assert!(!a.solver().is_cpu(), "expected the GPU backend");
     run_steps(&mut a, 5, "gpu-snap-a");
     let snap = a.snapshot();
-    assert!(!snap.has_history, "GPU snapshot is current-state-only");
+    assert!(snap.has_history, "GPU snapshot must carry full history");
+    assert_eq!(snap.step_count, 5, "GPU snapshot must carry the real step count");
+    assert!(snap.state_old.len() == snap.state.len());
+    assert!(snap.state_old_old.len() == snap.state.len());
+    assert!(!snap.x.is_empty(), "GPU snapshot must carry the warm start");
+    assert!(!snap.cell_vols_old.is_empty(), "GPU snapshot must carry volume history");
     let bits_a = state_bits(&a);
 
     let mut b = build_driver(&mesh, Some(ctx.device.clone()), Some(ctx.queue.clone()));
     b.restore(&snap).expect("restore snapshot");
     let bits_b = state_bits(&b);
-
     assert_bits_equal(&bits_a, &bits_b, "gpu-snapshot-state");
+
+    // Re-capture and compare EVERY field bit-exactly.
+    let snap2 = b.snapshot();
+    let eq_bits = |x: &[f32], y: &[f32], what: &str| {
+        assert_eq!(x.len(), y.len(), "{what}: length mismatch");
+        for (i, (a, b)) in x.iter().zip(y.iter()).enumerate() {
+            assert!(
+                a.to_bits() == b.to_bits(),
+                "{what}: slot {i} differs ({a:e} vs {b:e})"
+            );
+        }
+    };
+    eq_bits(&snap.state, &snap2.state, "state");
+    eq_bits(&snap.state_old, &snap2.state_old, "state_old");
+    eq_bits(&snap.state_old_old, &snap2.state_old_old, "state_old_old");
+    eq_bits(&snap.x, &snap2.x, "x");
+    eq_bits(&snap.cell_vols, &snap2.cell_vols, "cell_vols");
+    eq_bits(&snap.cell_vols_old, &snap2.cell_vols_old, "cell_vols_old");
+    eq_bits(
+        &snap.cell_vols_old_old,
+        &snap2.cell_vols_old_old,
+        "cell_vols_old_old",
+    );
+    eq_bits(&snap.mesh_fluxes, &snap2.mesh_fluxes, "mesh_fluxes");
+    assert_eq!(snap.time.to_bits(), snap2.time.to_bits(), "time");
+    assert_eq!(snap.dt.to_bits(), snap2.dt.to_bits(), "dt");
+    assert_eq!(snap.dt_old.to_bits(), snap2.dt_old.to_bits(), "dt_old");
+    assert_eq!(snap.step_count, snap2.step_count, "step_count");
+
+    // The restored solver keeps stepping (BDF2, not an Euler re-start —
+    // step_count survived) and stays finite.
+    run_steps(&mut b, 2, "gpu-snap-b");
+    assert_eq!(b.snapshot().step_count, 7, "restored step_count advances");
     println!(
-        "[snapshot] GPU snapshot/restore preserves the current state exactly over {} slots",
+        "[snapshot] GPU full-history snapshot/restore roundtrips {} state slots bit-exactly",
         bits_a.len()
     );
 }

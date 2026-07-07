@@ -438,12 +438,16 @@ pub fn init_mesh(
     // Zero-filled mesh face fluxes: a static mesh has zero swept rate, so an
     // ALE model that never uploads reproduces static physics bitwise.
     let mesh_fluxes = vec![0.0f32; mesh.face_owner.len()];
+    // COPY_SRC: the full-history snapshot reads the swept rates back so a
+    // restore across a solver rebuild can reproduce the stepping state.
     let b_mesh_fluxes = create_buffer_with_capacity(
         device,
         "Mesh Fluxes Buffer (ALE)",
         bytemuck::cast_slice(&mesh_fluxes),
         (faces_cap * 4) as u64,
-        wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+        wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
     );
     // Volume history, seeded equal to the current volumes (COPY_SRC so the
     // old -> old_old rotation can run on-device; COPY_DST for uploads/seeding).

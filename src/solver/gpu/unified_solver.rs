@@ -875,45 +875,26 @@ impl GpuUnifiedSolver {
     }
 
     /// Capture the solver's stepping state — see
-    /// [`crate::solver::SolverStateSnapshot`]. The **CPU** backend captures the
-    /// full time/warm-start/volume history (`has_history == true`), so a fresh
-    /// solver restored from it reproduces the next step byte-identically. The
-    /// **GPU** backend captures the current state + scalars only
-    /// (`has_history == false`), so a GPU restore re-seeds the history from the
-    /// current state.
+    /// [`crate::solver::SolverStateSnapshot`]. BOTH backends capture the full
+    /// time/warm-start/volume history (`has_history == true`), so a fresh
+    /// solver restored from it resumes the run mid-stream — the seam the
+    /// moving-mesh resize discipline (BDF continuity + re-solve) rides on
+    /// either backend. Two CPU-only diagnostics have no GPU analog
+    /// (`schur_amg_active`, `last_rel_delta`) — see
+    /// [`GpuProgramPlan::snapshot_full`].
     pub fn snapshot(&self) -> crate::solver::SolverStateSnapshot {
         #[cfg(feature = "cpu")]
         if let Some(c) = self.cpu_ref() {
             return c.snapshot();
         }
-        let state = pollster::block_on(self.read_state_f32());
-        crate::solver::SolverStateSnapshot {
-            num_cells: self.num_cells() as usize,
-            num_faces: 0,
-            state_stride: self.model.state_layout.stride(),
-            unknowns_per_cell: self.model.system.unknowns_per_cell() as usize,
-            state,
-            state_old: Vec::new(),
-            state_old_old: Vec::new(),
-            x: Vec::new(),
-            cell_vols: Vec::new(),
-            cell_vols_old: Vec::new(),
-            cell_vols_old_old: Vec::new(),
-            mesh_fluxes: Vec::new(),
-            time: self.time(),
-            dt: self.dt(),
-            dt_old: self.dt(),
-            dtau: 0.0,
-            step_count: 0,
-            last_rel_delta: f64::INFINITY,
-            schur_amg_active: false,
-            has_history: false,
-        }
+        self.plan().snapshot_full()
     }
 
-    /// Restore a snapshot. CPU restores the full history byte-exactly; GPU
-    /// writes the current state (initial-condition semantics
-    /// propagate it to the time-history buffers) — exact for single-step
+    /// Restore a snapshot. A full-history snapshot (`has_history == true`)
+    /// restores every time level, the warm start, the volume history, the
+    /// mesh fluxes and the scalar counters on BOTH backends. A
+    /// current-state-only capture (legacy `has_history == false`) writes the
+    /// state with initial-condition semantics — exact for single-step
     /// schemes, a documented startup fallback for BDF2.
     pub fn restore(&mut self, snap: &crate::solver::SolverStateSnapshot) -> Result<(), String> {
         #[cfg(feature = "cpu")]
@@ -921,11 +902,23 @@ impl GpuUnifiedSolver {
             return c.restore(snap);
         }
         snap.check_compatible(self.num_cells() as usize, self.model.state_layout.stride())?;
+        if snap.has_history {
+            return self.plan_mut().restore_full(snap);
+        }
         self.write_state_f32(&snap.state)?;
         if snap.dt > 0.0 {
             self.set_dt(snap.dt);
         }
         Ok(())
+    }
+
+    /// State-layout offsets of the coupled unknown vector's rows
+    /// (equation-target order — the packing of the warm-start `x`).
+    /// Model-derived, hence backend-independent; empty for models whose
+    /// unknowns don't map to state slots.
+    pub fn unknown_state_offsets(&self) -> Vec<u32> {
+        crate::solver::model::kernel::model_unknown_state_offsets(&self.model)
+            .unwrap_or_default()
     }
 
     /// ALE step entry: after the caller moved the mesh (topology-identical;

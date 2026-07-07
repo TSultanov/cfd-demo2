@@ -620,7 +620,12 @@ mod probe {
     /// exceeding) the whole smooth field's range — exactly what saturates
     /// the GUI color scale. Prints the worst frames for eyeball follow-up.
     fn run_dipole_watch(steps: usize) {
-        let out_dir = std::path::Path::new("target/probe_dipole");
+        // PROBE_DIPOLE_OUT: frame/zoom output dir (default target/probe_dipole)
+        // — set per-run when two backends run concurrently, or the PNGs
+        // interleave and the visual record is useless.
+        let out_dir_owned = std::env::var("PROBE_DIPOLE_OUT")
+            .unwrap_or_else(|_| "target/probe_dipole".into());
+        let out_dir = std::path::Path::new(&out_dir_owned);
         std::fs::create_dir_all(out_dir).expect("mkdir probe_dipole");
         let domain = Vector2::new(LX, LY);
         let (ocx, ocy, orad) = (1.0f64, 0.51f64, 0.1f64);
@@ -632,7 +637,21 @@ mod probe {
         };
         let cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.2, domain, &LloydConfig::default());
         let n0 = cvt.mesh.num_cells();
+        // PROBE_DIPOLE_FAMILY=allmach runs the COMPRESSIBLE thermal all-Mach
+        // ALE family (same recipe knobs as the visual probe's GUI regime) —
+        // the birth/death dipole discipline must hold there too.
+        let thermal = std::env::var("PROBE_DIPOLE_FAMILY")
+            .map(|v| v == "allmach")
+            .unwrap_or(false);
         let mut params = gui_params();
+        if thermal {
+            params.time_scheme = TimeScheme::Euler;
+            params.requested_dt = 0.005;
+            params.outer_iters = 6;
+            params.compressibility_psi = 1.0e-4;
+            params.viscosity = 1e-2;
+            params.inlet_velocity = 0.4;
+        }
         if let Some(outers) = std::env::var("PROBE_DIPOLE_OUTERS")
             .ok()
             .and_then(|s| s.parse().ok())
@@ -642,18 +661,36 @@ mod probe {
             params.outer_iters = outers;
             params.outer_auto_converge = false;
         }
-        let mut moving = pollster::block_on(MovingMeshDriver::build(
-            cvt,
-            &params,
-            MeshMotionSpec::FlowCoupled {
-                regularization: 0.5,
-            },
-            &vec![(INLET as f64, 0.0); n0],
-            &vec![0.0; n0],
-            None,
-            None,
-        ))
-        .expect("driver build");
+        let inlet = params.inlet_velocity;
+        let mut moving = if thermal {
+            use cfd2::solver::model::allmach_thermal_ale_model;
+            pollster::block_on(MovingMeshDriver::build_with_model(
+                cvt,
+                allmach_thermal_ale_model().expect("thermal ale model"),
+                &params,
+                MeshMotionSpec::FlowCoupled {
+                    regularization: 0.5,
+                },
+                &vec![(inlet as f64, 0.0); n0],
+                &vec![0.0; n0],
+                None,
+                None,
+            ))
+            .expect("driver build")
+        } else {
+            pollster::block_on(MovingMeshDriver::build(
+                cvt,
+                &params,
+                MeshMotionSpec::FlowCoupled {
+                    regularization: 0.5,
+                },
+                &vec![(inlet as f64, 0.0); n0],
+                &vec![0.0; n0],
+                None,
+                None,
+            ))
+            .expect("driver build")
+        };
         moving.driver_mut().apply_params(&params);
         // The user's GUI settings, verbatim.
         moving.set_adaptive_sizing(1);

@@ -33,6 +33,12 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 const STEPS: usize = 60;
 
+/// Is a GPU adapter present? (The GPU stress gates skip cleanly without one.)
+fn gpu_adapter_available() -> bool {
+    let instance = wgpu::Instance::default();
+    pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default())).is_ok()
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Family {
     Incompressible,
@@ -115,7 +121,9 @@ struct StressReport {
 
 /// One every-step-adaptation + every-step-smoothing run on the obstacle
 /// channel; panics on divergence / non-finite state / budget violation.
-fn stress_run(family: Family, motion: MeshMotionSpec, label: &str) -> StressReport {
+/// `expect_gpu` asserts which backend actually built (a GPU gate that
+/// silently fell back to CPU would pass vacuously).
+fn stress_run(family: Family, motion: MeshMotionSpec, label: &str, expect_gpu: bool) -> StressReport {
     let (h, band) = match family {
         Family::Incompressible => (0.05, (0.02, 0.06)),
         Family::AllMach => (0.08, (0.04, 0.09)),
@@ -147,6 +155,11 @@ fn stress_run(family: Family, motion: MeshMotionSpec, label: &str) -> StressRepo
         None,
     ))
     .unwrap_or_else(|e| panic!("[{label}] driver build: {e}"));
+    assert_eq!(
+        !moving.driver().solver().is_cpu(),
+        expect_gpu,
+        "[{label}] wrong backend (expect_gpu={expect_gpu})"
+    );
     moving.driver_mut().apply_params(&params);
     // THE STRESS: adaptation and smoothing EVERY solution step (cadence 1 —
     // the planner runs each step; whether it finds work depends on the
@@ -239,29 +252,56 @@ fn stress_run(family: Family, motion: MeshMotionSpec, label: &str) -> StressRepo
     report
 }
 
+fn gate_asserts(label: &str, report: &StressReport, expect_close: f64) {
+    // The projection actually RAN and measured real transfer defects
+    // (2.7e-2..3.5e-2 across the four configs). Without this, a silently
+    // disabled projection reports (0, 0) on every resize and the
+    // close-ratio bound below passes vacuously.
+    assert!(
+        report.defect_pre_max > 1e-3,
+        "[{label}] max transfer defect {:.3e} — the mass-row projection never \
+         measured a real defect (disabled or not running?)",
+        report.defect_pre_max
+    );
+    assert!(
+        report.worst_close_ratio <= expect_close,
+        "[{label}] mass-row projection close ratio {:.3e} exceeds {expect_close:.1e} \
+         — the correction no longer closes the solver's own continuity row",
+        report.worst_close_ratio
+    );
+}
+
 fn run_gate(family: Family, motion: MeshMotionSpec, label: &str, expect_close: f64) {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("CFD2_BACKEND", "cpu");
     let result = std::panic::catch_unwind(|| {
-        let report = stress_run(family, motion, label);
-        // The projection actually RAN and measured real transfer defects
-        // (2.7e-2..3.5e-2 across the four configs). Without this, a silently
-        // disabled projection reports (0, 0) on every resize and the
-        // close-ratio bound below passes vacuously.
-        assert!(
-            report.defect_pre_max > 1e-3,
-            "[{label}] max transfer defect {:.3e} — the mass-row projection never \
-             measured a real defect (disabled or not running?)",
-            report.defect_pre_max
-        );
-        assert!(
-            report.worst_close_ratio <= expect_close,
-            "[{label}] mass-row projection close ratio {:.3e} exceeds {expect_close:.1e} \
-             — the correction no longer closes the solver's own continuity row",
-            report.worst_close_ratio
-        );
+        let report = stress_run(family, motion, label, false);
+        gate_asserts(label, &report, expect_close);
     });
     std::env::remove_var("CFD2_BACKEND");
+    if let Err(e) = result {
+        std::panic::resume_unwind(e);
+    }
+}
+
+/// The SAME every-step adaptation + smoothing stress on the GPU backend —
+/// the configuration whose missing resize discipline (flat-history reinit,
+/// no BDF continuity, no re-solve) published every per-step rebuild as an
+/// integrator restart and was the GUI's phantom pressure dipoles. The
+/// mass-row projection runs through the params-faithful CPU companion; the
+/// same close-ratio gates apply. Skips cleanly without a GPU adapter.
+fn run_gate_gpu(family: Family, motion: MeshMotionSpec, label: &str, expect_close: f64) {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if !gpu_adapter_available() {
+        eprintln!("[{label}] no GPU adapter present; skipping GPU stress gate");
+        return;
+    }
+    std::env::remove_var("CFD2_BACKEND");
+    std::env::remove_var("CFD2_CPU_ENGINE");
+    let result = std::panic::catch_unwind(|| {
+        let report = stress_run(family, motion, label, true);
+        gate_asserts(label, &report, expect_close);
+    });
     if let Err(e) = result {
         std::panic::resume_unwind(e);
     }
@@ -307,6 +347,50 @@ fn movingmesh_stress_everystep_allmach_flowcoupled() {
             regularization: 0.5,
         },
         "stress allmach+flowcoupled",
+        1e-3,
+    );
+}
+
+#[test]
+fn movingmesh_stress_everystep_incompressible_frozen_gpu() {
+    run_gate_gpu(
+        Family::Incompressible,
+        MeshMotionSpec::Frozen,
+        "stress incompressible+frozen GPU",
+        1e-3,
+    );
+}
+
+#[test]
+fn movingmesh_stress_everystep_incompressible_flowcoupled_gpu() {
+    run_gate_gpu(
+        Family::Incompressible,
+        MeshMotionSpec::FlowCoupled {
+            regularization: 0.5,
+        },
+        "stress incompressible+flowcoupled GPU",
+        1e-3,
+    );
+}
+
+#[test]
+fn movingmesh_stress_everystep_allmach_frozen_gpu() {
+    run_gate_gpu(
+        Family::AllMach,
+        MeshMotionSpec::Frozen,
+        "stress allmach+frozen GPU",
+        1e-3,
+    );
+}
+
+#[test]
+fn movingmesh_stress_everystep_allmach_flowcoupled_gpu() {
+    run_gate_gpu(
+        Family::AllMach,
+        MeshMotionSpec::FlowCoupled {
+            regularization: 0.5,
+        },
+        "stress allmach+flowcoupled GPU",
         1e-3,
     );
 }

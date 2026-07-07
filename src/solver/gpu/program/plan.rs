@@ -540,6 +540,23 @@ impl GpuProgramPlan {
         reinit(self, cells, rows, new_vols)
     }
 
+    /// Full-history snapshot of the stepping state (the GPU parity twin of
+    /// the CPU backend's) — see
+    /// [`generic_coupled::spec_snapshot_full`](crate::solver::gpu::lowering::programs::generic_coupled::spec_snapshot_full).
+    pub fn snapshot_full(&self) -> crate::solver::SolverStateSnapshot {
+        crate::solver::gpu::lowering::programs::generic_coupled::spec_snapshot_full(self)
+    }
+
+    /// Restore a full-history snapshot (state × time levels, warm start,
+    /// volume history, mesh fluxes, scalar counters) — see
+    /// [`generic_coupled::spec_restore_full`](crate::solver::gpu::lowering::programs::generic_coupled::spec_restore_full).
+    pub fn restore_full(
+        &mut self,
+        snap: &crate::solver::SolverStateSnapshot,
+    ) -> Result<(), String> {
+        crate::solver::gpu::lowering::programs::generic_coupled::spec_restore_full(self, snap)
+    }
+
     /// Permute every cell-indexed store by the gather map `perm`
     /// (`new[i] = old[perm[i]]`) — the mesh-reordering seam. Face-indexed
     /// stacks are NOT touched; the caller must rebuild them (topology

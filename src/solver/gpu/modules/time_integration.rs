@@ -69,6 +69,32 @@ impl TimeIntegrationModule {
         constants.write(queue);
     }
 
+    /// Restore the scalar stepping counters from a snapshot (a mid-run
+    /// resume, possibly across a solver rebuild). Unlike [`Self::initialize`],
+    /// `dt_old` is restored verbatim — variable-dt BDF2 reads `dt/dt_old`
+    /// in-shader — and `step_count` is carried so the BDF2→Euler startup
+    /// fallback does not wrongly re-fire on the resumed step.
+    pub fn restore(
+        &mut self,
+        time: f64,
+        dt: f32,
+        dt_old: f32,
+        step_count: u64,
+        constants: &mut ConstantsModule,
+        queue: &wgpu::Queue,
+    ) {
+        self.time = time;
+        self.dt = dt;
+        self.dt_old = dt_old;
+        self.step_count = step_count;
+
+        let values = constants.values_mut();
+        values.time = self.time as f32;
+        values.dt = self.dt;
+        values.dt_old = self.dt_old;
+        constants.write(queue);
+    }
+
     /// For restart or initialization scenarios
     pub fn initialize(
         &mut self,

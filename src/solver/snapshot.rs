@@ -36,17 +36,20 @@
 //!
 //! ## Backend completeness
 //!
-//! The **CPU** backend fills every field (`has_history == true`) and its restore
-//! reproduces the next step byte-identically.
-//!
-//! The **GPU** backend captures the *current state* + scalar counters only
-//! (`has_history == false`): the history/warm-start/volume buffers have no
-//! readback plumbing, so a GPU restore re-seeds the history from the current
-//! state (IC semantics) — exact for single-step schemes, a startup-fallback for
-//! BDF2. The GPU moving-mesh loop ([`crate::sim::MovingMeshDriver`]) instead
-//! preserves all cross-step state surgically in place across the topology
-//! refresh and never uses snapshot/restore, so GPU history readback is only
-//! needed for a restore that crosses a rebuild boundary and remains deferred.
+//! BOTH backends fill every field (`has_history == true`). The **CPU**
+//! restore reproduces the next step byte-identically. The **GPU** snapshot
+//! reads back all three ping-pong state levels, the warm-start `x`, the
+//! volume history and the mesh fluxes, and its restore re-uploads them plus
+//! the scalar counters — the seam the moving-mesh resize discipline (BDF
+//! continuity + two-level re-solve) rides on either backend. Two CPU-only
+//! diagnostics have no GPU analog: `schur_amg_active` (the GPU Schur
+//! Chebyshev→AMG cadence counter lives inside the preconditioner and resets
+//! with any rebuild) and `last_rel_delta`; a GPU-origin restore therefore
+//! resumes the run exactly in stepping state, while the first linear solve
+//! after a REBUILD may take a different (equally converged) iterate path.
+//! Restoring a `has_history == false` capture re-seeds the history from the
+//! current state (IC semantics) — exact for single-step schemes, a
+//! startup-fallback for BDF2.
 
 /// Captured stepping state of a solver — see the module docs for the inventory
 /// and the exclusion rationale.

@@ -8,7 +8,7 @@ use crate::solver::model::backend::typed_ast::{
 use crate::solver::model::ports::PortRegistry;
 use cfd2_codegen::solver::codegen::dsl::XY;
 use cfd2_ir::dimensions::{
-    Density, DivDim, DynamicViscosity, Force, InvTime, Length, MassFlux, Pressure, Velocity,
+    Density, DivDim, DynamicViscosity, Force, InvTime, Length, MassFlux, Pressure, Time, Velocity,
 };
 
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
@@ -68,10 +68,27 @@ pub enum ViscousStressForm {
 /// hold (the term is analytically zero for div-free fields, residual O(h²)).
 const VISCOUS_STRESS_FORM: ViscousStressForm = ViscousStressForm::FullDev2;
 
+/// Per-cell Brinkman penalisation field for immersed obstacles in the momentum
+/// equation (`Sp`, unit Density/Time). Large NEGATIVE inside the solid drives
+/// `U -> 0` (a momentum sink); zero in the fluid recovers the base operator.
+/// Host code samples the obstacle SDF at cell centres. NOTE: for a clean
+/// (non-porous) body the Rhie–Chow face flux must ALSO see `d_p = 0` on solid
+/// cells, else pressure-driven flux leaks through the obstacle.
+pub const IBM_MOMENTUM_PENALTY_FIELD: &str = "ibm_penalty_U";
+
 fn build_incompressible_momentum_system(
     _fields: &IncompressibleMomentumFields,
     with_mms_source: bool,
     ale: bool,
+) -> EquationSystem {
+    build_incompressible_momentum_system_ibm(_fields, with_mms_source, ale, false)
+}
+
+fn build_incompressible_momentum_system_ibm(
+    _fields: &IncompressibleMomentumFields,
+    with_mms_source: bool,
+    ale: bool,
+    ibm: bool,
 ) -> EquationSystem {
     // Type-level dimension expressions are not normalized, so semantically
     // equivalent dimensions (e.g. MassFlux*Velocity vs MomentumDensity*Volume/Time)
@@ -126,6 +143,17 @@ fn build_incompressible_momentum_system(
         );
         momentum_sum =
             momentum_sum + typed_fvc::source_vector(mms_src_typed, u_typed).cast_to::<Force>();
+    }
+    if ibm {
+        // Immersed-boundary Brinkman penalisation: an implicit per-component sink
+        // `source_coeff(Sp, U)` (Sp a Density/Time reaction rate) adds `-Sp*V` to
+        // each velocity diagonal, driving `U -> 0` where the mask is large. Sp=0
+        // in the fluid is the IEEE-identity recovery of the base momentum operator.
+        let penalty_typed =
+            TypedFieldRef::<DivDim<Density, Time>, Scalar>::new(IBM_MOMENTUM_PENALTY_FIELD);
+        let penalty_coeff = TypedCoeff::from_field(penalty_typed);
+        momentum_sum =
+            momentum_sum + typed_fvm::source_coeff(penalty_coeff, u_typed).cast_to::<Force>();
     }
     let momentum_eqn = momentum_sum.eqn(u_typed);
 
@@ -192,9 +220,38 @@ pub fn incompressible_momentum_ale_mms_model() -> Result<ModelSpec, String> {
     incompressible_momentum_model_impl(true, true)
 }
 
+/// STRUCTURED (`TopologyMode::Structured2D`) incompressible momentum: identical
+/// Rhie–Chow pressure-velocity physics, lowered to the dense-array Cartesian
+/// kernels (the operator expansion, flux module, gradients and Rhie–Chow all
+/// emit index arithmetic — no connectivity indirection). Obstacles are immersed
+/// via Brinkman penalisation, never cut out of the grid.
+pub fn incompressible_momentum_structured_model() -> Result<ModelSpec, String> {
+    incompressible_momentum_model_impl_topo(
+        false,
+        false,
+        cfd2_ir::equation::TopologyMode::Structured2D,
+    )
+}
+
 fn incompressible_momentum_model_impl(with_mms_source: bool, ale: bool) -> Result<ModelSpec, String> {
+    incompressible_momentum_model_impl_topo(
+        with_mms_source,
+        ale,
+        cfd2_ir::equation::TopologyMode::Unstructured,
+    )
+}
+
+fn incompressible_momentum_model_impl_topo(
+    with_mms_source: bool,
+    ale: bool,
+    topology: cfd2_ir::equation::TopologyMode,
+) -> Result<ModelSpec, String> {
     let fields = IncompressibleMomentumFields::new();
-    let system = build_incompressible_momentum_system(&fields, with_mms_source, ale);
+    // The structured (Cartesian) variant is the immersed-boundary-capable one:
+    // obstacles live in a per-cell Brinkman mask, never cut from the dense grid.
+    let ibm = topology == cfd2_ir::equation::TopologyMode::Structured2D;
+    let mut system = build_incompressible_momentum_system_ibm(&fields, with_mms_source, ale, ibm);
+    system.set_topology(topology);
     let mut layout_fields = vec![
         fields.u,
         fields.p,
@@ -206,6 +263,9 @@ fn incompressible_momentum_model_impl(with_mms_source: bool, ale: bool) -> Resul
         layout_fields.push(vol_vector_dim::<DivDim<Force, cfd2_ir::dimensions::Volume>>(
             INCOMPRESSIBLE_MMS_SOURCE_FIELD,
         ));
+    }
+    if ibm {
+        layout_fields.push(vol_scalar_dim::<DivDim<Density, Time>>(IBM_MOMENTUM_PENALTY_FIELD));
     }
     let layout = PortRegistry::from_fields(layout_fields).into_state_layout();
     // d_p stays the closed form. Two assembled-matrix alternatives exist:
@@ -348,11 +408,14 @@ fn incompressible_momentum_model_impl(with_mms_source: bool, ale: bool) -> Resul
     .map_err(|e| format!("failed to build flux_module module: {e}"))?;
 
     Ok(ModelSpec {
-        id: match (with_mms_source, ale) {
-            (true, false) => "incompressible_momentum_mms",
-            (true, true) => "incompressible_momentum_ale_mms",
-            (false, true) => "incompressible_momentum_ale",
-            (false, false) => "incompressible_momentum",
+        id: match (with_mms_source, ale, topology) {
+            (_, _, cfd2_ir::equation::TopologyMode::Structured2D) => {
+                "incompressible_momentum_structured"
+            }
+            (true, false, _) => "incompressible_momentum_mms",
+            (true, true, _) => "incompressible_momentum_ale_mms",
+            (false, true, _) => "incompressible_momentum_ale",
+            (false, false, _) => "incompressible_momentum",
         },
         system,
         state_layout: layout,

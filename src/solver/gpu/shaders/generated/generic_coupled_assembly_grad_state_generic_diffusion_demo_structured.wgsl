@@ -84,6 +84,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         rhs_0 += dual_time_scale * state_iter[idx * 1u + 0u];
     }
     for (var k = 0u; k < 4u; k++) {
+        let owner = idx;
         let axis_is_x = k >= 1u && k <= 2u;
         let sign_f = select(-1.0, 1.0, k >= 2u);
         let normal = Vector2(select(0.0, sign_f, axis_is_x), select(sign_f, 0.0, axis_is_x));

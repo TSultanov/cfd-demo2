@@ -341,6 +341,10 @@ fn structured_face_head() -> Vec<Stmt> {
     // East (k=2) and North (k=3) point in the +axis direction; South/West in -.
     let k_pos = k().ge(2u32);
     vec![
+        // Every structured face "belongs" to `idx` with its normal already
+        // outward, so `owner == idx` unconditionally — this keeps the shared
+        // convection/reconstruction orientation guards (`owner != idx`) inert.
+        dsl::let_expr("owner", id("idx")),
         dsl::let_expr("axis_is_x", axis_is_x),
         dsl::let_expr("sign_f", dsl::select(-1.0, 1.0, k_pos.clone())),
         dsl::let_expr(

@@ -652,8 +652,8 @@ pub use buoyant_incompressible::{
 pub use incompressible_momentum::{
     incompressible_momentum_ale_mms_model, incompressible_momentum_ale_model,
     incompressible_momentum_mms_model, incompressible_momentum_model,
-    incompressible_momentum_system, IncompressibleMomentumFields,
-    INCOMPRESSIBLE_MMS_SOURCE_FIELD,
+    incompressible_momentum_structured_model, incompressible_momentum_system,
+    IncompressibleMomentumFields, INCOMPRESSIBLE_MMS_SOURCE_FIELD,
 };
 #[allow(unused_imports)]
 pub use allmach_pressure::{
@@ -716,6 +716,7 @@ pub fn all_models() -> Result<Vec<ModelSpec>, String> {
         generic_diffusion_demo_structured_model()?,
         generic_diffusion_demo_structured_mms_model()?,
         generic_diffusion_demo_structured_ibm_model()?,
+        incompressible_momentum_structured_model()?,
         scalar_transport_model()?,
         scalar_transport_sou_model()?,
     ])

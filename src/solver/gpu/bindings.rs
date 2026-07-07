@@ -2,7 +2,7 @@
 //
 // ^ wgsl_bindgen version 0.21.2
 // Changes made to this file will not be saved.
-// SourceHash: 201a9350db65dcd080b2e00ac16a1c37f500ff1d5ca06ef4554e9533527d865f
+// SourceHash: 861db598fd8867bf4e1afb949fd8289f316662eaa890e514248591e4f9bb4798
 
 #![allow(unused, non_snake_case, non_camel_case_types, non_upper_case_globals, clippy::too_many_arguments)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -28,6 +28,7 @@ pub enum ShaderEntry {
     GeneratedDpInitIncompressibleMomentumAle,
     GeneratedDpInitIncompressibleMomentumAleMms,
     GeneratedDpInitIncompressibleMomentumMms,
+    GeneratedDpInitIncompressibleMomentumStructured,
     GeneratedDpUpdateFromDiagAllmachPressure,
     GeneratedDpUpdateFromDiagAllmachPressureAle,
     GeneratedDpUpdateFromDiagAllmachPressureAleMms,
@@ -42,6 +43,7 @@ pub enum ShaderEntry {
     GeneratedDpUpdateFromDiagIncompressibleMomentumAle,
     GeneratedDpUpdateFromDiagIncompressibleMomentumAleMms,
     GeneratedDpUpdateFromDiagIncompressibleMomentumMms,
+    GeneratedDpUpdateFromDiagIncompressibleMomentumStructured,
     GeneratedFluxModuleAllmachPressure,
     GeneratedFluxModuleAllmachPressureAle,
     GeneratedFluxModuleAllmachPressureAleMms,
@@ -72,10 +74,12 @@ pub enum ShaderEntry {
     GeneratedFluxModuleGradientsIncompressibleMomentumAle,
     GeneratedFluxModuleGradientsIncompressibleMomentumAleMms,
     GeneratedFluxModuleGradientsIncompressibleMomentumMms,
+    GeneratedFluxModuleGradientsIncompressibleMomentumStructured,
     GeneratedFluxModuleIncompressibleMomentum,
     GeneratedFluxModuleIncompressibleMomentumAle,
     GeneratedFluxModuleIncompressibleMomentumAleMms,
     GeneratedFluxModuleIncompressibleMomentumMms,
+    GeneratedFluxModuleIncompressibleMomentumStructured,
     GeneratedFluxModuleScalarTransport,
     GeneratedFluxModuleScalarTransportSou,
     GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressure,
@@ -149,6 +153,7 @@ pub enum ShaderEntry {
     GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumAle,
     GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumAleMms,
     GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumMms,
+    GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumStructured,
     GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressure,
     GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressureAle,
     GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressureAleMms,
@@ -174,6 +179,7 @@ pub enum ShaderEntry {
     GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumAle,
     GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumAleMms,
     GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumMms,
+    GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumStructured,
     GeneratedGenericCoupledAssemblyGradStateRhsOnlyScalarTransport,
     GeneratedGenericCoupledAssemblyGradStateRhsOnlyScalarTransportSou,
     GeneratedGenericCoupledAssemblyGradStateScalarTransport,
@@ -182,6 +188,7 @@ pub enum ShaderEntry {
     GeneratedGenericCoupledAssemblyIncompressibleMomentumAle,
     GeneratedGenericCoupledAssemblyIncompressibleMomentumAleMms,
     GeneratedGenericCoupledAssemblyIncompressibleMomentumMms,
+    GeneratedGenericCoupledAssemblyIncompressibleMomentumStructured,
     GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressure,
     GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressureAle,
     GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressureAleMms,
@@ -207,6 +214,7 @@ pub enum ShaderEntry {
     GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumAle,
     GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumAleMms,
     GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumMms,
+    GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumStructured,
     GeneratedGenericCoupledAssemblyRhsOnlyScalarTransport,
     GeneratedGenericCoupledAssemblyRhsOnlyScalarTransportSou,
     GeneratedGenericCoupledAssemblyScalarTransport,
@@ -251,6 +259,7 @@ pub enum ShaderEntry {
     GeneratedGenericCoupledUpdateIncompressibleMomentumAle,
     GeneratedGenericCoupledUpdateIncompressibleMomentumAleMms,
     GeneratedGenericCoupledUpdateIncompressibleMomentumMms,
+    GeneratedGenericCoupledUpdateIncompressibleMomentumStructured,
     GeneratedGenericCoupledUpdateScalarTransport,
     GeneratedGenericCoupledUpdateScalarTransportSou,
     GeneratedGmresCgs,
@@ -288,6 +297,7 @@ pub enum ShaderEntry {
     GeneratedPackedStateGradientsIncompressibleMomentumAle,
     GeneratedPackedStateGradientsIncompressibleMomentumAleMms,
     GeneratedPackedStateGradientsIncompressibleMomentumMms,
+    GeneratedPackedStateGradientsIncompressibleMomentumStructured,
     GeneratedPackedStateGradientsScalarTransport,
     GeneratedPackedStateGradientsScalarTransportSou,
     GeneratedRhieChowCorrectVelocityDeltaAllmachPressure,
@@ -304,6 +314,7 @@ pub enum ShaderEntry {
     GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumAle,
     GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumAleMms,
     GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumMms,
+    GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumStructured,
     GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressure,
     GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAle,
     GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAleMms,
@@ -388,6 +399,7 @@ pub enum ShaderEntry {
     GeneratedRhieChowGradPUpdateIncompressibleMomentumAle,
     GeneratedRhieChowGradPUpdateIncompressibleMomentumAleMms,
     GeneratedRhieChowGradPUpdateIncompressibleMomentumMms,
+    GeneratedRhieChowGradPUpdateIncompressibleMomentumStructured,
     GeneratedRhieChowStoreGradPAllmachPressure,
     GeneratedRhieChowStoreGradPAllmachPressureAle,
     GeneratedRhieChowStoreGradPAllmachPressureAleMms,
@@ -416,15 +428,16 @@ pub enum ShaderEntry {
     GeneratedRhieChowStoreGradPIncompressibleMomentumAle,
     GeneratedRhieChowStoreGradPIncompressibleMomentumAleMms,
     GeneratedRhieChowStoreGradPIncompressibleMomentumMms,
+    GeneratedRhieChowStoreGradPIncompressibleMomentumStructured,
     GeneratedScalars,
     GeneratedSchurPrecondGeneric,
 }
 impl ShaderEntry {
     pub fn create_pipeline_layout(&self, device: &wgpu::Device) -> wgpu::PipelineLayout {
-        match self { Self :: GeneratedAmg => generated :: amg :: create_pipeline_layout (device) , Self :: GeneratedBcExprUpdateCompressible => generated :: bc_expr_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedBcExprUpdateCompressibleMms => generated :: bc_expr_update_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedBcExprUpdateCompressibleMmsBiharmonic => generated :: bc_expr_update_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedBlockPrecond => generated :: block_precond :: create_pipeline_layout (device) , Self :: GeneratedDotProduct => generated :: dot_product :: create_pipeline_layout (device) , Self :: GeneratedDotProductPair => generated :: dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedDpInitAllmachPressure => generated :: dp_init_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedDpInitAllmachPressureAle => generated :: dp_init_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedDpInitAllmachPressureAleMms => generated :: dp_init_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedDpInitAllmachPressureMms => generated :: dp_init_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedDpInitAllmachThermal => generated :: dp_init_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedDpInitAllmachThermalAle => generated :: dp_init_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedDpInitAllmachThermalAleMms => generated :: dp_init_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedDpInitAllmachThermalMms => generated :: dp_init_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedDpInitBuoyantIncompressible => generated :: dp_init_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedDpInitBuoyantIncompressibleMms => generated :: dp_init_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentum => generated :: dp_init_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentumAle => generated :: dp_init_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentumAleMms => generated :: dp_init_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentumMms => generated :: dp_init_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagAllmachPressure => generated :: dp_update_from_diag_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagAllmachPressureAle => generated :: dp_update_from_diag_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagAllmachPressureAleMms => generated :: dp_update_from_diag_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagAllmachPressureMms => generated :: dp_update_from_diag_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagAllmachThermal => generated :: dp_update_from_diag_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagAllmachThermalAle => generated :: dp_update_from_diag_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagAllmachThermalAleMms => generated :: dp_update_from_diag_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagAllmachThermalMms => generated :: dp_update_from_diag_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagBuoyantIncompressible => generated :: dp_update_from_diag_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagBuoyantIncompressibleMms => generated :: dp_update_from_diag_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => generated :: dp_update_from_diag_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentumAle => generated :: dp_update_from_diag_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentumAleMms => generated :: dp_update_from_diag_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentumMms => generated :: dp_update_from_diag_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleAllmachPressure => generated :: flux_module_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleAllmachPressureAle => generated :: flux_module_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleAllmachPressureAleMms => generated :: flux_module_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleAllmachPressureMms => generated :: flux_module_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleAllmachThermal => generated :: flux_module_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleAllmachThermalAle => generated :: flux_module_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleAllmachThermalAleMms => generated :: flux_module_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleAllmachThermalMms => generated :: flux_module_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleBuoyantIncompressible => generated :: flux_module_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleBuoyantIncompressibleMms => generated :: flux_module_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressible => generated :: flux_module_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressibleMms => generated :: flux_module_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressibleMmsBiharmonic => generated :: flux_module_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsAllmachPressure => generated :: flux_module_gradients_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsAllmachPressureAle => generated :: flux_module_gradients_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsAllmachPressureAleMms => generated :: flux_module_gradients_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsAllmachPressureMms => generated :: flux_module_gradients_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsAllmachThermal => generated :: flux_module_gradients_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsAllmachThermalAle => generated :: flux_module_gradients_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsAllmachThermalAleMms => generated :: flux_module_gradients_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsAllmachThermalMms => generated :: flux_module_gradients_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsBuoyantIncompressible => generated :: flux_module_gradients_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsBuoyantIncompressibleMms => generated :: flux_module_gradients_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsCompressible => generated :: flux_module_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsCompressibleMms => generated :: flux_module_gradients_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsCompressibleMmsBiharmonic => generated :: flux_module_gradients_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => generated :: flux_module_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentumAle => generated :: flux_module_gradients_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentumAleMms => generated :: flux_module_gradients_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentumMms => generated :: flux_module_gradients_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentum => generated :: flux_module_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentumAle => generated :: flux_module_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentumAleMms => generated :: flux_module_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentumMms => generated :: flux_module_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleScalarTransport => generated :: flux_module_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleScalarTransportSou => generated :: flux_module_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressure => generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressureAle => generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressureAleMms => generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressureMms => generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachThermal => generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachThermalAle => generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachThermalAleMms => generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachThermalMms => generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateBuoyantIncompressible => generated :: fusion_packed_state_gradients_assembly_grad_state_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateBuoyantIncompressibleMms => generated :: fusion_packed_state_gradients_assembly_grad_state_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateCompressible => generated :: fusion_packed_state_gradients_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateCompressibleMms => generated :: fusion_packed_state_gradients_assembly_grad_state_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateCompressibleMmsBiharmonic => generated :: fusion_packed_state_gradients_assembly_grad_state_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemo => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMms => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMmsDirichlet => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMmsNeumann => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoNeumann => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentum => generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentumAle => generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentumAleMms => generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentumMms => generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateScalarTransport => generated :: fusion_packed_state_gradients_assembly_grad_state_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateScalarTransportSou => generated :: fusion_packed_state_gradients_assembly_grad_state_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyAllmachPressure => generated :: generic_coupled_assembly_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyAllmachPressureAle => generated :: generic_coupled_assembly_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyAllmachPressureAleMms => generated :: generic_coupled_assembly_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyAllmachPressureMms => generated :: generic_coupled_assembly_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyAllmachThermal => generated :: generic_coupled_assembly_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyAllmachThermalAle => generated :: generic_coupled_assembly_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyAllmachThermalAleMms => generated :: generic_coupled_assembly_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyAllmachThermalMms => generated :: generic_coupled_assembly_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyBuoyantIncompressible => generated :: generic_coupled_assembly_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyBuoyantIncompressibleMms => generated :: generic_coupled_assembly_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressibleMms => generated :: generic_coupled_assembly_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressibleMmsBiharmonic => generated :: generic_coupled_assembly_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMms => generated :: generic_coupled_assembly_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMmsDirichlet => generated :: generic_coupled_assembly_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMmsNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoStructured => generated :: generic_coupled_assembly_generic_diffusion_demo_structured :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoStructuredIbm => generated :: generic_coupled_assembly_generic_diffusion_demo_structured_ibm :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoStructuredMms => generated :: generic_coupled_assembly_generic_diffusion_demo_structured_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachPressure => generated :: generic_coupled_assembly_grad_state_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachPressureAle => generated :: generic_coupled_assembly_grad_state_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachPressureAleMms => generated :: generic_coupled_assembly_grad_state_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachPressureMms => generated :: generic_coupled_assembly_grad_state_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachThermal => generated :: generic_coupled_assembly_grad_state_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachThermalAle => generated :: generic_coupled_assembly_grad_state_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachThermalAleMms => generated :: generic_coupled_assembly_grad_state_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachThermalMms => generated :: generic_coupled_assembly_grad_state_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateBuoyantIncompressible => generated :: generic_coupled_assembly_grad_state_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateBuoyantIncompressibleMms => generated :: generic_coupled_assembly_grad_state_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => generated :: generic_coupled_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressibleMms => generated :: generic_coupled_assembly_grad_state_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressibleMmsBiharmonic => generated :: generic_coupled_assembly_grad_state_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMms => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMmsDirichlet => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMmsNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoStructured => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_structured :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoStructuredIbm => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_structured_ibm :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoStructuredMms => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_structured_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumAle => generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumAleMms => generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumMms => generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressure => generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressureAle => generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressureAleMms => generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressureMms => generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachThermal => generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachThermalAle => generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachThermalAleMms => generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachThermalMms => generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyBuoyantIncompressible => generated :: generic_coupled_assembly_grad_state_rhs_only_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyBuoyantIncompressibleMms => generated :: generic_coupled_assembly_grad_state_rhs_only_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyCompressible => generated :: generic_coupled_assembly_grad_state_rhs_only_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyCompressibleMms => generated :: generic_coupled_assembly_grad_state_rhs_only_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyCompressibleMmsBiharmonic => generated :: generic_coupled_assembly_grad_state_rhs_only_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemo => generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoMms => generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoMmsDirichlet => generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoMmsNeumann => generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoStructured => generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_structured :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoStructuredIbm => generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_structured_ibm :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoStructuredMms => generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_structured_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentum => generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumAle => generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumAleMms => generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumMms => generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyScalarTransport => generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyScalarTransportSou => generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateScalarTransport => generated :: generic_coupled_assembly_grad_state_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateScalarTransportSou => generated :: generic_coupled_assembly_grad_state_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => generated :: generic_coupled_assembly_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumAle => generated :: generic_coupled_assembly_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumAleMms => generated :: generic_coupled_assembly_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumMms => generated :: generic_coupled_assembly_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressure => generated :: generic_coupled_assembly_rhs_only_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressureAle => generated :: generic_coupled_assembly_rhs_only_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressureAleMms => generated :: generic_coupled_assembly_rhs_only_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressureMms => generated :: generic_coupled_assembly_rhs_only_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachThermal => generated :: generic_coupled_assembly_rhs_only_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachThermalAle => generated :: generic_coupled_assembly_rhs_only_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachThermalAleMms => generated :: generic_coupled_assembly_rhs_only_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachThermalMms => generated :: generic_coupled_assembly_rhs_only_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyBuoyantIncompressible => generated :: generic_coupled_assembly_rhs_only_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyBuoyantIncompressibleMms => generated :: generic_coupled_assembly_rhs_only_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyCompressible => generated :: generic_coupled_assembly_rhs_only_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyCompressibleMms => generated :: generic_coupled_assembly_rhs_only_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyCompressibleMmsBiharmonic => generated :: generic_coupled_assembly_rhs_only_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemo => generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoMms => generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoMmsDirichlet => generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoMmsNeumann => generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoStructured => generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_structured :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoStructuredIbm => generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_structured_ibm :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoStructuredMms => generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_structured_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentum => generated :: generic_coupled_assembly_rhs_only_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumAle => generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumAleMms => generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumMms => generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyScalarTransport => generated :: generic_coupled_assembly_rhs_only_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyScalarTransportSou => generated :: generic_coupled_assembly_rhs_only_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyScalarTransport => generated :: generic_coupled_assembly_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyScalarTransportSou => generated :: generic_coupled_assembly_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledSchurSetup => generated :: generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateAllmachPressure => generated :: generic_coupled_update_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateAllmachPressureAle => generated :: generic_coupled_update_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateAllmachPressureAleMms => generated :: generic_coupled_update_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateAllmachPressureMms => generated :: generic_coupled_update_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateAllmachThermal => generated :: generic_coupled_update_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateAllmachThermalAle => generated :: generic_coupled_update_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateAllmachThermalAleMms => generated :: generic_coupled_update_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateAllmachThermalMms => generated :: generic_coupled_update_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateBuoyantIncompressible => generated :: generic_coupled_update_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateBuoyantIncompressibleMms => generated :: generic_coupled_update_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressibleMms => generated :: generic_coupled_update_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressibleMmsBiharmonic => generated :: generic_coupled_update_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachPressure => generated :: generic_coupled_update_dp_init_fused_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachPressureAle => generated :: generic_coupled_update_dp_init_fused_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachPressureAleMms => generated :: generic_coupled_update_dp_init_fused_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachPressureMms => generated :: generic_coupled_update_dp_init_fused_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachThermal => generated :: generic_coupled_update_dp_init_fused_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachThermalAle => generated :: generic_coupled_update_dp_init_fused_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachThermalAleMms => generated :: generic_coupled_update_dp_init_fused_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachThermalMms => generated :: generic_coupled_update_dp_init_fused_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedBuoyantIncompressible => generated :: generic_coupled_update_dp_init_fused_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedBuoyantIncompressibleMms => generated :: generic_coupled_update_dp_init_fused_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentum => generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentumAle => generated :: generic_coupled_update_dp_init_fused_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentumAleMms => generated :: generic_coupled_update_dp_init_fused_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentumMms => generated :: generic_coupled_update_dp_init_fused_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMms => generated :: generic_coupled_update_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMmsDirichlet => generated :: generic_coupled_update_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMmsNeumann => generated :: generic_coupled_update_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoStructured => generated :: generic_coupled_update_generic_diffusion_demo_structured :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoStructuredIbm => generated :: generic_coupled_update_generic_diffusion_demo_structured_ibm :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoStructuredMms => generated :: generic_coupled_update_generic_diffusion_demo_structured_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => generated :: generic_coupled_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumAle => generated :: generic_coupled_update_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumAleMms => generated :: generic_coupled_update_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumMms => generated :: generic_coupled_update_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateScalarTransport => generated :: generic_coupled_update_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateScalarTransportSou => generated :: generic_coupled_update_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGmresCgs => generated :: gmres_cgs :: create_pipeline_layout (device) , Self :: GeneratedGmresLogic => generated :: gmres_logic :: create_pipeline_layout (device) , Self :: GeneratedGmresOps => generated :: gmres_ops :: create_pipeline_layout (device) , Self :: GeneratedGmresUpdateFused => generated :: gmres_update_fused :: create_pipeline_layout (device) , Self :: GeneratedLinearSolver => generated :: linear_solver :: create_pipeline_layout (device) , Self :: GeneratedOuterConvergence => generated :: outer_convergence :: create_pipeline_layout (device) , Self :: GeneratedOuterConvergenceBreak => generated :: outer_convergence_break :: create_pipeline_layout (device) , Self :: GeneratedOuterGate => generated :: outer_gate :: create_pipeline_layout (device) , Self :: GeneratedOuterStopInjectCg => generated :: outer_stop_inject_cg :: create_pipeline_layout (device) , Self :: GeneratedOuterStopInjectFgmres => generated :: outer_stop_inject_fgmres :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsAllmachPressure => generated :: packed_state_gradients_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsAllmachPressureAle => generated :: packed_state_gradients_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsAllmachPressureAleMms => generated :: packed_state_gradients_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsAllmachPressureMms => generated :: packed_state_gradients_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsAllmachThermal => generated :: packed_state_gradients_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsAllmachThermalAle => generated :: packed_state_gradients_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsAllmachThermalAleMms => generated :: packed_state_gradients_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsAllmachThermalMms => generated :: packed_state_gradients_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsBuoyantIncompressible => generated :: packed_state_gradients_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsBuoyantIncompressibleMms => generated :: packed_state_gradients_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressible => generated :: packed_state_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressibleMms => generated :: packed_state_gradients_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressibleMmsBiharmonic => generated :: packed_state_gradients_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => generated :: packed_state_gradients_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMms => generated :: packed_state_gradients_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMmsDirichlet => generated :: packed_state_gradients_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMmsNeumann => generated :: packed_state_gradients_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoStructured => generated :: packed_state_gradients_generic_diffusion_demo_structured :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoStructuredIbm => generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoStructuredMms => generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => generated :: packed_state_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentumAle => generated :: packed_state_gradients_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentumAleMms => generated :: packed_state_gradients_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentumMms => generated :: packed_state_gradients_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsScalarTransport => generated :: packed_state_gradients_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsScalarTransportSou => generated :: packed_state_gradients_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachPressure => generated :: rhie_chow_correct_velocity_delta_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachPressureAle => generated :: rhie_chow_correct_velocity_delta_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachPressureAleMms => generated :: rhie_chow_correct_velocity_delta_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachPressureMms => generated :: rhie_chow_correct_velocity_delta_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachThermal => generated :: rhie_chow_correct_velocity_delta_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachThermalAle => generated :: rhie_chow_correct_velocity_delta_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachThermalAleMms => generated :: rhie_chow_correct_velocity_delta_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachThermalMms => generated :: rhie_chow_correct_velocity_delta_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaBuoyantIncompressible => generated :: rhie_chow_correct_velocity_delta_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaBuoyantIncompressibleMms => generated :: rhie_chow_correct_velocity_delta_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumAle => generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumAleMms => generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumMms => generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressure => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAle => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAleMms => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureMms => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermal => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAle => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAleMms => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalMms => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressible => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressibleMms => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAle => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAleMms => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumMms => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachPressure => generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachPressureAle => generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachPressureAleMms => generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachPressureMms => generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachThermal => generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachThermalAle => generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachThermalAleMms => generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachThermalMms => generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedBuoyantIncompressible => generated :: rhie_chow_dp_update_store_grad_p_fused_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedBuoyantIncompressibleMms => generated :: rhie_chow_dp_update_store_grad_p_fused_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentumAle => generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentumAleMms => generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentumMms => generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressure => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAle => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAleMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermal => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAle => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAleMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressible => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressibleMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAle => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAleMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachPressure => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachPressureAle => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachPressureAleMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachPressureMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachThermal => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachThermalAle => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachThermalAleMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachThermalMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedBuoyantIncompressible => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedBuoyantIncompressibleMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentumAle => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentumAleMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentumMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateAllmachPressure => generated :: rhie_chow_grad_p_update_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateAllmachPressureAle => generated :: rhie_chow_grad_p_update_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateAllmachPressureAleMms => generated :: rhie_chow_grad_p_update_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateAllmachPressureMms => generated :: rhie_chow_grad_p_update_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateAllmachThermal => generated :: rhie_chow_grad_p_update_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateAllmachThermalAle => generated :: rhie_chow_grad_p_update_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateAllmachThermalAleMms => generated :: rhie_chow_grad_p_update_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateAllmachThermalMms => generated :: rhie_chow_grad_p_update_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateBuoyantIncompressible => generated :: rhie_chow_grad_p_update_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateBuoyantIncompressibleMms => generated :: rhie_chow_grad_p_update_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachPressure => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAle => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAleMms => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachPressureMms => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachThermal => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAle => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAleMms => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachThermalMms => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressible => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressibleMms => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAle => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAleMms => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumMms => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentumAle => generated :: rhie_chow_grad_p_update_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentumAleMms => generated :: rhie_chow_grad_p_update_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentumMms => generated :: rhie_chow_grad_p_update_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPAllmachPressure => generated :: rhie_chow_store_grad_p_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPAllmachPressureAle => generated :: rhie_chow_store_grad_p_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPAllmachPressureAleMms => generated :: rhie_chow_store_grad_p_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPAllmachPressureMms => generated :: rhie_chow_store_grad_p_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPAllmachThermal => generated :: rhie_chow_store_grad_p_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPAllmachThermalAle => generated :: rhie_chow_store_grad_p_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPAllmachThermalAleMms => generated :: rhie_chow_store_grad_p_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPAllmachThermalMms => generated :: rhie_chow_store_grad_p_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPBuoyantIncompressible => generated :: rhie_chow_store_grad_p_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPBuoyantIncompressibleMms => generated :: rhie_chow_store_grad_p_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachPressure => generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachPressureAle => generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachPressureAleMms => generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachPressureMms => generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachThermal => generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachThermalAle => generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachThermalAleMms => generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachThermalMms => generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedBuoyantIncompressible => generated :: rhie_chow_store_grad_p_grad_p_update_fused_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedBuoyantIncompressibleMms => generated :: rhie_chow_store_grad_p_grad_p_update_fused_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentum => generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentumAle => generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentumAleMms => generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentumMms => generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentumAle => generated :: rhie_chow_store_grad_p_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentumAleMms => generated :: rhie_chow_store_grad_p_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentumMms => generated :: rhie_chow_store_grad_p_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedScalars => generated :: scalars :: create_pipeline_layout (device) , Self :: GeneratedSchurPrecondGeneric => generated :: schur_precond_generic :: create_pipeline_layout (device) , }
+        match self { Self :: GeneratedAmg => generated :: amg :: create_pipeline_layout (device) , Self :: GeneratedBcExprUpdateCompressible => generated :: bc_expr_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedBcExprUpdateCompressibleMms => generated :: bc_expr_update_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedBcExprUpdateCompressibleMmsBiharmonic => generated :: bc_expr_update_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedBlockPrecond => generated :: block_precond :: create_pipeline_layout (device) , Self :: GeneratedDotProduct => generated :: dot_product :: create_pipeline_layout (device) , Self :: GeneratedDotProductPair => generated :: dot_product_pair :: create_pipeline_layout (device) , Self :: GeneratedDpInitAllmachPressure => generated :: dp_init_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedDpInitAllmachPressureAle => generated :: dp_init_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedDpInitAllmachPressureAleMms => generated :: dp_init_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedDpInitAllmachPressureMms => generated :: dp_init_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedDpInitAllmachThermal => generated :: dp_init_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedDpInitAllmachThermalAle => generated :: dp_init_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedDpInitAllmachThermalAleMms => generated :: dp_init_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedDpInitAllmachThermalMms => generated :: dp_init_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedDpInitBuoyantIncompressible => generated :: dp_init_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedDpInitBuoyantIncompressibleMms => generated :: dp_init_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentum => generated :: dp_init_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentumAle => generated :: dp_init_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentumAleMms => generated :: dp_init_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentumMms => generated :: dp_init_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedDpInitIncompressibleMomentumStructured => generated :: dp_init_incompressible_momentum_structured :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagAllmachPressure => generated :: dp_update_from_diag_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagAllmachPressureAle => generated :: dp_update_from_diag_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagAllmachPressureAleMms => generated :: dp_update_from_diag_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagAllmachPressureMms => generated :: dp_update_from_diag_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagAllmachThermal => generated :: dp_update_from_diag_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagAllmachThermalAle => generated :: dp_update_from_diag_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagAllmachThermalAleMms => generated :: dp_update_from_diag_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagAllmachThermalMms => generated :: dp_update_from_diag_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagBuoyantIncompressible => generated :: dp_update_from_diag_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagBuoyantIncompressibleMms => generated :: dp_update_from_diag_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => generated :: dp_update_from_diag_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentumAle => generated :: dp_update_from_diag_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentumAleMms => generated :: dp_update_from_diag_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentumMms => generated :: dp_update_from_diag_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentumStructured => generated :: dp_update_from_diag_incompressible_momentum_structured :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleAllmachPressure => generated :: flux_module_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleAllmachPressureAle => generated :: flux_module_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleAllmachPressureAleMms => generated :: flux_module_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleAllmachPressureMms => generated :: flux_module_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleAllmachThermal => generated :: flux_module_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleAllmachThermalAle => generated :: flux_module_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleAllmachThermalAleMms => generated :: flux_module_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleAllmachThermalMms => generated :: flux_module_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleBuoyantIncompressible => generated :: flux_module_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleBuoyantIncompressibleMms => generated :: flux_module_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressible => generated :: flux_module_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressibleMms => generated :: flux_module_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleCompressibleMmsBiharmonic => generated :: flux_module_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsAllmachPressure => generated :: flux_module_gradients_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsAllmachPressureAle => generated :: flux_module_gradients_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsAllmachPressureAleMms => generated :: flux_module_gradients_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsAllmachPressureMms => generated :: flux_module_gradients_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsAllmachThermal => generated :: flux_module_gradients_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsAllmachThermalAle => generated :: flux_module_gradients_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsAllmachThermalAleMms => generated :: flux_module_gradients_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsAllmachThermalMms => generated :: flux_module_gradients_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsBuoyantIncompressible => generated :: flux_module_gradients_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsBuoyantIncompressibleMms => generated :: flux_module_gradients_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsCompressible => generated :: flux_module_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsCompressibleMms => generated :: flux_module_gradients_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsCompressibleMmsBiharmonic => generated :: flux_module_gradients_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => generated :: flux_module_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentumAle => generated :: flux_module_gradients_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentumAleMms => generated :: flux_module_gradients_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentumMms => generated :: flux_module_gradients_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleGradientsIncompressibleMomentumStructured => generated :: flux_module_gradients_incompressible_momentum_structured :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentum => generated :: flux_module_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentumAle => generated :: flux_module_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentumAleMms => generated :: flux_module_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentumMms => generated :: flux_module_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleIncompressibleMomentumStructured => generated :: flux_module_incompressible_momentum_structured :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleScalarTransport => generated :: flux_module_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedFluxModuleScalarTransportSou => generated :: flux_module_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressure => generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressureAle => generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressureAleMms => generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressureMms => generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachThermal => generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachThermalAle => generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachThermalAleMms => generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachThermalMms => generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateBuoyantIncompressible => generated :: fusion_packed_state_gradients_assembly_grad_state_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateBuoyantIncompressibleMms => generated :: fusion_packed_state_gradients_assembly_grad_state_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateCompressible => generated :: fusion_packed_state_gradients_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateCompressibleMms => generated :: fusion_packed_state_gradients_assembly_grad_state_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateCompressibleMmsBiharmonic => generated :: fusion_packed_state_gradients_assembly_grad_state_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemo => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMms => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMmsDirichlet => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMmsNeumann => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoNeumann => generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentum => generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentumAle => generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentumAleMms => generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentumMms => generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateScalarTransport => generated :: fusion_packed_state_gradients_assembly_grad_state_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateScalarTransportSou => generated :: fusion_packed_state_gradients_assembly_grad_state_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledApply => generated :: generic_coupled_apply :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyAllmachPressure => generated :: generic_coupled_assembly_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyAllmachPressureAle => generated :: generic_coupled_assembly_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyAllmachPressureAleMms => generated :: generic_coupled_assembly_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyAllmachPressureMms => generated :: generic_coupled_assembly_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyAllmachThermal => generated :: generic_coupled_assembly_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyAllmachThermalAle => generated :: generic_coupled_assembly_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyAllmachThermalAleMms => generated :: generic_coupled_assembly_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyAllmachThermalMms => generated :: generic_coupled_assembly_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyBuoyantIncompressible => generated :: generic_coupled_assembly_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyBuoyantIncompressibleMms => generated :: generic_coupled_assembly_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressible => generated :: generic_coupled_assembly_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressibleMms => generated :: generic_coupled_assembly_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyCompressibleMmsBiharmonic => generated :: generic_coupled_assembly_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => generated :: generic_coupled_assembly_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMms => generated :: generic_coupled_assembly_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMmsDirichlet => generated :: generic_coupled_assembly_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMmsNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoStructured => generated :: generic_coupled_assembly_generic_diffusion_demo_structured :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoStructuredIbm => generated :: generic_coupled_assembly_generic_diffusion_demo_structured_ibm :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoStructuredMms => generated :: generic_coupled_assembly_generic_diffusion_demo_structured_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachPressure => generated :: generic_coupled_assembly_grad_state_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachPressureAle => generated :: generic_coupled_assembly_grad_state_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachPressureAleMms => generated :: generic_coupled_assembly_grad_state_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachPressureMms => generated :: generic_coupled_assembly_grad_state_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachThermal => generated :: generic_coupled_assembly_grad_state_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachThermalAle => generated :: generic_coupled_assembly_grad_state_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachThermalAleMms => generated :: generic_coupled_assembly_grad_state_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachThermalMms => generated :: generic_coupled_assembly_grad_state_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateBuoyantIncompressible => generated :: generic_coupled_assembly_grad_state_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateBuoyantIncompressibleMms => generated :: generic_coupled_assembly_grad_state_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => generated :: generic_coupled_assembly_grad_state_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressibleMms => generated :: generic_coupled_assembly_grad_state_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateCompressibleMmsBiharmonic => generated :: generic_coupled_assembly_grad_state_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMms => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMmsDirichlet => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMmsNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoStructured => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_structured :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoStructuredIbm => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_structured_ibm :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoStructuredMms => generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_structured_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumAle => generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumAleMms => generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumMms => generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumStructured => generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressure => generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressureAle => generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressureAleMms => generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressureMms => generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachThermal => generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachThermalAle => generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachThermalAleMms => generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachThermalMms => generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyBuoyantIncompressible => generated :: generic_coupled_assembly_grad_state_rhs_only_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyBuoyantIncompressibleMms => generated :: generic_coupled_assembly_grad_state_rhs_only_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyCompressible => generated :: generic_coupled_assembly_grad_state_rhs_only_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyCompressibleMms => generated :: generic_coupled_assembly_grad_state_rhs_only_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyCompressibleMmsBiharmonic => generated :: generic_coupled_assembly_grad_state_rhs_only_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemo => generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoMms => generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoMmsDirichlet => generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoMmsNeumann => generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoStructured => generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_structured :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoStructuredIbm => generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_structured_ibm :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoStructuredMms => generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_structured_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentum => generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumAle => generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumAleMms => generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumMms => generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumStructured => generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyScalarTransport => generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyScalarTransportSou => generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateScalarTransport => generated :: generic_coupled_assembly_grad_state_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyGradStateScalarTransportSou => generated :: generic_coupled_assembly_grad_state_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => generated :: generic_coupled_assembly_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumAle => generated :: generic_coupled_assembly_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumAleMms => generated :: generic_coupled_assembly_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumMms => generated :: generic_coupled_assembly_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumStructured => generated :: generic_coupled_assembly_incompressible_momentum_structured :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressure => generated :: generic_coupled_assembly_rhs_only_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressureAle => generated :: generic_coupled_assembly_rhs_only_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressureAleMms => generated :: generic_coupled_assembly_rhs_only_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressureMms => generated :: generic_coupled_assembly_rhs_only_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachThermal => generated :: generic_coupled_assembly_rhs_only_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachThermalAle => generated :: generic_coupled_assembly_rhs_only_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachThermalAleMms => generated :: generic_coupled_assembly_rhs_only_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachThermalMms => generated :: generic_coupled_assembly_rhs_only_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyBuoyantIncompressible => generated :: generic_coupled_assembly_rhs_only_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyBuoyantIncompressibleMms => generated :: generic_coupled_assembly_rhs_only_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyCompressible => generated :: generic_coupled_assembly_rhs_only_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyCompressibleMms => generated :: generic_coupled_assembly_rhs_only_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyCompressibleMmsBiharmonic => generated :: generic_coupled_assembly_rhs_only_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemo => generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoMms => generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoMmsDirichlet => generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoMmsNeumann => generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoNeumann => generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoStructured => generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_structured :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoStructuredIbm => generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_structured_ibm :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoStructuredMms => generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_structured_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentum => generated :: generic_coupled_assembly_rhs_only_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumAle => generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumAleMms => generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumMms => generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumStructured => generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyScalarTransport => generated :: generic_coupled_assembly_rhs_only_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyRhsOnlyScalarTransportSou => generated :: generic_coupled_assembly_rhs_only_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyScalarTransport => generated :: generic_coupled_assembly_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledAssemblyScalarTransportSou => generated :: generic_coupled_assembly_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledSchurSetup => generated :: generic_coupled_schur_setup :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateAllmachPressure => generated :: generic_coupled_update_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateAllmachPressureAle => generated :: generic_coupled_update_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateAllmachPressureAleMms => generated :: generic_coupled_update_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateAllmachPressureMms => generated :: generic_coupled_update_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateAllmachThermal => generated :: generic_coupled_update_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateAllmachThermalAle => generated :: generic_coupled_update_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateAllmachThermalAleMms => generated :: generic_coupled_update_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateAllmachThermalMms => generated :: generic_coupled_update_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateBuoyantIncompressible => generated :: generic_coupled_update_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateBuoyantIncompressibleMms => generated :: generic_coupled_update_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressible => generated :: generic_coupled_update_compressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressibleMms => generated :: generic_coupled_update_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateCompressibleMmsBiharmonic => generated :: generic_coupled_update_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachPressure => generated :: generic_coupled_update_dp_init_fused_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachPressureAle => generated :: generic_coupled_update_dp_init_fused_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachPressureAleMms => generated :: generic_coupled_update_dp_init_fused_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachPressureMms => generated :: generic_coupled_update_dp_init_fused_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachThermal => generated :: generic_coupled_update_dp_init_fused_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachThermalAle => generated :: generic_coupled_update_dp_init_fused_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachThermalAleMms => generated :: generic_coupled_update_dp_init_fused_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachThermalMms => generated :: generic_coupled_update_dp_init_fused_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedBuoyantIncompressible => generated :: generic_coupled_update_dp_init_fused_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedBuoyantIncompressibleMms => generated :: generic_coupled_update_dp_init_fused_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentum => generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentumAle => generated :: generic_coupled_update_dp_init_fused_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentumAleMms => generated :: generic_coupled_update_dp_init_fused_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentumMms => generated :: generic_coupled_update_dp_init_fused_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => generated :: generic_coupled_update_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMms => generated :: generic_coupled_update_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMmsDirichlet => generated :: generic_coupled_update_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMmsNeumann => generated :: generic_coupled_update_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoStructured => generated :: generic_coupled_update_generic_diffusion_demo_structured :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoStructuredIbm => generated :: generic_coupled_update_generic_diffusion_demo_structured_ibm :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoStructuredMms => generated :: generic_coupled_update_generic_diffusion_demo_structured_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => generated :: generic_coupled_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumAle => generated :: generic_coupled_update_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumAleMms => generated :: generic_coupled_update_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumMms => generated :: generic_coupled_update_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumStructured => generated :: generic_coupled_update_incompressible_momentum_structured :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateScalarTransport => generated :: generic_coupled_update_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedGenericCoupledUpdateScalarTransportSou => generated :: generic_coupled_update_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedGmresCgs => generated :: gmres_cgs :: create_pipeline_layout (device) , Self :: GeneratedGmresLogic => generated :: gmres_logic :: create_pipeline_layout (device) , Self :: GeneratedGmresOps => generated :: gmres_ops :: create_pipeline_layout (device) , Self :: GeneratedGmresUpdateFused => generated :: gmres_update_fused :: create_pipeline_layout (device) , Self :: GeneratedLinearSolver => generated :: linear_solver :: create_pipeline_layout (device) , Self :: GeneratedOuterConvergence => generated :: outer_convergence :: create_pipeline_layout (device) , Self :: GeneratedOuterConvergenceBreak => generated :: outer_convergence_break :: create_pipeline_layout (device) , Self :: GeneratedOuterGate => generated :: outer_gate :: create_pipeline_layout (device) , Self :: GeneratedOuterStopInjectCg => generated :: outer_stop_inject_cg :: create_pipeline_layout (device) , Self :: GeneratedOuterStopInjectFgmres => generated :: outer_stop_inject_fgmres :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsAllmachPressure => generated :: packed_state_gradients_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsAllmachPressureAle => generated :: packed_state_gradients_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsAllmachPressureAleMms => generated :: packed_state_gradients_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsAllmachPressureMms => generated :: packed_state_gradients_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsAllmachThermal => generated :: packed_state_gradients_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsAllmachThermalAle => generated :: packed_state_gradients_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsAllmachThermalAleMms => generated :: packed_state_gradients_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsAllmachThermalMms => generated :: packed_state_gradients_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsBuoyantIncompressible => generated :: packed_state_gradients_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsBuoyantIncompressibleMms => generated :: packed_state_gradients_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressible => generated :: packed_state_gradients_compressible :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressibleMms => generated :: packed_state_gradients_compressible_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsCompressibleMmsBiharmonic => generated :: packed_state_gradients_compressible_mms_biharmonic :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => generated :: packed_state_gradients_generic_diffusion_demo :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMms => generated :: packed_state_gradients_generic_diffusion_demo_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMmsDirichlet => generated :: packed_state_gradients_generic_diffusion_demo_mms_dirichlet :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMmsNeumann => generated :: packed_state_gradients_generic_diffusion_demo_mms_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoStructured => generated :: packed_state_gradients_generic_diffusion_demo_structured :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoStructuredIbm => generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoStructuredMms => generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => generated :: packed_state_gradients_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentumAle => generated :: packed_state_gradients_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentumAleMms => generated :: packed_state_gradients_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentumMms => generated :: packed_state_gradients_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsIncompressibleMomentumStructured => generated :: packed_state_gradients_incompressible_momentum_structured :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsScalarTransport => generated :: packed_state_gradients_scalar_transport :: create_pipeline_layout (device) , Self :: GeneratedPackedStateGradientsScalarTransportSou => generated :: packed_state_gradients_scalar_transport_sou :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachPressure => generated :: rhie_chow_correct_velocity_delta_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachPressureAle => generated :: rhie_chow_correct_velocity_delta_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachPressureAleMms => generated :: rhie_chow_correct_velocity_delta_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachPressureMms => generated :: rhie_chow_correct_velocity_delta_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachThermal => generated :: rhie_chow_correct_velocity_delta_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachThermalAle => generated :: rhie_chow_correct_velocity_delta_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachThermalAleMms => generated :: rhie_chow_correct_velocity_delta_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachThermalMms => generated :: rhie_chow_correct_velocity_delta_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaBuoyantIncompressible => generated :: rhie_chow_correct_velocity_delta_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaBuoyantIncompressibleMms => generated :: rhie_chow_correct_velocity_delta_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumAle => generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumAleMms => generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumMms => generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumStructured => generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressure => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAle => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAleMms => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureMms => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermal => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAle => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAleMms => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalMms => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressible => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressibleMms => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAle => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAleMms => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumMms => generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachPressure => generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachPressureAle => generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachPressureAleMms => generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachPressureMms => generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachThermal => generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachThermalAle => generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachThermalAleMms => generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachThermalMms => generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedBuoyantIncompressible => generated :: rhie_chow_dp_update_store_grad_p_fused_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedBuoyantIncompressibleMms => generated :: rhie_chow_dp_update_store_grad_p_fused_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentumAle => generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentumAleMms => generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentumMms => generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressure => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAle => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAleMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermal => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAle => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAleMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressible => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressibleMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAle => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAleMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachPressure => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachPressureAle => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachPressureAleMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachPressureMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachThermal => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachThermalAle => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachThermalAleMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachThermalMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedBuoyantIncompressible => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedBuoyantIncompressibleMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentumAle => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentumAleMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentumMms => generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateAllmachPressure => generated :: rhie_chow_grad_p_update_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateAllmachPressureAle => generated :: rhie_chow_grad_p_update_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateAllmachPressureAleMms => generated :: rhie_chow_grad_p_update_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateAllmachPressureMms => generated :: rhie_chow_grad_p_update_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateAllmachThermal => generated :: rhie_chow_grad_p_update_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateAllmachThermalAle => generated :: rhie_chow_grad_p_update_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateAllmachThermalAleMms => generated :: rhie_chow_grad_p_update_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateAllmachThermalMms => generated :: rhie_chow_grad_p_update_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateBuoyantIncompressible => generated :: rhie_chow_grad_p_update_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateBuoyantIncompressibleMms => generated :: rhie_chow_grad_p_update_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachPressure => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAle => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAleMms => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachPressureMms => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachThermal => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAle => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAleMms => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachThermalMms => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressible => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressibleMms => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAle => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAleMms => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumMms => generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentumAle => generated :: rhie_chow_grad_p_update_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentumAleMms => generated :: rhie_chow_grad_p_update_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentumMms => generated :: rhie_chow_grad_p_update_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentumStructured => generated :: rhie_chow_grad_p_update_incompressible_momentum_structured :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPAllmachPressure => generated :: rhie_chow_store_grad_p_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPAllmachPressureAle => generated :: rhie_chow_store_grad_p_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPAllmachPressureAleMms => generated :: rhie_chow_store_grad_p_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPAllmachPressureMms => generated :: rhie_chow_store_grad_p_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPAllmachThermal => generated :: rhie_chow_store_grad_p_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPAllmachThermalAle => generated :: rhie_chow_store_grad_p_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPAllmachThermalAleMms => generated :: rhie_chow_store_grad_p_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPAllmachThermalMms => generated :: rhie_chow_store_grad_p_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPBuoyantIncompressible => generated :: rhie_chow_store_grad_p_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPBuoyantIncompressibleMms => generated :: rhie_chow_store_grad_p_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachPressure => generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_pressure :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachPressureAle => generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_pressure_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachPressureAleMms => generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_pressure_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachPressureMms => generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_pressure_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachThermal => generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_thermal :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachThermalAle => generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_thermal_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachThermalAleMms => generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_thermal_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachThermalMms => generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_thermal_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedBuoyantIncompressible => generated :: rhie_chow_store_grad_p_grad_p_update_fused_buoyant_incompressible :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedBuoyantIncompressibleMms => generated :: rhie_chow_store_grad_p_grad_p_update_fused_buoyant_incompressible_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentum => generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentumAle => generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentumAleMms => generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentumMms => generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentumAle => generated :: rhie_chow_store_grad_p_incompressible_momentum_ale :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentumAleMms => generated :: rhie_chow_store_grad_p_incompressible_momentum_ale_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentumMms => generated :: rhie_chow_store_grad_p_incompressible_momentum_mms :: create_pipeline_layout (device) , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentumStructured => generated :: rhie_chow_store_grad_p_incompressible_momentum_structured :: create_pipeline_layout (device) , Self :: GeneratedScalars => generated :: scalars :: create_pipeline_layout (device) , Self :: GeneratedSchurPrecondGeneric => generated :: schur_precond_generic :: create_pipeline_layout (device) , }
     }
     pub fn create_shader_module_embed_source(&self, device: &wgpu::Device) -> wgpu::ShaderModule {
-        match self { Self :: GeneratedAmg => { generated :: amg :: create_shader_module_embed_source (device) } , Self :: GeneratedBcExprUpdateCompressible => { generated :: bc_expr_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedBcExprUpdateCompressibleMms => { generated :: bc_expr_update_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedBcExprUpdateCompressibleMmsBiharmonic => { generated :: bc_expr_update_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedBlockPrecond => { generated :: block_precond :: create_shader_module_embed_source (device) } , Self :: GeneratedDotProduct => { generated :: dot_product :: create_shader_module_embed_source (device) } , Self :: GeneratedDotProductPair => { generated :: dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitAllmachPressure => { generated :: dp_init_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitAllmachPressureAle => { generated :: dp_init_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitAllmachPressureAleMms => { generated :: dp_init_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitAllmachPressureMms => { generated :: dp_init_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitAllmachThermal => { generated :: dp_init_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitAllmachThermalAle => { generated :: dp_init_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitAllmachThermalAleMms => { generated :: dp_init_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitAllmachThermalMms => { generated :: dp_init_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitBuoyantIncompressible => { generated :: dp_init_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitBuoyantIncompressibleMms => { generated :: dp_init_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentum => { generated :: dp_init_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentumAle => { generated :: dp_init_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentumAleMms => { generated :: dp_init_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentumMms => { generated :: dp_init_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagAllmachPressure => { generated :: dp_update_from_diag_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagAllmachPressureAle => { generated :: dp_update_from_diag_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagAllmachPressureAleMms => { generated :: dp_update_from_diag_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagAllmachPressureMms => { generated :: dp_update_from_diag_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagAllmachThermal => { generated :: dp_update_from_diag_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagAllmachThermalAle => { generated :: dp_update_from_diag_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagAllmachThermalAleMms => { generated :: dp_update_from_diag_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagAllmachThermalMms => { generated :: dp_update_from_diag_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagBuoyantIncompressible => { generated :: dp_update_from_diag_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagBuoyantIncompressibleMms => { generated :: dp_update_from_diag_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => { generated :: dp_update_from_diag_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentumAle => { generated :: dp_update_from_diag_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentumAleMms => { generated :: dp_update_from_diag_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentumMms => { generated :: dp_update_from_diag_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleAllmachPressure => { generated :: flux_module_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleAllmachPressureAle => { generated :: flux_module_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleAllmachPressureAleMms => { generated :: flux_module_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleAllmachPressureMms => { generated :: flux_module_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleAllmachThermal => { generated :: flux_module_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleAllmachThermalAle => { generated :: flux_module_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleAllmachThermalAleMms => { generated :: flux_module_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleAllmachThermalMms => { generated :: flux_module_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleBuoyantIncompressible => { generated :: flux_module_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleBuoyantIncompressibleMms => { generated :: flux_module_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressible => { generated :: flux_module_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressibleMms => { generated :: flux_module_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressibleMmsBiharmonic => { generated :: flux_module_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsAllmachPressure => { generated :: flux_module_gradients_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsAllmachPressureAle => { generated :: flux_module_gradients_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsAllmachPressureAleMms => { generated :: flux_module_gradients_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsAllmachPressureMms => { generated :: flux_module_gradients_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsAllmachThermal => { generated :: flux_module_gradients_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsAllmachThermalAle => { generated :: flux_module_gradients_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsAllmachThermalAleMms => { generated :: flux_module_gradients_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsAllmachThermalMms => { generated :: flux_module_gradients_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsBuoyantIncompressible => { generated :: flux_module_gradients_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsBuoyantIncompressibleMms => { generated :: flux_module_gradients_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsCompressible => { generated :: flux_module_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsCompressibleMms => { generated :: flux_module_gradients_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsCompressibleMmsBiharmonic => { generated :: flux_module_gradients_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => { generated :: flux_module_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentumAle => { generated :: flux_module_gradients_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentumAleMms => { generated :: flux_module_gradients_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentumMms => { generated :: flux_module_gradients_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentum => { generated :: flux_module_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentumAle => { generated :: flux_module_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentumAleMms => { generated :: flux_module_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentumMms => { generated :: flux_module_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleScalarTransport => { generated :: flux_module_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleScalarTransportSou => { generated :: flux_module_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressure => { generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressureAle => { generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressureAleMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressureMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachThermal => { generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachThermalAle => { generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachThermalAleMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachThermalMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateBuoyantIncompressible => { generated :: fusion_packed_state_gradients_assembly_grad_state_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateBuoyantIncompressibleMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateCompressible => { generated :: fusion_packed_state_gradients_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateCompressibleMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateCompressibleMmsBiharmonic => { generated :: fusion_packed_state_gradients_assembly_grad_state_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemo => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMmsDirichlet => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMmsNeumann => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentum => { generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentumAle => { generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentumAleMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentumMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateScalarTransport => { generated :: fusion_packed_state_gradients_assembly_grad_state_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateScalarTransportSou => { generated :: fusion_packed_state_gradients_assembly_grad_state_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyAllmachPressure => { generated :: generic_coupled_assembly_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyAllmachPressureAle => { generated :: generic_coupled_assembly_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyAllmachPressureAleMms => { generated :: generic_coupled_assembly_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyAllmachPressureMms => { generated :: generic_coupled_assembly_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyAllmachThermal => { generated :: generic_coupled_assembly_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyAllmachThermalAle => { generated :: generic_coupled_assembly_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyAllmachThermalAleMms => { generated :: generic_coupled_assembly_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyAllmachThermalMms => { generated :: generic_coupled_assembly_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyBuoyantIncompressible => { generated :: generic_coupled_assembly_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyBuoyantIncompressibleMms => { generated :: generic_coupled_assembly_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressibleMms => { generated :: generic_coupled_assembly_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressibleMmsBiharmonic => { generated :: generic_coupled_assembly_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMms => { generated :: generic_coupled_assembly_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMmsDirichlet => { generated :: generic_coupled_assembly_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMmsNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoStructured => { generated :: generic_coupled_assembly_generic_diffusion_demo_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoStructuredIbm => { generated :: generic_coupled_assembly_generic_diffusion_demo_structured_ibm :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoStructuredMms => { generated :: generic_coupled_assembly_generic_diffusion_demo_structured_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachPressure => { generated :: generic_coupled_assembly_grad_state_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachPressureAle => { generated :: generic_coupled_assembly_grad_state_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachPressureAleMms => { generated :: generic_coupled_assembly_grad_state_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachPressureMms => { generated :: generic_coupled_assembly_grad_state_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachThermal => { generated :: generic_coupled_assembly_grad_state_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachThermalAle => { generated :: generic_coupled_assembly_grad_state_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachThermalAleMms => { generated :: generic_coupled_assembly_grad_state_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachThermalMms => { generated :: generic_coupled_assembly_grad_state_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateBuoyantIncompressible => { generated :: generic_coupled_assembly_grad_state_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateBuoyantIncompressibleMms => { generated :: generic_coupled_assembly_grad_state_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => { generated :: generic_coupled_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressibleMms => { generated :: generic_coupled_assembly_grad_state_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressibleMmsBiharmonic => { generated :: generic_coupled_assembly_grad_state_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMms => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMmsDirichlet => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMmsNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoStructured => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoStructuredIbm => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_structured_ibm :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoStructuredMms => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_structured_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumAle => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumAleMms => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumMms => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressure => { generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressureAle => { generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressureAleMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressureMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachThermal => { generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachThermalAle => { generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachThermalAleMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachThermalMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyBuoyantIncompressible => { generated :: generic_coupled_assembly_grad_state_rhs_only_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyBuoyantIncompressibleMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyCompressible => { generated :: generic_coupled_assembly_grad_state_rhs_only_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyCompressibleMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyCompressibleMmsBiharmonic => { generated :: generic_coupled_assembly_grad_state_rhs_only_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemo => { generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoMmsDirichlet => { generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoMmsNeumann => { generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoStructured => { generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoStructuredIbm => { generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_structured_ibm :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoStructuredMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_structured_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentum => { generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumAle => { generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumAleMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyScalarTransport => { generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyScalarTransportSou => { generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateScalarTransport => { generated :: generic_coupled_assembly_grad_state_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateScalarTransportSou => { generated :: generic_coupled_assembly_grad_state_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => { generated :: generic_coupled_assembly_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumAle => { generated :: generic_coupled_assembly_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumAleMms => { generated :: generic_coupled_assembly_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumMms => { generated :: generic_coupled_assembly_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressure => { generated :: generic_coupled_assembly_rhs_only_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressureAle => { generated :: generic_coupled_assembly_rhs_only_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressureAleMms => { generated :: generic_coupled_assembly_rhs_only_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressureMms => { generated :: generic_coupled_assembly_rhs_only_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachThermal => { generated :: generic_coupled_assembly_rhs_only_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachThermalAle => { generated :: generic_coupled_assembly_rhs_only_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachThermalAleMms => { generated :: generic_coupled_assembly_rhs_only_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachThermalMms => { generated :: generic_coupled_assembly_rhs_only_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyBuoyantIncompressible => { generated :: generic_coupled_assembly_rhs_only_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyBuoyantIncompressibleMms => { generated :: generic_coupled_assembly_rhs_only_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyCompressible => { generated :: generic_coupled_assembly_rhs_only_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyCompressibleMms => { generated :: generic_coupled_assembly_rhs_only_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyCompressibleMmsBiharmonic => { generated :: generic_coupled_assembly_rhs_only_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemo => { generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoMms => { generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoMmsDirichlet => { generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoMmsNeumann => { generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoStructured => { generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoStructuredIbm => { generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_structured_ibm :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoStructuredMms => { generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_structured_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentum => { generated :: generic_coupled_assembly_rhs_only_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumAle => { generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumAleMms => { generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumMms => { generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyScalarTransport => { generated :: generic_coupled_assembly_rhs_only_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyScalarTransportSou => { generated :: generic_coupled_assembly_rhs_only_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyScalarTransport => { generated :: generic_coupled_assembly_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyScalarTransportSou => { generated :: generic_coupled_assembly_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledSchurSetup => { generated :: generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateAllmachPressure => { generated :: generic_coupled_update_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateAllmachPressureAle => { generated :: generic_coupled_update_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateAllmachPressureAleMms => { generated :: generic_coupled_update_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateAllmachPressureMms => { generated :: generic_coupled_update_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateAllmachThermal => { generated :: generic_coupled_update_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateAllmachThermalAle => { generated :: generic_coupled_update_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateAllmachThermalAleMms => { generated :: generic_coupled_update_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateAllmachThermalMms => { generated :: generic_coupled_update_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateBuoyantIncompressible => { generated :: generic_coupled_update_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateBuoyantIncompressibleMms => { generated :: generic_coupled_update_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressibleMms => { generated :: generic_coupled_update_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressibleMmsBiharmonic => { generated :: generic_coupled_update_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachPressure => { generated :: generic_coupled_update_dp_init_fused_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachPressureAle => { generated :: generic_coupled_update_dp_init_fused_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachPressureAleMms => { generated :: generic_coupled_update_dp_init_fused_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachPressureMms => { generated :: generic_coupled_update_dp_init_fused_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachThermal => { generated :: generic_coupled_update_dp_init_fused_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachThermalAle => { generated :: generic_coupled_update_dp_init_fused_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachThermalAleMms => { generated :: generic_coupled_update_dp_init_fused_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachThermalMms => { generated :: generic_coupled_update_dp_init_fused_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedBuoyantIncompressible => { generated :: generic_coupled_update_dp_init_fused_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedBuoyantIncompressibleMms => { generated :: generic_coupled_update_dp_init_fused_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentum => { generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentumAle => { generated :: generic_coupled_update_dp_init_fused_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentumAleMms => { generated :: generic_coupled_update_dp_init_fused_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentumMms => { generated :: generic_coupled_update_dp_init_fused_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMms => { generated :: generic_coupled_update_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMmsDirichlet => { generated :: generic_coupled_update_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMmsNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoStructured => { generated :: generic_coupled_update_generic_diffusion_demo_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoStructuredIbm => { generated :: generic_coupled_update_generic_diffusion_demo_structured_ibm :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoStructuredMms => { generated :: generic_coupled_update_generic_diffusion_demo_structured_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => { generated :: generic_coupled_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumAle => { generated :: generic_coupled_update_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumAleMms => { generated :: generic_coupled_update_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumMms => { generated :: generic_coupled_update_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateScalarTransport => { generated :: generic_coupled_update_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateScalarTransportSou => { generated :: generic_coupled_update_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGmresCgs => { generated :: gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GeneratedGmresLogic => { generated :: gmres_logic :: create_shader_module_embed_source (device) } , Self :: GeneratedGmresOps => { generated :: gmres_ops :: create_shader_module_embed_source (device) } , Self :: GeneratedGmresUpdateFused => { generated :: gmres_update_fused :: create_shader_module_embed_source (device) } , Self :: GeneratedLinearSolver => { generated :: linear_solver :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterConvergence => { generated :: outer_convergence :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterConvergenceBreak => { generated :: outer_convergence_break :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterGate => { generated :: outer_gate :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterStopInjectCg => { generated :: outer_stop_inject_cg :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterStopInjectFgmres => { generated :: outer_stop_inject_fgmres :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsAllmachPressure => { generated :: packed_state_gradients_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsAllmachPressureAle => { generated :: packed_state_gradients_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsAllmachPressureAleMms => { generated :: packed_state_gradients_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsAllmachPressureMms => { generated :: packed_state_gradients_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsAllmachThermal => { generated :: packed_state_gradients_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsAllmachThermalAle => { generated :: packed_state_gradients_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsAllmachThermalAleMms => { generated :: packed_state_gradients_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsAllmachThermalMms => { generated :: packed_state_gradients_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsBuoyantIncompressible => { generated :: packed_state_gradients_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsBuoyantIncompressibleMms => { generated :: packed_state_gradients_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressible => { generated :: packed_state_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressibleMms => { generated :: packed_state_gradients_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressibleMmsBiharmonic => { generated :: packed_state_gradients_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => { generated :: packed_state_gradients_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMms => { generated :: packed_state_gradients_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMmsDirichlet => { generated :: packed_state_gradients_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMmsNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoStructured => { generated :: packed_state_gradients_generic_diffusion_demo_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoStructuredIbm => { generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoStructuredMms => { generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => { generated :: packed_state_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentumAle => { generated :: packed_state_gradients_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentumAleMms => { generated :: packed_state_gradients_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentumMms => { generated :: packed_state_gradients_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsScalarTransport => { generated :: packed_state_gradients_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsScalarTransportSou => { generated :: packed_state_gradients_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachPressure => { generated :: rhie_chow_correct_velocity_delta_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachPressureAle => { generated :: rhie_chow_correct_velocity_delta_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachPressureAleMms => { generated :: rhie_chow_correct_velocity_delta_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachPressureMms => { generated :: rhie_chow_correct_velocity_delta_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachThermal => { generated :: rhie_chow_correct_velocity_delta_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachThermalAle => { generated :: rhie_chow_correct_velocity_delta_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachThermalAleMms => { generated :: rhie_chow_correct_velocity_delta_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachThermalMms => { generated :: rhie_chow_correct_velocity_delta_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaBuoyantIncompressible => { generated :: rhie_chow_correct_velocity_delta_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaBuoyantIncompressibleMms => { generated :: rhie_chow_correct_velocity_delta_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => { generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumAle => { generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumAleMms => { generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumMms => { generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressure => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAle => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAleMms => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureMms => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermal => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAle => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAleMms => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalMms => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressible => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressibleMms => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAle => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAleMms => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumMms => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachPressure => { generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachPressureAle => { generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachPressureAleMms => { generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachPressureMms => { generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachThermal => { generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachThermalAle => { generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachThermalAleMms => { generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachThermalMms => { generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedBuoyantIncompressible => { generated :: rhie_chow_dp_update_store_grad_p_fused_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedBuoyantIncompressibleMms => { generated :: rhie_chow_dp_update_store_grad_p_fused_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentumAle => { generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentumAleMms => { generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentumMms => { generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressure => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAle => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAleMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermal => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAle => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAleMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressible => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressibleMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAle => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAleMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachPressure => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachPressureAle => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachPressureAleMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachPressureMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachThermal => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachThermalAle => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachThermalAleMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachThermalMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedBuoyantIncompressible => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedBuoyantIncompressibleMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentumAle => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentumAleMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentumMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateAllmachPressure => { generated :: rhie_chow_grad_p_update_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateAllmachPressureAle => { generated :: rhie_chow_grad_p_update_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateAllmachPressureAleMms => { generated :: rhie_chow_grad_p_update_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateAllmachPressureMms => { generated :: rhie_chow_grad_p_update_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateAllmachThermal => { generated :: rhie_chow_grad_p_update_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateAllmachThermalAle => { generated :: rhie_chow_grad_p_update_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateAllmachThermalAleMms => { generated :: rhie_chow_grad_p_update_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateAllmachThermalMms => { generated :: rhie_chow_grad_p_update_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateBuoyantIncompressible => { generated :: rhie_chow_grad_p_update_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateBuoyantIncompressibleMms => { generated :: rhie_chow_grad_p_update_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachPressure => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAle => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAleMms => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachPressureMms => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachThermal => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAle => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAleMms => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachThermalMms => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressible => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressibleMms => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAle => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAleMms => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumMms => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => { generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentumAle => { generated :: rhie_chow_grad_p_update_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentumAleMms => { generated :: rhie_chow_grad_p_update_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentumMms => { generated :: rhie_chow_grad_p_update_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPAllmachPressure => { generated :: rhie_chow_store_grad_p_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPAllmachPressureAle => { generated :: rhie_chow_store_grad_p_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPAllmachPressureAleMms => { generated :: rhie_chow_store_grad_p_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPAllmachPressureMms => { generated :: rhie_chow_store_grad_p_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPAllmachThermal => { generated :: rhie_chow_store_grad_p_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPAllmachThermalAle => { generated :: rhie_chow_store_grad_p_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPAllmachThermalAleMms => { generated :: rhie_chow_store_grad_p_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPAllmachThermalMms => { generated :: rhie_chow_store_grad_p_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPBuoyantIncompressible => { generated :: rhie_chow_store_grad_p_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPBuoyantIncompressibleMms => { generated :: rhie_chow_store_grad_p_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachPressure => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachPressureAle => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachPressureAleMms => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachPressureMms => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachThermal => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachThermalAle => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachThermalAleMms => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachThermalMms => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedBuoyantIncompressible => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedBuoyantIncompressibleMms => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentum => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentumAle => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentumAleMms => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentumMms => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => { generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentumAle => { generated :: rhie_chow_store_grad_p_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentumAleMms => { generated :: rhie_chow_store_grad_p_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentumMms => { generated :: rhie_chow_store_grad_p_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedScalars => { generated :: scalars :: create_shader_module_embed_source (device) } , Self :: GeneratedSchurPrecondGeneric => { generated :: schur_precond_generic :: create_shader_module_embed_source (device) } , }
+        match self { Self :: GeneratedAmg => { generated :: amg :: create_shader_module_embed_source (device) } , Self :: GeneratedBcExprUpdateCompressible => { generated :: bc_expr_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedBcExprUpdateCompressibleMms => { generated :: bc_expr_update_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedBcExprUpdateCompressibleMmsBiharmonic => { generated :: bc_expr_update_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedBlockPrecond => { generated :: block_precond :: create_shader_module_embed_source (device) } , Self :: GeneratedDotProduct => { generated :: dot_product :: create_shader_module_embed_source (device) } , Self :: GeneratedDotProductPair => { generated :: dot_product_pair :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitAllmachPressure => { generated :: dp_init_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitAllmachPressureAle => { generated :: dp_init_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitAllmachPressureAleMms => { generated :: dp_init_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitAllmachPressureMms => { generated :: dp_init_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitAllmachThermal => { generated :: dp_init_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitAllmachThermalAle => { generated :: dp_init_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitAllmachThermalAleMms => { generated :: dp_init_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitAllmachThermalMms => { generated :: dp_init_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitBuoyantIncompressible => { generated :: dp_init_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitBuoyantIncompressibleMms => { generated :: dp_init_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentum => { generated :: dp_init_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentumAle => { generated :: dp_init_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentumAleMms => { generated :: dp_init_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentumMms => { generated :: dp_init_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpInitIncompressibleMomentumStructured => { generated :: dp_init_incompressible_momentum_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagAllmachPressure => { generated :: dp_update_from_diag_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagAllmachPressureAle => { generated :: dp_update_from_diag_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagAllmachPressureAleMms => { generated :: dp_update_from_diag_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagAllmachPressureMms => { generated :: dp_update_from_diag_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagAllmachThermal => { generated :: dp_update_from_diag_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagAllmachThermalAle => { generated :: dp_update_from_diag_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagAllmachThermalAleMms => { generated :: dp_update_from_diag_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagAllmachThermalMms => { generated :: dp_update_from_diag_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagBuoyantIncompressible => { generated :: dp_update_from_diag_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagBuoyantIncompressibleMms => { generated :: dp_update_from_diag_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentum => { generated :: dp_update_from_diag_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentumAle => { generated :: dp_update_from_diag_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentumAleMms => { generated :: dp_update_from_diag_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentumMms => { generated :: dp_update_from_diag_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedDpUpdateFromDiagIncompressibleMomentumStructured => { generated :: dp_update_from_diag_incompressible_momentum_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleAllmachPressure => { generated :: flux_module_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleAllmachPressureAle => { generated :: flux_module_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleAllmachPressureAleMms => { generated :: flux_module_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleAllmachPressureMms => { generated :: flux_module_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleAllmachThermal => { generated :: flux_module_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleAllmachThermalAle => { generated :: flux_module_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleAllmachThermalAleMms => { generated :: flux_module_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleAllmachThermalMms => { generated :: flux_module_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleBuoyantIncompressible => { generated :: flux_module_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleBuoyantIncompressibleMms => { generated :: flux_module_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressible => { generated :: flux_module_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressibleMms => { generated :: flux_module_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleCompressibleMmsBiharmonic => { generated :: flux_module_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsAllmachPressure => { generated :: flux_module_gradients_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsAllmachPressureAle => { generated :: flux_module_gradients_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsAllmachPressureAleMms => { generated :: flux_module_gradients_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsAllmachPressureMms => { generated :: flux_module_gradients_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsAllmachThermal => { generated :: flux_module_gradients_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsAllmachThermalAle => { generated :: flux_module_gradients_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsAllmachThermalAleMms => { generated :: flux_module_gradients_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsAllmachThermalMms => { generated :: flux_module_gradients_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsBuoyantIncompressible => { generated :: flux_module_gradients_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsBuoyantIncompressibleMms => { generated :: flux_module_gradients_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsCompressible => { generated :: flux_module_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsCompressibleMms => { generated :: flux_module_gradients_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsCompressibleMmsBiharmonic => { generated :: flux_module_gradients_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentum => { generated :: flux_module_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentumAle => { generated :: flux_module_gradients_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentumAleMms => { generated :: flux_module_gradients_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentumMms => { generated :: flux_module_gradients_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleGradientsIncompressibleMomentumStructured => { generated :: flux_module_gradients_incompressible_momentum_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentum => { generated :: flux_module_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentumAle => { generated :: flux_module_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentumAleMms => { generated :: flux_module_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentumMms => { generated :: flux_module_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleIncompressibleMomentumStructured => { generated :: flux_module_incompressible_momentum_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleScalarTransport => { generated :: flux_module_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedFluxModuleScalarTransportSou => { generated :: flux_module_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressure => { generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressureAle => { generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressureAleMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachPressureMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachThermal => { generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachThermalAle => { generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachThermalAleMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateAllmachThermalMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateBuoyantIncompressible => { generated :: fusion_packed_state_gradients_assembly_grad_state_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateBuoyantIncompressibleMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateCompressible => { generated :: fusion_packed_state_gradients_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateCompressibleMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateCompressibleMmsBiharmonic => { generated :: fusion_packed_state_gradients_assembly_grad_state_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemo => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMmsDirichlet => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoMmsNeumann => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: fusion_packed_state_gradients_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentum => { generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentumAle => { generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentumAleMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateIncompressibleMomentumMms => { generated :: fusion_packed_state_gradients_assembly_grad_state_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateScalarTransport => { generated :: fusion_packed_state_gradients_assembly_grad_state_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedFusionPackedStateGradientsAssemblyGradStateScalarTransportSou => { generated :: fusion_packed_state_gradients_assembly_grad_state_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledApply => { generated :: generic_coupled_apply :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyAllmachPressure => { generated :: generic_coupled_assembly_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyAllmachPressureAle => { generated :: generic_coupled_assembly_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyAllmachPressureAleMms => { generated :: generic_coupled_assembly_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyAllmachPressureMms => { generated :: generic_coupled_assembly_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyAllmachThermal => { generated :: generic_coupled_assembly_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyAllmachThermalAle => { generated :: generic_coupled_assembly_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyAllmachThermalAleMms => { generated :: generic_coupled_assembly_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyAllmachThermalMms => { generated :: generic_coupled_assembly_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyBuoyantIncompressible => { generated :: generic_coupled_assembly_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyBuoyantIncompressibleMms => { generated :: generic_coupled_assembly_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressible => { generated :: generic_coupled_assembly_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressibleMms => { generated :: generic_coupled_assembly_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyCompressibleMmsBiharmonic => { generated :: generic_coupled_assembly_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemo => { generated :: generic_coupled_assembly_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMms => { generated :: generic_coupled_assembly_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMmsDirichlet => { generated :: generic_coupled_assembly_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoMmsNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoStructured => { generated :: generic_coupled_assembly_generic_diffusion_demo_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoStructuredIbm => { generated :: generic_coupled_assembly_generic_diffusion_demo_structured_ibm :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGenericDiffusionDemoStructuredMms => { generated :: generic_coupled_assembly_generic_diffusion_demo_structured_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachPressure => { generated :: generic_coupled_assembly_grad_state_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachPressureAle => { generated :: generic_coupled_assembly_grad_state_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachPressureAleMms => { generated :: generic_coupled_assembly_grad_state_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachPressureMms => { generated :: generic_coupled_assembly_grad_state_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachThermal => { generated :: generic_coupled_assembly_grad_state_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachThermalAle => { generated :: generic_coupled_assembly_grad_state_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachThermalAleMms => { generated :: generic_coupled_assembly_grad_state_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateAllmachThermalMms => { generated :: generic_coupled_assembly_grad_state_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateBuoyantIncompressible => { generated :: generic_coupled_assembly_grad_state_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateBuoyantIncompressibleMms => { generated :: generic_coupled_assembly_grad_state_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressible => { generated :: generic_coupled_assembly_grad_state_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressibleMms => { generated :: generic_coupled_assembly_grad_state_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateCompressibleMmsBiharmonic => { generated :: generic_coupled_assembly_grad_state_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemo => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMms => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMmsDirichlet => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoMmsNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoStructured => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoStructuredIbm => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_structured_ibm :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateGenericDiffusionDemoStructuredMms => { generated :: generic_coupled_assembly_grad_state_generic_diffusion_demo_structured_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentum => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumAle => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumAleMms => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumMms => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumStructured => { generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressure => { generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressureAle => { generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressureAleMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachPressureMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachThermal => { generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachThermalAle => { generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachThermalAleMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyAllmachThermalMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyBuoyantIncompressible => { generated :: generic_coupled_assembly_grad_state_rhs_only_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyBuoyantIncompressibleMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyCompressible => { generated :: generic_coupled_assembly_grad_state_rhs_only_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyCompressibleMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyCompressibleMmsBiharmonic => { generated :: generic_coupled_assembly_grad_state_rhs_only_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemo => { generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoMmsDirichlet => { generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoMmsNeumann => { generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoStructured => { generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoStructuredIbm => { generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_structured_ibm :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyGenericDiffusionDemoStructuredMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_generic_diffusion_demo_structured_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentum => { generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumAle => { generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumAleMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumMms => { generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumStructured => { generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyScalarTransport => { generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateRhsOnlyScalarTransportSou => { generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateScalarTransport => { generated :: generic_coupled_assembly_grad_state_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyGradStateScalarTransportSou => { generated :: generic_coupled_assembly_grad_state_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentum => { generated :: generic_coupled_assembly_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumAle => { generated :: generic_coupled_assembly_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumAleMms => { generated :: generic_coupled_assembly_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumMms => { generated :: generic_coupled_assembly_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyIncompressibleMomentumStructured => { generated :: generic_coupled_assembly_incompressible_momentum_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressure => { generated :: generic_coupled_assembly_rhs_only_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressureAle => { generated :: generic_coupled_assembly_rhs_only_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressureAleMms => { generated :: generic_coupled_assembly_rhs_only_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachPressureMms => { generated :: generic_coupled_assembly_rhs_only_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachThermal => { generated :: generic_coupled_assembly_rhs_only_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachThermalAle => { generated :: generic_coupled_assembly_rhs_only_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachThermalAleMms => { generated :: generic_coupled_assembly_rhs_only_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyAllmachThermalMms => { generated :: generic_coupled_assembly_rhs_only_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyBuoyantIncompressible => { generated :: generic_coupled_assembly_rhs_only_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyBuoyantIncompressibleMms => { generated :: generic_coupled_assembly_rhs_only_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyCompressible => { generated :: generic_coupled_assembly_rhs_only_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyCompressibleMms => { generated :: generic_coupled_assembly_rhs_only_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyCompressibleMmsBiharmonic => { generated :: generic_coupled_assembly_rhs_only_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemo => { generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoMms => { generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoMmsDirichlet => { generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoMmsNeumann => { generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoNeumann => { generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoStructured => { generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoStructuredIbm => { generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_structured_ibm :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyGenericDiffusionDemoStructuredMms => { generated :: generic_coupled_assembly_rhs_only_generic_diffusion_demo_structured_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentum => { generated :: generic_coupled_assembly_rhs_only_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumAle => { generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumAleMms => { generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumMms => { generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumStructured => { generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyScalarTransport => { generated :: generic_coupled_assembly_rhs_only_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyRhsOnlyScalarTransportSou => { generated :: generic_coupled_assembly_rhs_only_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyScalarTransport => { generated :: generic_coupled_assembly_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledAssemblyScalarTransportSou => { generated :: generic_coupled_assembly_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledSchurSetup => { generated :: generic_coupled_schur_setup :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateAllmachPressure => { generated :: generic_coupled_update_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateAllmachPressureAle => { generated :: generic_coupled_update_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateAllmachPressureAleMms => { generated :: generic_coupled_update_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateAllmachPressureMms => { generated :: generic_coupled_update_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateAllmachThermal => { generated :: generic_coupled_update_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateAllmachThermalAle => { generated :: generic_coupled_update_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateAllmachThermalAleMms => { generated :: generic_coupled_update_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateAllmachThermalMms => { generated :: generic_coupled_update_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateBuoyantIncompressible => { generated :: generic_coupled_update_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateBuoyantIncompressibleMms => { generated :: generic_coupled_update_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressible => { generated :: generic_coupled_update_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressibleMms => { generated :: generic_coupled_update_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateCompressibleMmsBiharmonic => { generated :: generic_coupled_update_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachPressure => { generated :: generic_coupled_update_dp_init_fused_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachPressureAle => { generated :: generic_coupled_update_dp_init_fused_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachPressureAleMms => { generated :: generic_coupled_update_dp_init_fused_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachPressureMms => { generated :: generic_coupled_update_dp_init_fused_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachThermal => { generated :: generic_coupled_update_dp_init_fused_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachThermalAle => { generated :: generic_coupled_update_dp_init_fused_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachThermalAleMms => { generated :: generic_coupled_update_dp_init_fused_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedAllmachThermalMms => { generated :: generic_coupled_update_dp_init_fused_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedBuoyantIncompressible => { generated :: generic_coupled_update_dp_init_fused_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedBuoyantIncompressibleMms => { generated :: generic_coupled_update_dp_init_fused_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentum => { generated :: generic_coupled_update_dp_init_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentumAle => { generated :: generic_coupled_update_dp_init_fused_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentumAleMms => { generated :: generic_coupled_update_dp_init_fused_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateDpInitFusedIncompressibleMomentumMms => { generated :: generic_coupled_update_dp_init_fused_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemo => { generated :: generic_coupled_update_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMms => { generated :: generic_coupled_update_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMmsDirichlet => { generated :: generic_coupled_update_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoMmsNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoNeumann => { generated :: generic_coupled_update_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoStructured => { generated :: generic_coupled_update_generic_diffusion_demo_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoStructuredIbm => { generated :: generic_coupled_update_generic_diffusion_demo_structured_ibm :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateGenericDiffusionDemoStructuredMms => { generated :: generic_coupled_update_generic_diffusion_demo_structured_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentum => { generated :: generic_coupled_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumAle => { generated :: generic_coupled_update_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumAleMms => { generated :: generic_coupled_update_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumMms => { generated :: generic_coupled_update_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateIncompressibleMomentumStructured => { generated :: generic_coupled_update_incompressible_momentum_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateScalarTransport => { generated :: generic_coupled_update_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedGenericCoupledUpdateScalarTransportSou => { generated :: generic_coupled_update_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedGmresCgs => { generated :: gmres_cgs :: create_shader_module_embed_source (device) } , Self :: GeneratedGmresLogic => { generated :: gmres_logic :: create_shader_module_embed_source (device) } , Self :: GeneratedGmresOps => { generated :: gmres_ops :: create_shader_module_embed_source (device) } , Self :: GeneratedGmresUpdateFused => { generated :: gmres_update_fused :: create_shader_module_embed_source (device) } , Self :: GeneratedLinearSolver => { generated :: linear_solver :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterConvergence => { generated :: outer_convergence :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterConvergenceBreak => { generated :: outer_convergence_break :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterGate => { generated :: outer_gate :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterStopInjectCg => { generated :: outer_stop_inject_cg :: create_shader_module_embed_source (device) } , Self :: GeneratedOuterStopInjectFgmres => { generated :: outer_stop_inject_fgmres :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsAllmachPressure => { generated :: packed_state_gradients_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsAllmachPressureAle => { generated :: packed_state_gradients_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsAllmachPressureAleMms => { generated :: packed_state_gradients_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsAllmachPressureMms => { generated :: packed_state_gradients_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsAllmachThermal => { generated :: packed_state_gradients_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsAllmachThermalAle => { generated :: packed_state_gradients_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsAllmachThermalAleMms => { generated :: packed_state_gradients_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsAllmachThermalMms => { generated :: packed_state_gradients_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsBuoyantIncompressible => { generated :: packed_state_gradients_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsBuoyantIncompressibleMms => { generated :: packed_state_gradients_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressible => { generated :: packed_state_gradients_compressible :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressibleMms => { generated :: packed_state_gradients_compressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsCompressibleMmsBiharmonic => { generated :: packed_state_gradients_compressible_mms_biharmonic :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemo => { generated :: packed_state_gradients_generic_diffusion_demo :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMms => { generated :: packed_state_gradients_generic_diffusion_demo_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMmsDirichlet => { generated :: packed_state_gradients_generic_diffusion_demo_mms_dirichlet :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoMmsNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_mms_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoNeumann => { generated :: packed_state_gradients_generic_diffusion_demo_neumann :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoStructured => { generated :: packed_state_gradients_generic_diffusion_demo_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoStructuredIbm => { generated :: packed_state_gradients_generic_diffusion_demo_structured_ibm :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsGenericDiffusionDemoStructuredMms => { generated :: packed_state_gradients_generic_diffusion_demo_structured_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentum => { generated :: packed_state_gradients_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentumAle => { generated :: packed_state_gradients_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentumAleMms => { generated :: packed_state_gradients_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentumMms => { generated :: packed_state_gradients_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsIncompressibleMomentumStructured => { generated :: packed_state_gradients_incompressible_momentum_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsScalarTransport => { generated :: packed_state_gradients_scalar_transport :: create_shader_module_embed_source (device) } , Self :: GeneratedPackedStateGradientsScalarTransportSou => { generated :: packed_state_gradients_scalar_transport_sou :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachPressure => { generated :: rhie_chow_correct_velocity_delta_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachPressureAle => { generated :: rhie_chow_correct_velocity_delta_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachPressureAleMms => { generated :: rhie_chow_correct_velocity_delta_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachPressureMms => { generated :: rhie_chow_correct_velocity_delta_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachThermal => { generated :: rhie_chow_correct_velocity_delta_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachThermalAle => { generated :: rhie_chow_correct_velocity_delta_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachThermalAleMms => { generated :: rhie_chow_correct_velocity_delta_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaAllmachThermalMms => { generated :: rhie_chow_correct_velocity_delta_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaBuoyantIncompressible => { generated :: rhie_chow_correct_velocity_delta_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaBuoyantIncompressibleMms => { generated :: rhie_chow_correct_velocity_delta_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentum => { generated :: rhie_chow_correct_velocity_delta_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumAle => { generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumAleMms => { generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumMms => { generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumStructured => { generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressure => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAle => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAleMms => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureMms => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermal => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAle => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAleMms => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalMms => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressible => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressibleMms => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAle => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAleMms => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpInitDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumMms => { generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachPressure => { generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachPressureAle => { generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachPressureAleMms => { generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachPressureMms => { generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachThermal => { generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachThermalAle => { generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachThermalAleMms => { generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedAllmachThermalMms => { generated :: rhie_chow_dp_update_store_grad_p_fused_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedBuoyantIncompressible => { generated :: rhie_chow_dp_update_store_grad_p_fused_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedBuoyantIncompressibleMms => { generated :: rhie_chow_dp_update_store_grad_p_fused_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentumAle => { generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentumAleMms => { generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPFusedIncompressibleMomentumMms => { generated :: rhie_chow_dp_update_store_grad_p_fused_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressure => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAle => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAleMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachPressureMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermal => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAle => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAleMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedAllmachThermalMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressible => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressibleMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAle => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAleMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachPressure => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachPressureAle => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachPressureAleMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachPressureMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachThermal => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachThermalAle => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachThermalAleMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedAllmachThermalMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedBuoyantIncompressible => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedBuoyantIncompressibleMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentum => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentumAle => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentumAleMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowDpUpdateStoreGradPGradPUpdateFusedIncompressibleMomentumMms => { generated :: rhie_chow_dp_update_store_grad_p_grad_p_update_fused_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateAllmachPressure => { generated :: rhie_chow_grad_p_update_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateAllmachPressureAle => { generated :: rhie_chow_grad_p_update_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateAllmachPressureAleMms => { generated :: rhie_chow_grad_p_update_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateAllmachPressureMms => { generated :: rhie_chow_grad_p_update_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateAllmachThermal => { generated :: rhie_chow_grad_p_update_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateAllmachThermalAle => { generated :: rhie_chow_grad_p_update_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateAllmachThermalAleMms => { generated :: rhie_chow_grad_p_update_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateAllmachThermalMms => { generated :: rhie_chow_grad_p_update_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateBuoyantIncompressible => { generated :: rhie_chow_grad_p_update_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateBuoyantIncompressibleMms => { generated :: rhie_chow_grad_p_update_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachPressure => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAle => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachPressureAleMms => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachPressureMms => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachThermal => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAle => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachThermalAleMms => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedAllmachThermalMms => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressible => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedBuoyantIncompressibleMms => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentum => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAle => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumAleMms => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateCorrectVelocityDeltaFusedIncompressibleMomentumMms => { generated :: rhie_chow_grad_p_update_correct_velocity_delta_fused_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentum => { generated :: rhie_chow_grad_p_update_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentumAle => { generated :: rhie_chow_grad_p_update_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentumAleMms => { generated :: rhie_chow_grad_p_update_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentumMms => { generated :: rhie_chow_grad_p_update_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowGradPUpdateIncompressibleMomentumStructured => { generated :: rhie_chow_grad_p_update_incompressible_momentum_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPAllmachPressure => { generated :: rhie_chow_store_grad_p_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPAllmachPressureAle => { generated :: rhie_chow_store_grad_p_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPAllmachPressureAleMms => { generated :: rhie_chow_store_grad_p_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPAllmachPressureMms => { generated :: rhie_chow_store_grad_p_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPAllmachThermal => { generated :: rhie_chow_store_grad_p_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPAllmachThermalAle => { generated :: rhie_chow_store_grad_p_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPAllmachThermalAleMms => { generated :: rhie_chow_store_grad_p_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPAllmachThermalMms => { generated :: rhie_chow_store_grad_p_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPBuoyantIncompressible => { generated :: rhie_chow_store_grad_p_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPBuoyantIncompressibleMms => { generated :: rhie_chow_store_grad_p_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachPressure => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_pressure :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachPressureAle => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_pressure_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachPressureAleMms => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_pressure_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachPressureMms => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_pressure_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachThermal => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_thermal :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachThermalAle => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_thermal_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachThermalAleMms => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_thermal_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedAllmachThermalMms => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_allmach_thermal_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedBuoyantIncompressible => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_buoyant_incompressible :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedBuoyantIncompressibleMms => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_buoyant_incompressible_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentum => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentumAle => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentumAleMms => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPGradPUpdateFusedIncompressibleMomentumMms => { generated :: rhie_chow_store_grad_p_grad_p_update_fused_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentum => { generated :: rhie_chow_store_grad_p_incompressible_momentum :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentumAle => { generated :: rhie_chow_store_grad_p_incompressible_momentum_ale :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentumAleMms => { generated :: rhie_chow_store_grad_p_incompressible_momentum_ale_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentumMms => { generated :: rhie_chow_store_grad_p_incompressible_momentum_mms :: create_shader_module_embed_source (device) } , Self :: GeneratedRhieChowStoreGradPIncompressibleMomentumStructured => { generated :: rhie_chow_store_grad_p_incompressible_momentum_structured :: create_shader_module_embed_source (device) } , Self :: GeneratedScalars => { generated :: scalars :: create_shader_module_embed_source (device) } , Self :: GeneratedSchurPrecondGeneric => { generated :: schur_precond_generic :: create_shader_module_embed_source (device) } , }
     }
 }
 mod _root {
@@ -1491,6 +1504,84 @@ pub mod layout_asserts {
         );
         assert!(
             std::mem::size_of::<generated::dp_init_incompressible_momentum_mms::Constants>() == 48
+        );
+    };
+    const GENERATED_DP_INIT_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_CONSTANTS_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_init_incompressible_momentum_structured::Constants,
+                dt
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_init_incompressible_momentum_structured::Constants,
+                dt_old
+            ) == 4
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_init_incompressible_momentum_structured::Constants,
+                dtau
+            ) == 8
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_init_incompressible_momentum_structured::Constants,
+                time
+            ) == 12
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_init_incompressible_momentum_structured::Constants,
+                viscosity
+            ) == 16
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_init_incompressible_momentum_structured::Constants,
+                density
+            ) == 20
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_init_incompressible_momentum_structured::Constants,
+                component
+            ) == 24
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_init_incompressible_momentum_structured::Constants,
+                alpha_p
+            ) == 28
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_init_incompressible_momentum_structured::Constants,
+                scheme
+            ) == 32
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_init_incompressible_momentum_structured::Constants,
+                alpha_u
+            ) == 36
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_init_incompressible_momentum_structured::Constants,
+                stride_x
+            ) == 40
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_init_incompressible_momentum_structured::Constants,
+                time_scheme
+            ) == 44
+        );
+        assert!(
+            std::mem::size_of::<generated::dp_init_incompressible_momentum_structured::Constants>()
+                == 48
         );
     };
     const GENERATED_DP_UPDATE_FROM_DIAG_ALLMACH_PRESSURE_CONSTANTS_ASSERTS: () = {
@@ -2583,6 +2674,85 @@ pub mod layout_asserts {
         assert!(
             std::mem::size_of::<
                 generated::dp_update_from_diag_incompressible_momentum_mms::Constants,
+            >() == 48
+        );
+    };
+    const GENERATED_DP_UPDATE_FROM_DIAG_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_CONSTANTS_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_update_from_diag_incompressible_momentum_structured::Constants,
+                dt
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_update_from_diag_incompressible_momentum_structured::Constants,
+                dt_old
+            ) == 4
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_update_from_diag_incompressible_momentum_structured::Constants,
+                dtau
+            ) == 8
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_update_from_diag_incompressible_momentum_structured::Constants,
+                time
+            ) == 12
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_update_from_diag_incompressible_momentum_structured::Constants,
+                viscosity
+            ) == 16
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_update_from_diag_incompressible_momentum_structured::Constants,
+                density
+            ) == 20
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_update_from_diag_incompressible_momentum_structured::Constants,
+                component
+            ) == 24
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_update_from_diag_incompressible_momentum_structured::Constants,
+                alpha_p
+            ) == 28
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_update_from_diag_incompressible_momentum_structured::Constants,
+                scheme
+            ) == 32
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_update_from_diag_incompressible_momentum_structured::Constants,
+                alpha_u
+            ) == 36
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_update_from_diag_incompressible_momentum_structured::Constants,
+                stride_x
+            ) == 40
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::dp_update_from_diag_incompressible_momentum_structured::Constants,
+                time_scheme
+            ) == 44
+        );
+        assert!(
+            std::mem::size_of::<
+                generated::dp_update_from_diag_incompressible_momentum_structured::Constants,
             >() == 48
         );
     };
@@ -5669,6 +5839,104 @@ pub mod layout_asserts {
             >() == 48
         );
     };
+    const GENERATED_FLUX_MODULE_GRADIENTS_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_VECTOR2_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_gradients_incompressible_momentum_structured::Vector2,
+                x
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_gradients_incompressible_momentum_structured::Vector2,
+                y
+            ) == 4
+        );
+        assert!(
+            std::mem::size_of::<
+                generated::flux_module_gradients_incompressible_momentum_structured::Vector2,
+            >() == 8
+        );
+    };
+    const GENERATED_FLUX_MODULE_GRADIENTS_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_CONSTANTS_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_gradients_incompressible_momentum_structured::Constants,
+                dt
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_gradients_incompressible_momentum_structured::Constants,
+                dt_old
+            ) == 4
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_gradients_incompressible_momentum_structured::Constants,
+                dtau
+            ) == 8
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_gradients_incompressible_momentum_structured::Constants,
+                time
+            ) == 12
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_gradients_incompressible_momentum_structured::Constants,
+                viscosity
+            ) == 16
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_gradients_incompressible_momentum_structured::Constants,
+                density
+            ) == 20
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_gradients_incompressible_momentum_structured::Constants,
+                component
+            ) == 24
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_gradients_incompressible_momentum_structured::Constants,
+                alpha_p
+            ) == 28
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_gradients_incompressible_momentum_structured::Constants,
+                scheme
+            ) == 32
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_gradients_incompressible_momentum_structured::Constants,
+                alpha_u
+            ) == 36
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_gradients_incompressible_momentum_structured::Constants,
+                stride_x
+            ) == 40
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_gradients_incompressible_momentum_structured::Constants,
+                time_scheme
+            ) == 44
+        );
+        assert!(
+            std::mem::size_of::<
+                generated::flux_module_gradients_incompressible_momentum_structured::Constants,
+            >() == 48
+        );
+    };
     const GENERATED_FLUX_MODULE_INCOMPRESSIBLE_MOMENTUM_VECTOR2_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(generated::flux_module_incompressible_momentum::Vector2, x) == 0
@@ -6185,6 +6453,138 @@ pub mod layout_asserts {
         assert!(
             std::mem::size_of::<generated::flux_module_incompressible_momentum_mms::Constants>()
                 == 72
+        );
+    };
+    const GENERATED_FLUX_MODULE_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_VECTOR2_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Vector2,
+                x
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Vector2,
+                y
+            ) == 4
+        );
+        assert!(
+            std::mem::size_of::<generated::flux_module_incompressible_momentum_structured::Vector2>(
+            ) == 8
+        );
+    };
+    const GENERATED_FLUX_MODULE_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_CONSTANTS_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                dt
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                dt_old
+            ) == 4
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                dtau
+            ) == 8
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                time
+            ) == 12
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                viscosity
+            ) == 16
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                density
+            ) == 20
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                component
+            ) == 24
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                alpha_p
+            ) == 28
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                scheme
+            ) == 32
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                alpha_u
+            ) == 36
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                stride_x
+            ) == 40
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                time_scheme
+            ) == 44
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                eos_gamma
+            ) == 48
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                eos_gm1
+            ) == 52
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                eos_r
+            ) == 56
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                eos_dp_drho
+            ) == 60
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                eos_p_offset
+            ) == 64
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::flux_module_incompressible_momentum_structured::Constants,
+                eos_theta_ref
+            ) == 68
+        );
+        assert!(
+            std::mem::size_of::<generated::flux_module_incompressible_momentum_structured::Constants>(
+            ) == 72
         );
     };
     const GENERATED_FLUX_MODULE_SCALAR_TRANSPORT_VECTOR2_ASSERTS: () = {
@@ -10203,6 +10603,9 @@ pub mod layout_asserts {
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_INCOMPRESSIBLE_MOMENTUM_ALE_MMS_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_incompressible_momentum_ale_mms :: Constants > () == 72) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_INCOMPRESSIBLE_MOMENTUM_MMS_VECTOR2_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Vector2 , x) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Vector2 , y) == 4) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Vector2 > () == 8) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_INCOMPRESSIBLE_MOMENTUM_MMS_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_incompressible_momentum_mms :: Constants > () == 72) ; } ;
+    const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_VECTOR2_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Vector2 , x) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Vector2 , y) == 4) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Vector2 > () == 8) ; } ;
+    const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_STRUCTURED_GRID_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: StructuredGrid , nx) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: StructuredGrid , ny) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: StructuredGrid , dx) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: StructuredGrid , dy) == 12) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: StructuredGrid > () == 16) ; } ;
+    const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants > () == 72) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY_ALLMACH_PRESSURE_VECTOR2_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Vector2 , x) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Vector2 , y) == 4) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Vector2 > () == 8) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY_ALLMACH_PRESSURE_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure :: Constants > () == 72) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY_ALLMACH_PRESSURE_ALE_VECTOR2_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure_ale :: Vector2 , x) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure_ale :: Vector2 , y) == 4) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_rhs_only_allmach_pressure_ale :: Vector2 > () == 8) ; } ;
@@ -10408,6 +10811,9 @@ pub mod layout_asserts {
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY_INCOMPRESSIBLE_MOMENTUM_ALE_MMS_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_ale_mms :: Constants > () == 72) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY_INCOMPRESSIBLE_MOMENTUM_MMS_VECTOR2_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Vector2 , x) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Vector2 , y) == 4) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Vector2 > () == 8) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY_INCOMPRESSIBLE_MOMENTUM_MMS_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants > () == 72) ; } ;
+    const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_VECTOR2_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Vector2 , x) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Vector2 , y) == 4) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Vector2 > () == 8) ; } ;
+    const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_STRUCTURED_GRID_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: StructuredGrid , nx) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: StructuredGrid , ny) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: StructuredGrid , dx) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: StructuredGrid , dy) == 12) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: StructuredGrid > () == 16) ; } ;
+    const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants > () == 72) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY_SCALAR_TRANSPORT_VECTOR2_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Vector2 , x) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Vector2 , y) == 4) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Vector2 > () == 8) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY_SCALAR_TRANSPORT_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport :: Constants > () == 72) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY_SCALAR_TRANSPORT_SOU_VECTOR2_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport_sou :: Vector2 , x) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport_sou :: Vector2 , y) == 4) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_grad_state_rhs_only_scalar_transport_sou :: Vector2 > () == 8) ; } ;
@@ -11215,6 +11621,8 @@ pub mod layout_asserts {
             >() == 72
         );
     };
+    const GENERATED_GENERIC_COUPLED_ASSEMBLY_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_STRUCTURED_GRID_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: StructuredGrid , nx) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: StructuredGrid , ny) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: StructuredGrid , dx) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: StructuredGrid , dy) == 12) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_incompressible_momentum_structured :: StructuredGrid > () == 16) ; } ;
+    const GENERATED_GENERIC_COUPLED_ASSEMBLY_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants > () == 72) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_RHS_ONLY_ALLMACH_PRESSURE_VECTOR2_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(
@@ -13038,6 +13446,8 @@ pub mod layout_asserts {
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_RHS_ONLY_INCOMPRESSIBLE_MOMENTUM_ALE_MMS_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_ale_mms :: Constants > () == 72) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_RHS_ONLY_INCOMPRESSIBLE_MOMENTUM_MMS_VECTOR2_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Vector2 , x) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Vector2 , y) == 4) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Vector2 > () == 8) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_RHS_ONLY_INCOMPRESSIBLE_MOMENTUM_MMS_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_mms :: Constants > () == 72) ; } ;
+    const GENERATED_GENERIC_COUPLED_ASSEMBLY_RHS_ONLY_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_STRUCTURED_GRID_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: StructuredGrid , nx) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: StructuredGrid , ny) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: StructuredGrid , dx) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: StructuredGrid , dy) == 12) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: StructuredGrid > () == 16) ; } ;
+    const GENERATED_GENERIC_COUPLED_ASSEMBLY_RHS_ONLY_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , eos_gamma) == 48) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , eos_gm1) == 52) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , eos_r) == 56) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , eos_dp_drho) == 60) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , eos_p_offset) == 64) ; assert ! (std :: mem :: offset_of ! (generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants , eos_theta_ref) == 68) ; assert ! (std :: mem :: size_of :: < generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants > () == 72) ; } ;
     const GENERATED_GENERIC_COUPLED_ASSEMBLY_RHS_ONLY_SCALAR_TRANSPORT_VECTOR2_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(
@@ -16852,6 +17262,122 @@ pub mod layout_asserts {
             >() == 72
         );
     };
+    const GENERATED_GENERIC_COUPLED_UPDATE_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_CONSTANTS_ASSERTS: (
+    ) = {
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                dt
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                dt_old
+            ) == 4
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                dtau
+            ) == 8
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                time
+            ) == 12
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                viscosity
+            ) == 16
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                density
+            ) == 20
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                component
+            ) == 24
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                alpha_p
+            ) == 28
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                scheme
+            ) == 32
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                alpha_u
+            ) == 36
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                stride_x
+            ) == 40
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                time_scheme
+            ) == 44
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                eos_gamma
+            ) == 48
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                eos_gm1
+            ) == 52
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                eos_r
+            ) == 56
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                eos_dp_drho
+            ) == 60
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                eos_p_offset
+            ) == 64
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+                eos_theta_ref
+            ) == 68
+        );
+        assert!(
+            std::mem::size_of::<
+                generated::generic_coupled_update_incompressible_momentum_structured::Constants,
+            >() == 72
+        );
+    };
     const GENERATED_GENERIC_COUPLED_UPDATE_SCALAR_TRANSPORT_CONSTANTS_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(
@@ -20217,6 +20743,141 @@ pub mod layout_asserts {
             >() == 72
         );
     };
+    const GENERATED_PACKED_STATE_GRADIENTS_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_VECTOR2_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Vector2,
+                x
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Vector2,
+                y
+            ) == 4
+        );
+        assert!(
+            std::mem::size_of::<
+                generated::packed_state_gradients_incompressible_momentum_structured::Vector2,
+            >() == 8
+        );
+    };
+    const GENERATED_PACKED_STATE_GRADIENTS_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_CONSTANTS_ASSERTS: (
+    ) = {
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                dt
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                dt_old
+            ) == 4
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                dtau
+            ) == 8
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                time
+            ) == 12
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                viscosity
+            ) == 16
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                density
+            ) == 20
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                component
+            ) == 24
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                alpha_p
+            ) == 28
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                scheme
+            ) == 32
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                alpha_u
+            ) == 36
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                stride_x
+            ) == 40
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                time_scheme
+            ) == 44
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                eos_gamma
+            ) == 48
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                eos_gm1
+            ) == 52
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                eos_r
+            ) == 56
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                eos_dp_drho
+            ) == 60
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                eos_p_offset
+            ) == 64
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+                eos_theta_ref
+            ) == 68
+        );
+        assert!(
+            std::mem::size_of::<
+                generated::packed_state_gradients_incompressible_momentum_structured::Constants,
+            >() == 72
+        );
+    };
     const GENERATED_PACKED_STATE_GRADIENTS_SCALAR_TRANSPORT_VECTOR2_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(
@@ -21275,6 +21936,7 @@ pub mod layout_asserts {
     const GENERATED_RHIE_CHOW_CORRECT_VELOCITY_DELTA_INCOMPRESSIBLE_MOMENTUM_ALE_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: size_of :: < generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale :: Constants > () == 48) ; } ;
     const GENERATED_RHIE_CHOW_CORRECT_VELOCITY_DELTA_INCOMPRESSIBLE_MOMENTUM_ALE_MMS_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: size_of :: < generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_ale_mms :: Constants > () == 48) ; } ;
     const GENERATED_RHIE_CHOW_CORRECT_VELOCITY_DELTA_INCOMPRESSIBLE_MOMENTUM_MMS_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: size_of :: < generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_mms :: Constants > () == 48) ; } ;
+    const GENERATED_RHIE_CHOW_CORRECT_VELOCITY_DELTA_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: size_of :: < generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: Constants > () == 48) ; } ;
     const GENERATED_RHIE_CHOW_DP_INIT_DP_UPDATE_STORE_GRAD_P_GRAD_P_UPDATE_CORRECT_VELOCITY_DELTA_FUSED_ALLMACH_PRESSURE_VECTOR2_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Vector2 , x) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Vector2 , y) == 4) ; assert ! (std :: mem :: size_of :: < generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Vector2 > () == 8) ; } ;
     const GENERATED_RHIE_CHOW_DP_INIT_DP_UPDATE_STORE_GRAD_P_GRAD_P_UPDATE_CORRECT_VELOCITY_DELTA_FUSED_ALLMACH_PRESSURE_CONSTANTS_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Constants , dt) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Constants , dt_old) == 4) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Constants , dtau) == 8) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Constants , time) == 12) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Constants , viscosity) == 16) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Constants , density) == 20) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Constants , component) == 24) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Constants , alpha_p) == 28) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Constants , scheme) == 32) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Constants , alpha_u) == 36) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Constants , stride_x) == 40) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Constants , time_scheme) == 44) ; assert ! (std :: mem :: size_of :: < generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Constants > () == 48) ; } ;
     const GENERATED_RHIE_CHOW_DP_INIT_DP_UPDATE_STORE_GRAD_P_GRAD_P_UPDATE_CORRECT_VELOCITY_DELTA_FUSED_ALLMACH_PRESSURE_ALE_VECTOR2_ASSERTS : () = { assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale :: Vector2 , x) == 0) ; assert ! (std :: mem :: offset_of ! (generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale :: Vector2 , y) == 4) ; assert ! (std :: mem :: size_of :: < generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure_ale :: Vector2 > () == 8) ; } ;
@@ -23069,6 +23731,105 @@ pub mod layout_asserts {
             >() == 48
         );
     };
+    const GENERATED_RHIE_CHOW_GRAD_P_UPDATE_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_VECTOR2_ASSERTS: () = {
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Vector2,
+                x
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Vector2,
+                y
+            ) == 4
+        );
+        assert!(
+            std::mem::size_of::<
+                generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Vector2,
+            >() == 8
+        );
+    };
+    const GENERATED_RHIE_CHOW_GRAD_P_UPDATE_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_CONSTANTS_ASSERTS: (
+    ) = {
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Constants,
+                dt
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Constants,
+                dt_old
+            ) == 4
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Constants,
+                dtau
+            ) == 8
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Constants,
+                time
+            ) == 12
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Constants,
+                viscosity
+            ) == 16
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Constants,
+                density
+            ) == 20
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Constants,
+                component
+            ) == 24
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Constants,
+                alpha_p
+            ) == 28
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Constants,
+                scheme
+            ) == 32
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Constants,
+                alpha_u
+            ) == 36
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Constants,
+                stride_x
+            ) == 40
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Constants,
+                time_scheme
+            ) == 44
+        );
+        assert!(
+            std::mem::size_of::<
+                generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Constants,
+            >() == 48
+        );
+    };
     const GENERATED_RHIE_CHOW_STORE_GRAD_P_ALLMACH_PRESSURE_CONSTANTS_ASSERTS: () = {
         assert!(
             std::mem::offset_of!(
@@ -24307,6 +25068,86 @@ pub mod layout_asserts {
         assert!(
             std::mem::size_of::<
                 generated::rhie_chow_store_grad_p_incompressible_momentum_mms::Constants,
+            >() == 48
+        );
+    };
+    const GENERATED_RHIE_CHOW_STORE_GRAD_P_INCOMPRESSIBLE_MOMENTUM_STRUCTURED_CONSTANTS_ASSERTS: (
+    ) = {
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum_structured::Constants,
+                dt
+            ) == 0
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum_structured::Constants,
+                dt_old
+            ) == 4
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum_structured::Constants,
+                dtau
+            ) == 8
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum_structured::Constants,
+                time
+            ) == 12
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum_structured::Constants,
+                viscosity
+            ) == 16
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum_structured::Constants,
+                density
+            ) == 20
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum_structured::Constants,
+                component
+            ) == 24
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum_structured::Constants,
+                alpha_p
+            ) == 28
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum_structured::Constants,
+                scheme
+            ) == 32
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum_structured::Constants,
+                alpha_u
+            ) == 36
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum_structured::Constants,
+                stride_x
+            ) == 40
+        );
+        assert!(
+            std::mem::offset_of!(
+                generated::rhie_chow_store_grad_p_incompressible_momentum_structured::Constants,
+                time_scheme
+            ) == 44
+        );
+        assert!(
+            std::mem::size_of::<
+                generated::rhie_chow_store_grad_p_incompressible_momentum_structured::Constants,
             >() == 48
         );
     };
@@ -31081,6 +31922,209 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 "#;
     }
+    pub mod dp_init_incompressible_momentum_structured {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.state, self.constants]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedDpInitIncompressibleMomentumStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: dp_init_incompressible_momentum_structured :: Constants > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedDpInitIncompressibleMomentumStructured::BindGroup0"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 1],
+            ) -> [wgpu::BindGroupLayout; 1] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("GeneratedDpInitIncompressibleMomentumStructured::PipelineLayout"),
+                bind_group_layouts: &[&WgpuBindGroup0::get_bind_group_layout(device)],
+                push_constant_ranges: &[],
+            })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("dp_init_incompressible_momentum_structured.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+}
+
+@group(0) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(0) @binding(1) 
+var<uniform> constants: Constants;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let _e4 = constants.stride_x;
+    let idx = ((global_id.y * _e4) + global_id.x);
+    if (idx >= (arrayLength((&state)) / 9u)) {
+        return;
+    }
+    let base = (idx * 9u);
+    state[(base + 3u)] = 0f;
+    return;
+}
+"#;
+    }
     pub mod dp_update_from_diag_allmach_pressure {
         use super::{_root, _root::*};
         #[repr(C, align(4))]
@@ -34000,6 +35044,219 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
     let base = (idx * 10u);
+    let _e17 = constants.density;
+    let rho = max(_e17, 0.000000000001f);
+    let _e22 = constants.dt;
+    let dt = max(_e22, 0f);
+    let _e27 = constants.alpha_u;
+    let d_p = ((_e27 * dt) / rho);
+    state[(base + 3u)] = d_p;
+    return;
+}
+"#;
+    }
+    pub mod dp_update_from_diag_incompressible_momentum_structured {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.state, self.constants]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedDpUpdateFromDiagIncompressibleMomentumStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: dp_update_from_diag_incompressible_momentum_structured :: Constants > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(
+                        "GeneratedDpUpdateFromDiagIncompressibleMomentumStructured::BindGroup0",
+                    ),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 1],
+            ) -> [wgpu::BindGroupLayout; 1] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(
+                    "GeneratedDpUpdateFromDiagIncompressibleMomentumStructured::PipelineLayout",
+                ),
+                bind_group_layouts: &[&WgpuBindGroup0::get_bind_group_layout(device)],
+                push_constant_ranges: &[],
+            })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("dp_update_from_diag_incompressible_momentum_structured.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+}
+
+@group(0) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(0) @binding(1) 
+var<uniform> constants: Constants;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let _e4 = constants.stride_x;
+    let idx = ((global_id.y * _e4) + global_id.x);
+    if (idx >= (arrayLength((&state)) / 9u)) {
+        return;
+    }
+    let base = (idx * 9u);
     let _e17 = constants.density;
     let rho = max(_e17, 0.000000000001f);
     let _e22 = constants.dt;
@@ -58523,6 +59780,510 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 "#;
     }
+    pub mod flux_module_gradients_incompressible_momentum_structured {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Vector2 {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub x: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub y: f32,
+        }
+        impl Vector2 {
+            pub const fn new(x: f32, y: f32) -> Self {
+                Self { x, y }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub face_owner: wgpu::BufferBinding<'a>,
+            pub face_neighbor: wgpu::BufferBinding<'a>,
+            pub face_areas: wgpu::BufferBinding<'a>,
+            pub face_normals: wgpu::BufferBinding<'a>,
+            pub cell_centers: wgpu::BufferBinding<'a>,
+            pub cell_vols: wgpu::BufferBinding<'a>,
+            pub cell_face_offsets: wgpu::BufferBinding<'a>,
+            pub cell_faces: wgpu::BufferBinding<'a>,
+            pub face_boundary: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub face_owner: wgpu::BindGroupEntry<'a>,
+            pub face_neighbor: wgpu::BindGroupEntry<'a>,
+            pub face_areas: wgpu::BindGroupEntry<'a>,
+            pub face_normals: wgpu::BindGroupEntry<'a>,
+            pub cell_centers: wgpu::BindGroupEntry<'a>,
+            pub cell_vols: wgpu::BindGroupEntry<'a>,
+            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
+            pub cell_faces: wgpu::BindGroupEntry<'a>,
+            pub face_boundary: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    face_owner: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.face_owner),
+                    },
+                    face_neighbor: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
+                    },
+                    face_areas: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.face_areas),
+                    },
+                    face_normals: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.face_normals),
+                    },
+                    cell_centers: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
+                    },
+                    cell_vols: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
+                    },
+                    cell_face_offsets: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
+                    },
+                    cell_faces: wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
+                    },
+                    face_boundary: wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: wgpu::BindingResource::Buffer(params.face_boundary),
+                    },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
+                [
+                    self.face_owner,
+                    self.face_neighbor,
+                    self.face_areas,
+                    self.face_normals,
+                    self.cell_centers,
+                    self.cell_vols,
+                    self.cell_face_offsets,
+                    self.cell_faces,
+                    self.face_boundary,
+                    self.face_centers,
+                ]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleGradientsIncompressibleMomentumStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(
+                        "GeneratedFluxModuleGradientsIncompressibleMomentumStructured::BindGroup0",
+                    ),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup1Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.state, self.constants]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1(wgpu::BindGroup);
+        impl WgpuBindGroup1 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleGradientsIncompressibleMomentumStructured::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: flux_module_gradients_incompressible_momentum_structured :: Constants > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(
+                        "GeneratedFluxModuleGradientsIncompressibleMomentumStructured::BindGroup1",
+                    ),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(1, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2EntriesParams<'a> {
+            pub bc_kind: wgpu::BufferBinding<'a>,
+            pub bc_value: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup2Entries<'a> {
+            pub bc_kind: wgpu::BindGroupEntry<'a>,
+            pub bc_value: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup2Entries<'a> {
+            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
+                Self {
+                    bc_kind: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
+                    },
+                    bc_value: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.bc_value),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.bc_kind, self.bc_value]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2(wgpu::BindGroup);
+        impl WgpuBindGroup2 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleGradientsIncompressibleMomentumStructured::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(
+                        "GeneratedFluxModuleGradientsIncompressibleMomentumStructured::BindGroup2",
+                    ),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(2, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+            pub bind_group1: &'a WgpuBindGroup1,
+            pub bind_group2: &'a WgpuBindGroup2,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+                self.bind_group1.set(pass);
+                self.bind_group2.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 3],
+            ) -> [wgpu::BindGroupLayout; 3] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(
+                    "GeneratedFluxModuleGradientsIncompressibleMomentumStructured::PipelineLayout",
+                ),
+                bind_group_layouts: &[
+                    &WgpuBindGroup0::get_bind_group_layout(device),
+                    &WgpuBindGroup1::get_bind_group_layout(device),
+                    &WgpuBindGroup2::get_bind_group_layout(device),
+                ],
+                push_constant_ranges: &[],
+            })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("flux_module_gradients_incompressible_momentum_structured.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Vector2_ {
+    x: f32,
+    y: f32,
+}
+
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+}
+
+@group(0) @binding(0) 
+var<storage> face_owner: array<u32>;
+@group(0) @binding(1) 
+var<storage> face_neighbor: array<i32>;
+@group(0) @binding(2) 
+var<storage> face_areas: array<f32>;
+@group(0) @binding(3) 
+var<storage> face_normals: array<Vector2_>;
+@group(0) @binding(4) 
+var<storage> cell_centers: array<Vector2_>;
+@group(0) @binding(5) 
+var<storage> cell_vols: array<f32>;
+@group(0) @binding(6) 
+var<storage> cell_face_offsets: array<u32>;
+@group(0) @binding(7) 
+var<storage> cell_faces: array<u32>;
+@group(0) @binding(12) 
+var<storage> face_boundary: array<u32>;
+@group(0) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
+@group(1) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(1) @binding(1) 
+var<uniform> constants: Constants;
+@group(2) @binding(0) 
+var<storage> bc_kind: array<u32>;
+@group(2) @binding(1) 
+var<storage> bc_value: array<f32>;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var grad_acc_p: vec2<f32> = vec2<f32>(0f, 0f);
+    var k: u32;
+    var normal_vec: vec2<f32>;
+    var other_idx: u32;
+    var other_center_vec: vec2<f32>;
+    var lambda: f32;
+
+    let _e6 = constants.stride_x;
+    let idx = ((global_id.y * _e6) + global_id.x);
+    if (idx >= arrayLength((&cell_vols))) {
+        return;
+    }
+    let cell_center = cell_centers[idx];
+    let cell_center_vec = vec2<f32>(cell_center.x, cell_center.y);
+    let vol = cell_vols[idx];
+    let start = cell_face_offsets[idx];
+    let end = cell_face_offsets[(idx + 1u)];
+    k = start;
+    loop {
+        let _e31 = k;
+        if (_e31 < end) {
+        } else {
+            break;
+        }
+        {
+            let _e34 = k;
+            let face_idx = cell_faces[_e34];
+            let owner = face_owner[face_idx];
+            let neighbor_raw = face_neighbor[face_idx];
+            let is_boundary = (neighbor_raw == -1i);
+            let boundary_type = face_boundary[face_idx];
+            let area = face_areas[face_idx];
+            let face_center = face_centers[face_idx];
+            let face_center_vec = vec2<f32>(face_center.x, face_center.y);
+            let _e60 = face_normals[face_idx].x;
+            let _e64 = face_normals[face_idx].y;
+            normal_vec = vec2<f32>(_e60, _e64);
+            let _e68 = normal_vec;
+            if (dot((face_center_vec - cell_center_vec), _e68) < 0f) {
+                let _e72 = normal_vec;
+                normal_vec = -(_e72);
+            }
+            other_idx = idx;
+            other_center_vec = face_center_vec;
+            if (neighbor_raw != -1i) {
+                let neighbor = u32(neighbor_raw);
+                other_idx = neighbor;
+                if (owner != idx) {
+                    other_idx = owner;
+                }
+                let _e81 = other_idx;
+                let other_center = cell_centers[_e81];
+                other_center_vec = vec2<f32>(other_center.x, other_center.y);
+            }
+            let _e88 = normal_vec;
+            let d_own = abs(dot((face_center_vec - cell_center_vec), _e88));
+            let _e91 = other_center_vec;
+            let _e93 = normal_vec;
+            let d_neigh = abs(dot((_e91 - face_center_vec), _e93));
+            let total_dist = (d_own + d_neigh);
+            lambda = 0.5f;
+            if (total_dist > 0.000001f) {
+                lambda = (d_neigh / total_dist);
+            }
+            let _e102 = lambda;
+            let lambda_other = (1f - _e102);
+            let _e105 = normal_vec;
+            let _e112 = state[((idx * 9u) + 2u)];
+            let _e113 = lambda;
+            let _e115 = other_idx;
+            let _e122 = state[((_e115 * 9u) + 2u)];
+            let _e129 = state[((idx * 9u) + 2u)];
+            let _e136 = bc_value[((face_idx * 3u) + 2u)];
+            let _e143 = bc_kind[((face_idx * 3u) + 2u)];
+            let _e153 = state[((idx * 9u) + 2u)];
+            let _e160 = bc_value[((face_idx * 3u) + 2u)];
+            let _e169 = bc_kind[((face_idx * 3u) + 2u)];
+            let _e179 = grad_acc_p;
+            grad_acc_p = (_e179 + ((_e105 * ((_e112 * _e113) + (select(_e122, select(select(_e129, _e136, (_e143 == 1u)), (_e153 + (_e160 * d_own)), (_e169 == 2u)), is_boundary) * lambda_other))) * area));
+        }
+        continuing {
+            let _e182 = k;
+            k = (_e182 + 1u);
+        }
+    }
+    let _e184 = grad_acc_p;
+    let grad_out_p = ((_e184 * 1f) / vec2(max(vol, 0.000000000001f)));
+    state[((idx * 9u) + 4u)] = grad_out_p.x;
+    state[((idx * 9u) + 5u)] = grad_out_p.y;
+    return;
+}
+"#;
+    }
     pub mod flux_module_incompressible_momentum {
         use super::{_root, _root::*};
         #[repr(C, align(4))]
@@ -61094,6 +62855,625 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e463 = neigh_idx;
     let _e470 = state[((_e463 * 10u) + 2u)];
     let _e477 = state[((owner_1 * 10u) + 2u)];
+    let _e484 = bc_kind[((idx * 3u) + 2u)];
+    let _e491 = bc_value[((idx * 3u) + 2u)];
+    let _e492 = bc_neighbor_scalar(_e470, _e477, _e484, _e491, d_own_1, is_boundary_1);
+    let _e501 = constants.density;
+    let _e503 = lambda;
+    let _e509 = lambda;
+    let _e526 = lambda;
+    let _e532 = normal_vec;
+    let _e538 = constants.density;
+    let _e539 = lambda;
+    fluxes[((idx * 3u) + 0u)] = (((_e501 * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e503) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e509) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, (is_boundary_1 && !((boundary_type == 2u)))), select(s_neigh_grad_p_y, 0f, (is_boundary_1 && !((boundary_type == 2u))))) * lambda_other)) * ((s_own_d_p * _e526) + (s_neigh_d_p * lambda_other)))), _e532)) * area) - ((((_e538 * ((s_own_d_p * _e539) + (s_neigh_d_p * lambda_other))) * (_e492 - _e282)) / dist) * area));
+    let _e557 = constants.density;
+    let _e559 = lambda;
+    let _e565 = lambda;
+    let _e582 = lambda;
+    let _e588 = normal_vec;
+    let _e594 = constants.density;
+    let _e595 = lambda;
+    fluxes[((idx * 3u) + 1u)] = (((_e557 * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e559) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e565) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, (is_boundary_1 && !((boundary_type == 2u)))), select(s_neigh_grad_p_y, 0f, (is_boundary_1 && !((boundary_type == 2u))))) * lambda_other)) * ((s_own_d_p * _e582) + (s_neigh_d_p * lambda_other)))), _e588)) * area) - ((((_e594 * ((s_own_d_p * _e595) + (s_neigh_d_p * lambda_other))) * (_e492 - _e282)) / dist) * area));
+    let _e613 = constants.density;
+    let _e615 = lambda;
+    let _e621 = lambda;
+    let _e638 = lambda;
+    let _e644 = normal_vec;
+    fluxes[((idx * 3u) + 2u)] = ((_e613 * dot((((vec2<f32>(s_own_U_x, s_own_U_y) * _e615) + (vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other)) + (((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * _e621) + (vec2<f32>(select(s_neigh_grad_p_x, 0f, (is_boundary_1 && !((boundary_type == 2u)))), select(s_neigh_grad_p_y, 0f, (is_boundary_1 && !((boundary_type == 2u))))) * lambda_other)) * ((s_own_d_p * _e638) + (s_neigh_d_p * lambda_other)))), _e644)) * area);
+    return;
+}
+"#;
+    }
+    pub mod flux_module_incompressible_momentum_structured {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Vector2 {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub x: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub y: f32,
+        }
+        impl Vector2 {
+            pub const fn new(x: f32, y: f32) -> Self {
+                Self { x, y }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+            #[doc = "offset: 48, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 52, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub face_owner: wgpu::BufferBinding<'a>,
+            pub face_neighbor: wgpu::BufferBinding<'a>,
+            pub face_areas: wgpu::BufferBinding<'a>,
+            pub face_normals: wgpu::BufferBinding<'a>,
+            pub cell_centers: wgpu::BufferBinding<'a>,
+            pub face_boundary: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
+            pub face_wrap_shift: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub face_owner: wgpu::BindGroupEntry<'a>,
+            pub face_neighbor: wgpu::BindGroupEntry<'a>,
+            pub face_areas: wgpu::BindGroupEntry<'a>,
+            pub face_normals: wgpu::BindGroupEntry<'a>,
+            pub cell_centers: wgpu::BindGroupEntry<'a>,
+            pub face_boundary: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
+            pub face_wrap_shift: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    face_owner: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.face_owner),
+                    },
+                    face_neighbor: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
+                    },
+                    face_areas: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.face_areas),
+                    },
+                    face_normals: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.face_normals),
+                    },
+                    cell_centers: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
+                    },
+                    face_boundary: wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: wgpu::BindingResource::Buffer(params.face_boundary),
+                    },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
+                    face_wrap_shift: wgpu::BindGroupEntry {
+                        binding: 14,
+                        resource: wgpu::BindingResource::Buffer(params.face_wrap_shift),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 8] {
+                [
+                    self.face_owner,
+                    self.face_neighbor,
+                    self.face_areas,
+                    self.face_normals,
+                    self.cell_centers,
+                    self.face_boundary,
+                    self.face_centers,
+                    self.face_wrap_shift,
+                ]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleIncompressibleMomentumStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(14): \"face_wrap_shift\""] wgpu :: BindGroupLayoutEntry { binding : 14 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedFluxModuleIncompressibleMomentumStructured::BindGroup0"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub state_old: wgpu::BufferBinding<'a>,
+            pub state_old_old: wgpu::BufferBinding<'a>,
+            pub fluxes: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup1Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub state_old: wgpu::BindGroupEntry<'a>,
+            pub state_old_old: wgpu::BindGroupEntry<'a>,
+            pub fluxes: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    state_old: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.state_old),
+                    },
+                    state_old_old: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.state_old_old),
+                    },
+                    fluxes: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.fluxes),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 5] {
+                [
+                    self.state,
+                    self.state_old,
+                    self.state_old_old,
+                    self.fluxes,
+                    self.constants,
+                ]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1(wgpu::BindGroup);
+        impl WgpuBindGroup1 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleIncompressibleMomentumStructured::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"state_old\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"state_old_old\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"fluxes\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: flux_module_incompressible_momentum_structured :: Constants > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedFluxModuleIncompressibleMomentumStructured::BindGroup1"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(1, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2EntriesParams<'a> {
+            pub bc_kind: wgpu::BufferBinding<'a>,
+            pub bc_value: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup2Entries<'a> {
+            pub bc_kind: wgpu::BindGroupEntry<'a>,
+            pub bc_value: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup2Entries<'a> {
+            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
+                Self {
+                    bc_kind: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
+                    },
+                    bc_value: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.bc_value),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.bc_kind, self.bc_value]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2(wgpu::BindGroup);
+        impl WgpuBindGroup2 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedFluxModuleIncompressibleMomentumStructured::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("GeneratedFluxModuleIncompressibleMomentumStructured::BindGroup2"),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(2, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+            pub bind_group1: &'a WgpuBindGroup1,
+            pub bind_group2: &'a WgpuBindGroup2,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+                self.bind_group1.set(pass);
+                self.bind_group2.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 3],
+            ) -> [wgpu::BindGroupLayout; 3] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("GeneratedFluxModuleIncompressibleMomentumStructured::PipelineLayout"),
+                bind_group_layouts: &[
+                    &WgpuBindGroup0::get_bind_group_layout(device),
+                    &WgpuBindGroup1::get_bind_group_layout(device),
+                    &WgpuBindGroup2::get_bind_group_layout(device),
+                ],
+                push_constant_ranges: &[],
+            })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("flux_module_incompressible_momentum_structured.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Vector2_ {
+    x: f32,
+    y: f32,
+}
+
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
+}
+
+@group(0) @binding(0) 
+var<storage> face_owner: array<u32>;
+@group(0) @binding(1) 
+var<storage> face_neighbor: array<i32>;
+@group(0) @binding(2) 
+var<storage> face_areas: array<f32>;
+@group(0) @binding(3) 
+var<storage> face_normals: array<Vector2_>;
+@group(0) @binding(4) 
+var<storage> cell_centers: array<Vector2_>;
+@group(0) @binding(12) 
+var<storage> face_boundary: array<u32>;
+@group(0) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
+@group(0) @binding(14) 
+var<storage> face_wrap_shift: array<Vector2_>;
+@group(1) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(1) @binding(1) 
+var<storage> state_old: array<f32>;
+@group(1) @binding(2) 
+var<storage> state_old_old: array<f32>;
+@group(1) @binding(3) 
+var<storage, read_write> fluxes: array<f32>;
+@group(1) @binding(4) 
+var<uniform> constants: Constants;
+@group(2) @binding(0) 
+var<storage> bc_kind: array<u32>;
+@group(2) @binding(1) 
+var<storage> bc_value: array<f32>;
+
+fn bc_neighbor_scalar(interior: f32, owner: f32, kind: u32, value: f32, d_own: f32, is_boundary: bool) -> f32 {
+    var boundary: f32;
+
+    boundary = owner;
+    if (kind == 1u) {
+        boundary = value;
+    }
+    if (kind == 2u) {
+        boundary = (owner + (value * d_own));
+    }
+    let _e13 = boundary;
+    return select(interior, _e13, is_boundary);
+}
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var neigh_idx: u32;
+    var normal_vec: vec2<f32>;
+    var c_neigh_vec: vec2<f32>;
+    var lambda: f32 = 0.5f;
+
+    let _e5 = constants.stride_x;
+    let idx = ((global_id.y * _e5) + global_id.x);
+    if (idx >= arrayLength((&face_areas))) {
+        return;
+    }
+    let owner_1 = face_owner[idx];
+    let neighbor = face_neighbor[idx];
+    let is_boundary_1 = (neighbor == -1i);
+    neigh_idx = owner_1;
+    if (neighbor != -1i) {
+        neigh_idx = u32(neighbor);
+    }
+    let area = face_areas[idx];
+    let boundary_type = face_boundary[idx];
+    let face_center = face_centers[idx];
+    let _e36 = face_normals[idx].x;
+    let _e40 = face_normals[idx].y;
+    normal_vec = vec2<f32>(_e36, _e40);
+    let c_owner = cell_centers[owner_1];
+    let c_owner_vec = vec2<f32>(c_owner.x, c_owner.y);
+    let face_center_vec = vec2<f32>(face_center.x, face_center.y);
+    let _e53 = normal_vec;
+    if (dot((face_center_vec - c_owner_vec), _e53) < 0f) {
+        let _e57 = normal_vec;
+        normal_vec = -(_e57);
+    }
+    let _e60 = neigh_idx;
+    let c_neigh = cell_centers[_e60];
+    c_neigh_vec = vec2<f32>(c_neigh.x, c_neigh.y);
+    let _e67 = c_neigh_vec;
+    let _e71 = face_wrap_shift[idx].x;
+    let _e75 = face_wrap_shift[idx].y;
+    c_neigh_vec = (_e67 + vec2<f32>(_e71, _e75));
+    let c_neigh_cell_vec = c_neigh_vec;
+    if is_boundary_1 {
+        c_neigh_vec = face_center_vec;
+    }
+    let _e80 = normal_vec;
+    let d_own_1 = abs(dot((face_center_vec - c_owner_vec), _e80));
+    let _e83 = c_neigh_vec;
+    let _e85 = normal_vec;
+    let d_neigh = abs(dot((_e83 - face_center_vec), _e85));
+    let total_dist = (d_own_1 + d_neigh);
+    if (total_dist > 0.000001f) {
+        lambda = (d_neigh / total_dist);
+    }
+    let _e93 = lambda;
+    let lambda_other = (1f - _e93);
+    let _e96 = c_neigh_vec;
+    let d_vec = (_e96 - c_owner_vec);
+    let _e98 = normal_vec;
+    let dist_proj = abs(dot(d_vec, _e98));
+    let dist = max(dist_proj, 0.000001f);
+    let _e109 = state[((owner_1 * 9u) + 0u)];
+    let _e116 = state[((owner_1 * 9u) + 0u)];
+    let _e123 = bc_kind[((idx * 3u) + 0u)];
+    let _e130 = bc_value[((idx * 3u) + 0u)];
+    let _e131 = bc_neighbor_scalar(_e109, _e116, _e123, _e130, d_own_1, is_boundary_1);
+    let _e138 = state[((owner_1 * 9u) + 0u)];
+    let _e145 = state[((owner_1 * 9u) + 0u)];
+    let _e147 = normal_vec.x;
+    let _e155 = state[((owner_1 * 9u) + 1u)];
+    let _e157 = normal_vec.y;
+    let _e161 = normal_vec.x;
+    let s_own_U_x = select(_e131, (_e138 - (((_e145 * _e147) + (_e155 * _e157)) * _e161)), (is_boundary_1 && (boundary_type == 4u)));
+    let _e174 = state[((owner_1 * 9u) + 1u)];
+    let _e181 = state[((owner_1 * 9u) + 1u)];
+    let _e188 = bc_kind[((idx * 3u) + 1u)];
+    let _e195 = bc_value[((idx * 3u) + 1u)];
+    let _e196 = bc_neighbor_scalar(_e174, _e181, _e188, _e195, d_own_1, is_boundary_1);
+    let _e203 = state[((owner_1 * 9u) + 1u)];
+    let _e210 = state[((owner_1 * 9u) + 0u)];
+    let _e212 = normal_vec.x;
+    let _e220 = state[((owner_1 * 9u) + 1u)];
+    let _e222 = normal_vec.y;
+    let _e226 = normal_vec.y;
+    let s_own_U_y = select(_e196, (_e203 - (((_e210 * _e212) + (_e220 * _e222)) * _e226)), (is_boundary_1 && (boundary_type == 4u)));
+    let s_own_d_p = state[((owner_1 * 9u) + 3u)];
+    let s_own_grad_p_x = state[((owner_1 * 9u) + 4u)];
+    let s_own_grad_p_y = state[((owner_1 * 9u) + 5u)];
+    let _e260 = state[((owner_1 * 9u) + 2u)];
+    let _e267 = state[((owner_1 * 9u) + 2u)];
+    let _e274 = bc_kind[((idx * 3u) + 2u)];
+    let _e281 = bc_value[((idx * 3u) + 2u)];
+    let _e282 = bc_neighbor_scalar(_e260, _e267, _e274, _e281, d_own_1, is_boundary_1);
+    let _e283 = neigh_idx;
+    let _e290 = state[((_e283 * 9u) + 0u)];
+    let _e297 = state[((owner_1 * 9u) + 0u)];
+    let _e304 = bc_kind[((idx * 3u) + 0u)];
+    let _e311 = bc_value[((idx * 3u) + 0u)];
+    let _e312 = bc_neighbor_scalar(_e290, _e297, _e304, _e311, d_own_1, is_boundary_1);
+    let _e319 = state[((owner_1 * 9u) + 0u)];
+    let _e326 = state[((owner_1 * 9u) + 0u)];
+    let _e328 = normal_vec.x;
+    let _e336 = state[((owner_1 * 9u) + 1u)];
+    let _e338 = normal_vec.y;
+    let _e342 = normal_vec.x;
+    let s_neigh_U_x = select(_e312, (_e319 - (((_e326 * _e328) + (_e336 * _e338)) * _e342)), (is_boundary_1 && (boundary_type == 4u)));
+    let _e349 = neigh_idx;
+    let _e356 = state[((_e349 * 9u) + 1u)];
+    let _e363 = state[((owner_1 * 9u) + 1u)];
+    let _e370 = bc_kind[((idx * 3u) + 1u)];
+    let _e377 = bc_value[((idx * 3u) + 1u)];
+    let _e378 = bc_neighbor_scalar(_e356, _e363, _e370, _e377, d_own_1, is_boundary_1);
+    let _e385 = state[((owner_1 * 9u) + 1u)];
+    let _e392 = state[((owner_1 * 9u) + 0u)];
+    let _e394 = normal_vec.x;
+    let _e402 = state[((owner_1 * 9u) + 1u)];
+    let _e404 = normal_vec.y;
+    let _e408 = normal_vec.y;
+    let s_neigh_U_y = select(_e378, (_e385 - (((_e392 * _e394) + (_e402 * _e404)) * _e408)), (is_boundary_1 && (boundary_type == 4u)));
+    let _e415 = neigh_idx;
+    let _e422 = state[((_e415 * 9u) + 3u)];
+    let _e429 = state[((owner_1 * 9u) + 3u)];
+    let s_neigh_d_p = select(_e422, _e429, is_boundary_1);
+    let _e431 = neigh_idx;
+    let _e438 = state[((_e431 * 9u) + 4u)];
+    let _e445 = state[((owner_1 * 9u) + 4u)];
+    let s_neigh_grad_p_x = select(_e438, _e445, is_boundary_1);
+    let _e447 = neigh_idx;
+    let _e454 = state[((_e447 * 9u) + 5u)];
+    let _e461 = state[((owner_1 * 9u) + 5u)];
+    let s_neigh_grad_p_y = select(_e454, _e461, is_boundary_1);
+    let _e463 = neigh_idx;
+    let _e470 = state[((_e463 * 9u) + 2u)];
+    let _e477 = state[((owner_1 * 9u) + 2u)];
     let _e484 = bc_kind[((idx * 3u) + 2u)];
     let _e491 = bc_value[((idx * 3u) + 2u)];
     let _e492 = bc_neighbor_scalar(_e470, _e477, _e484, _e491, d_own_1, is_boundary_1);
@@ -136234,23 +138614,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var lambda_f: f32;
 
     let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
+    let owner = ((global_id.y * _e6) + global_id.x);
     let _e12 = grid.nx;
     let _e15 = grid.ny;
-    if (idx >= (_e12 * _e15)) {
+    if (owner >= (_e12 * _e15)) {
         return;
     }
     let _e20 = grid.nx;
-    let gi = (idx % _e20);
+    let gi = (owner % _e20);
     let _e24 = grid.nx;
-    let gj = (idx / _e24);
+    let gj = (owner / _e24);
     let _e31 = grid.dx;
     let _e38 = grid.dy;
     let center = Vector2_(((f32(gi) + 0.5f) * _e31), ((f32(gj) + 0.5f) * _e38));
     let _e43 = grid.dx;
     let _e46 = grid.dy;
     let vol = (_e43 * _e46);
-    let scalar_offset = (idx * 5u);
+    let scalar_offset = (owner * 5u);
     let start_row_0_ = (scalar_offset * 1u);
     loop {
         let _e54 = rank;
@@ -136280,7 +138660,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e102 = diag_0_;
     diag_0_ = (_e102 + (vol / _e100));
     let _e106 = constants.dt;
-    let _e115 = state_old[((idx * 1u) + 0u)];
+    let _e115 = state_old[((owner * 1u) + 0u)];
     let _e117 = rhs_0_;
     rhs_0_ = (_e117 + ((vol / _e106) * _e115));
     let _e121 = constants.time_scheme;
@@ -136297,17 +138677,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         diag_0_ = ((_e149 - (vol / _e152)) + diag_bdf2_);
         let _e156 = rhs_0_;
         let _e159 = constants.dt;
-        let _e167 = state_old[((idx * 1u) + 0u)];
+        let _e167 = state_old[((owner * 1u) + 0u)];
         let _e172 = constants.dt;
-        let _e180 = state_old[((idx * 1u) + 0u)];
-        let _e188 = state_old_old[((idx * 1u) + 0u)];
+        let _e180 = state_old[((owner * 1u) + 0u)];
+        let _e188 = state_old_old[((owner * 1u) + 0u)];
         rhs_0_ = ((_e156 - ((vol / _e159) * _e167)) + ((vol / _e172) * ((factor_n * _e180) - (factor_nm1_ * _e188))));
     }
     let _e195 = constants.dtau;
     if (_e195 > 0f) {
         let _e198 = diag_0_;
         diag_0_ = (_e198 + dual_time_scale);
-        let _e206 = state_iter[((idx * 1u) + 0u)];
+        let _e206 = state_iter[((owner * 1u) + 0u)];
         let _e208 = rhs_0_;
         rhs_0_ = (_e208 + (dual_time_scale * _e206));
     }
@@ -136340,13 +138720,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e267 = grid.nx;
             let off_u = select(_e267, 1u, axis_is_x);
             let _e272 = k;
-            let neighbor = select((idx - off_u), (idx + off_u), (_e272 >= 2u));
-            let other_idx = select(neighbor, idx, is_boundary);
+            let neighbor = select((owner - off_u), (owner + off_u), (_e272 >= 2u));
+            let other_idx = select(neighbor, owner, is_boundary);
             let f_center = Vector2_((center.x + (half * normal.x)), (center.y + (half * normal.y)));
             let mult = select(spacing, half, is_boundary);
             let other_center = Vector2_((center.x + (mult * normal.x)), (center.y + (mult * normal.y)));
             let _e298 = k;
-            let face_idx = ((idx * 4u) + _e298);
+            let face_idx = ((owner * 4u) + _e298);
             let dx = (other_center.x - center.x);
             let dy = (other_center.y - center.y);
             let dist_proj = abs(((dx * normal.x) + (dy * normal.y)));
@@ -136405,7 +138785,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e430 = matrix_values[((start_row_0_ + (2u * 1u)) + 0u)];
     matrix_values[((start_row_0_ + (2u * 1u)) + 0u)] = (_e430 + _e429);
     let _e438 = rhs_0_;
-    rhs[((idx * 1u) + 0u)] = _e438;
+    rhs[((owner * 1u) + 0u)] = _e438;
     return;
 }
 "#;
@@ -136842,23 +139222,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var lambda_f: f32;
 
     let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
+    let owner = ((global_id.y * _e6) + global_id.x);
     let _e12 = grid.nx;
     let _e15 = grid.ny;
-    if (idx >= (_e12 * _e15)) {
+    if (owner >= (_e12 * _e15)) {
         return;
     }
     let _e20 = grid.nx;
-    let gi = (idx % _e20);
+    let gi = (owner % _e20);
     let _e24 = grid.nx;
-    let gj = (idx / _e24);
+    let gj = (owner / _e24);
     let _e31 = grid.dx;
     let _e38 = grid.dy;
     let center = Vector2_(((f32(gi) + 0.5f) * _e31), ((f32(gj) + 0.5f) * _e38));
     let _e43 = grid.dx;
     let _e46 = grid.dy;
     let vol = (_e43 * _e46);
-    let scalar_offset = (idx * 5u);
+    let scalar_offset = (owner * 5u);
     let start_row_0_ = (scalar_offset * 1u);
     loop {
         let _e54 = rank;
@@ -136888,7 +139268,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e102 = diag_0_;
     diag_0_ = (_e102 + (vol / _e100));
     let _e106 = constants.dt;
-    let _e115 = state_old[((idx * 2u) + 0u)];
+    let _e115 = state_old[((owner * 2u) + 0u)];
     let _e117 = rhs_0_;
     rhs_0_ = (_e117 + ((vol / _e106) * _e115));
     let _e121 = constants.time_scheme;
@@ -136905,21 +139285,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         diag_0_ = ((_e149 - (vol / _e152)) + diag_bdf2_);
         let _e156 = rhs_0_;
         let _e159 = constants.dt;
-        let _e167 = state_old[((idx * 2u) + 0u)];
+        let _e167 = state_old[((owner * 2u) + 0u)];
         let _e172 = constants.dt;
-        let _e180 = state_old[((idx * 2u) + 0u)];
-        let _e188 = state_old_old[((idx * 2u) + 0u)];
+        let _e180 = state_old[((owner * 2u) + 0u)];
+        let _e188 = state_old_old[((owner * 2u) + 0u)];
         rhs_0_ = ((_e156 - ((vol / _e159) * _e167)) + ((vol / _e172) * ((factor_n * _e180) - (factor_nm1_ * _e188))));
     }
     let _e195 = constants.dtau;
     if (_e195 > 0f) {
         let _e198 = diag_0_;
         diag_0_ = (_e198 + dual_time_scale);
-        let _e206 = state_iter[((idx * 2u) + 0u)];
+        let _e206 = state_iter[((owner * 2u) + 0u)];
         let _e208 = rhs_0_;
         rhs_0_ = (_e208 + (dual_time_scale * _e206));
     }
-    let _e216 = state[((idx * 2u) + 1u)];
+    let _e216 = state[((owner * 2u) + 1u)];
     let _e218 = diag_0_;
     diag_0_ = (_e218 - (_e216 * vol));
     loop {
@@ -136951,13 +139331,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e277 = grid.nx;
             let off_u = select(_e277, 1u, axis_is_x);
             let _e282 = k;
-            let neighbor = select((idx - off_u), (idx + off_u), (_e282 >= 2u));
-            let other_idx = select(neighbor, idx, is_boundary);
+            let neighbor = select((owner - off_u), (owner + off_u), (_e282 >= 2u));
+            let other_idx = select(neighbor, owner, is_boundary);
             let f_center = Vector2_((center.x + (half * normal.x)), (center.y + (half * normal.y)));
             let mult = select(spacing, half, is_boundary);
             let other_center = Vector2_((center.x + (mult * normal.x)), (center.y + (mult * normal.y)));
             let _e308 = k;
-            let face_idx = ((idx * 4u) + _e308);
+            let face_idx = ((owner * 4u) + _e308);
             let dx = (other_center.x - center.x);
             let dy = (other_center.y - center.y);
             let dist_proj = abs(((dx * normal.x) + (dy * normal.y)));
@@ -137016,7 +139396,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e440 = matrix_values[((start_row_0_ + (2u * 1u)) + 0u)];
     matrix_values[((start_row_0_ + (2u * 1u)) + 0u)] = (_e440 + _e439);
     let _e448 = rhs_0_;
-    rhs[((idx * 1u) + 0u)] = _e448;
+    rhs[((owner * 1u) + 0u)] = _e448;
     return;
 }
 "#;
@@ -137453,23 +139833,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var lambda_f: f32;
 
     let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
+    let owner = ((global_id.y * _e6) + global_id.x);
     let _e12 = grid.nx;
     let _e15 = grid.ny;
-    if (idx >= (_e12 * _e15)) {
+    if (owner >= (_e12 * _e15)) {
         return;
     }
     let _e20 = grid.nx;
-    let gi = (idx % _e20);
+    let gi = (owner % _e20);
     let _e24 = grid.nx;
-    let gj = (idx / _e24);
+    let gj = (owner / _e24);
     let _e31 = grid.dx;
     let _e38 = grid.dy;
     let center = Vector2_(((f32(gi) + 0.5f) * _e31), ((f32(gj) + 0.5f) * _e38));
     let _e43 = grid.dx;
     let _e46 = grid.dy;
     let vol = (_e43 * _e46);
-    let scalar_offset = (idx * 5u);
+    let scalar_offset = (owner * 5u);
     let start_row_0_ = (scalar_offset * 1u);
     loop {
         let _e54 = rank;
@@ -137499,7 +139879,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e102 = diag_0_;
     diag_0_ = (_e102 + (vol / _e100));
     let _e106 = constants.dt;
-    let _e115 = state_old[((idx * 2u) + 0u)];
+    let _e115 = state_old[((owner * 2u) + 0u)];
     let _e117 = rhs_0_;
     rhs_0_ = (_e117 + ((vol / _e106) * _e115));
     let _e121 = constants.time_scheme;
@@ -137516,21 +139896,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         diag_0_ = ((_e149 - (vol / _e152)) + diag_bdf2_);
         let _e156 = rhs_0_;
         let _e159 = constants.dt;
-        let _e167 = state_old[((idx * 2u) + 0u)];
+        let _e167 = state_old[((owner * 2u) + 0u)];
         let _e172 = constants.dt;
-        let _e180 = state_old[((idx * 2u) + 0u)];
-        let _e188 = state_old_old[((idx * 2u) + 0u)];
+        let _e180 = state_old[((owner * 2u) + 0u)];
+        let _e188 = state_old_old[((owner * 2u) + 0u)];
         rhs_0_ = ((_e156 - ((vol / _e159) * _e167)) + ((vol / _e172) * ((factor_n * _e180) - (factor_nm1_ * _e188))));
     }
     let _e195 = constants.dtau;
     if (_e195 > 0f) {
         let _e198 = diag_0_;
         diag_0_ = (_e198 + dual_time_scale);
-        let _e206 = state_iter[((idx * 2u) + 0u)];
+        let _e206 = state_iter[((owner * 2u) + 0u)];
         let _e208 = rhs_0_;
         rhs_0_ = (_e208 + (dual_time_scale * _e206));
     }
-    let _e216 = state[((idx * 2u) + 1u)];
+    let _e216 = state[((owner * 2u) + 1u)];
     let _e218 = rhs_0_;
     rhs_0_ = (_e218 + (_e216 * vol));
     loop {
@@ -137562,13 +139942,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e277 = grid.nx;
             let off_u = select(_e277, 1u, axis_is_x);
             let _e282 = k;
-            let neighbor = select((idx - off_u), (idx + off_u), (_e282 >= 2u));
-            let other_idx = select(neighbor, idx, is_boundary);
+            let neighbor = select((owner - off_u), (owner + off_u), (_e282 >= 2u));
+            let other_idx = select(neighbor, owner, is_boundary);
             let f_center = Vector2_((center.x + (half * normal.x)), (center.y + (half * normal.y)));
             let mult = select(spacing, half, is_boundary);
             let other_center = Vector2_((center.x + (mult * normal.x)), (center.y + (mult * normal.y)));
             let _e308 = k;
-            let face_idx = ((idx * 4u) + _e308);
+            let face_idx = ((owner * 4u) + _e308);
             let dx = (other_center.x - center.x);
             let dy = (other_center.y - center.y);
             let dist_proj = abs(((dx * normal.x) + (dy * normal.y)));
@@ -137627,7 +140007,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e440 = matrix_values[((start_row_0_ + (2u * 1u)) + 0u)];
     matrix_values[((start_row_0_ + (2u * 1u)) + 0u)] = (_e440 + _e439);
     let _e448 = rhs_0_;
-    rhs[((idx * 1u) + 0u)] = _e448;
+    rhs[((owner * 1u) + 0u)] = _e448;
     return;
 }
 "#;
@@ -167485,23 +169865,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var lambda_f: f32;
 
     let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
+    let owner = ((global_id.y * _e6) + global_id.x);
     let _e12 = grid.nx;
     let _e15 = grid.ny;
-    if (idx >= (_e12 * _e15)) {
+    if (owner >= (_e12 * _e15)) {
         return;
     }
     let _e20 = grid.nx;
-    let gi = (idx % _e20);
+    let gi = (owner % _e20);
     let _e24 = grid.nx;
-    let gj = (idx / _e24);
+    let gj = (owner / _e24);
     let _e31 = grid.dx;
     let _e38 = grid.dy;
     let center = Vector2_(((f32(gi) + 0.5f) * _e31), ((f32(gj) + 0.5f) * _e38));
     let _e43 = grid.dx;
     let _e46 = grid.dy;
     let vol = (_e43 * _e46);
-    let scalar_offset = (idx * 5u);
+    let scalar_offset = (owner * 5u);
     let start_row_0_ = (scalar_offset * 1u);
     loop {
         let _e54 = rank;
@@ -167531,7 +169911,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e102 = diag_0_;
     diag_0_ = (_e102 + (vol / _e100));
     let _e106 = constants.dt;
-    let _e115 = state_old[((idx * 1u) + 0u)];
+    let _e115 = state_old[((owner * 1u) + 0u)];
     let _e117 = rhs_0_;
     rhs_0_ = (_e117 + ((vol / _e106) * _e115));
     let _e121 = constants.time_scheme;
@@ -167548,17 +169928,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         diag_0_ = ((_e149 - (vol / _e152)) + diag_bdf2_);
         let _e156 = rhs_0_;
         let _e159 = constants.dt;
-        let _e167 = state_old[((idx * 1u) + 0u)];
+        let _e167 = state_old[((owner * 1u) + 0u)];
         let _e172 = constants.dt;
-        let _e180 = state_old[((idx * 1u) + 0u)];
-        let _e188 = state_old_old[((idx * 1u) + 0u)];
+        let _e180 = state_old[((owner * 1u) + 0u)];
+        let _e188 = state_old_old[((owner * 1u) + 0u)];
         rhs_0_ = ((_e156 - ((vol / _e159) * _e167)) + ((vol / _e172) * ((factor_n * _e180) - (factor_nm1_ * _e188))));
     }
     let _e195 = constants.dtau;
     if (_e195 > 0f) {
         let _e198 = diag_0_;
         diag_0_ = (_e198 + dual_time_scale);
-        let _e206 = state_iter[((idx * 1u) + 0u)];
+        let _e206 = state_iter[((owner * 1u) + 0u)];
         let _e208 = rhs_0_;
         rhs_0_ = (_e208 + (dual_time_scale * _e206));
     }
@@ -167591,13 +169971,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e267 = grid.nx;
             let off_u = select(_e267, 1u, axis_is_x);
             let _e272 = k;
-            let neighbor = select((idx - off_u), (idx + off_u), (_e272 >= 2u));
-            let other_idx = select(neighbor, idx, is_boundary);
+            let neighbor = select((owner - off_u), (owner + off_u), (_e272 >= 2u));
+            let other_idx = select(neighbor, owner, is_boundary);
             let f_center = Vector2_((center.x + (half * normal.x)), (center.y + (half * normal.y)));
             let mult = select(spacing, half, is_boundary);
             let other_center = Vector2_((center.x + (mult * normal.x)), (center.y + (mult * normal.y)));
             let _e298 = k;
-            let face_idx = ((idx * 4u) + _e298);
+            let face_idx = ((owner * 4u) + _e298);
             let dx = (other_center.x - center.x);
             let dy = (other_center.y - center.y);
             let dist_proj = abs(((dx * normal.x) + (dy * normal.y)));
@@ -167656,7 +170036,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e430 = matrix_values[((start_row_0_ + (2u * 1u)) + 0u)];
     matrix_values[((start_row_0_ + (2u * 1u)) + 0u)] = (_e430 + _e429);
     let _e438 = rhs_0_;
-    rhs[((idx * 1u) + 0u)] = _e438;
+    rhs[((owner * 1u) + 0u)] = _e438;
     return;
 }
 "#;
@@ -168112,23 +170492,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var lambda_f: f32;
 
     let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
+    let owner = ((global_id.y * _e6) + global_id.x);
     let _e12 = grid.nx;
     let _e15 = grid.ny;
-    if (idx >= (_e12 * _e15)) {
+    if (owner >= (_e12 * _e15)) {
         return;
     }
     let _e20 = grid.nx;
-    let gi = (idx % _e20);
+    let gi = (owner % _e20);
     let _e24 = grid.nx;
-    let gj = (idx / _e24);
+    let gj = (owner / _e24);
     let _e31 = grid.dx;
     let _e38 = grid.dy;
     let center = Vector2_(((f32(gi) + 0.5f) * _e31), ((f32(gj) + 0.5f) * _e38));
     let _e43 = grid.dx;
     let _e46 = grid.dy;
     let vol = (_e43 * _e46);
-    let scalar_offset = (idx * 5u);
+    let scalar_offset = (owner * 5u);
     let start_row_0_ = (scalar_offset * 1u);
     loop {
         let _e54 = rank;
@@ -168158,7 +170538,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e102 = diag_0_;
     diag_0_ = (_e102 + (vol / _e100));
     let _e106 = constants.dt;
-    let _e115 = state_old[((idx * 2u) + 0u)];
+    let _e115 = state_old[((owner * 2u) + 0u)];
     let _e117 = rhs_0_;
     rhs_0_ = (_e117 + ((vol / _e106) * _e115));
     let _e121 = constants.time_scheme;
@@ -168175,21 +170555,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         diag_0_ = ((_e149 - (vol / _e152)) + diag_bdf2_);
         let _e156 = rhs_0_;
         let _e159 = constants.dt;
-        let _e167 = state_old[((idx * 2u) + 0u)];
+        let _e167 = state_old[((owner * 2u) + 0u)];
         let _e172 = constants.dt;
-        let _e180 = state_old[((idx * 2u) + 0u)];
-        let _e188 = state_old_old[((idx * 2u) + 0u)];
+        let _e180 = state_old[((owner * 2u) + 0u)];
+        let _e188 = state_old_old[((owner * 2u) + 0u)];
         rhs_0_ = ((_e156 - ((vol / _e159) * _e167)) + ((vol / _e172) * ((factor_n * _e180) - (factor_nm1_ * _e188))));
     }
     let _e195 = constants.dtau;
     if (_e195 > 0f) {
         let _e198 = diag_0_;
         diag_0_ = (_e198 + dual_time_scale);
-        let _e206 = state_iter[((idx * 2u) + 0u)];
+        let _e206 = state_iter[((owner * 2u) + 0u)];
         let _e208 = rhs_0_;
         rhs_0_ = (_e208 + (dual_time_scale * _e206));
     }
-    let _e216 = state[((idx * 2u) + 1u)];
+    let _e216 = state[((owner * 2u) + 1u)];
     let _e218 = diag_0_;
     diag_0_ = (_e218 - (_e216 * vol));
     loop {
@@ -168221,13 +170601,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e277 = grid.nx;
             let off_u = select(_e277, 1u, axis_is_x);
             let _e282 = k;
-            let neighbor = select((idx - off_u), (idx + off_u), (_e282 >= 2u));
-            let other_idx = select(neighbor, idx, is_boundary);
+            let neighbor = select((owner - off_u), (owner + off_u), (_e282 >= 2u));
+            let other_idx = select(neighbor, owner, is_boundary);
             let f_center = Vector2_((center.x + (half * normal.x)), (center.y + (half * normal.y)));
             let mult = select(spacing, half, is_boundary);
             let other_center = Vector2_((center.x + (mult * normal.x)), (center.y + (mult * normal.y)));
             let _e308 = k;
-            let face_idx = ((idx * 4u) + _e308);
+            let face_idx = ((owner * 4u) + _e308);
             let dx = (other_center.x - center.x);
             let dy = (other_center.y - center.y);
             let dist_proj = abs(((dx * normal.x) + (dy * normal.y)));
@@ -168286,7 +170666,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e440 = matrix_values[((start_row_0_ + (2u * 1u)) + 0u)];
     matrix_values[((start_row_0_ + (2u * 1u)) + 0u)] = (_e440 + _e439);
     let _e448 = rhs_0_;
-    rhs[((idx * 1u) + 0u)] = _e448;
+    rhs[((owner * 1u) + 0u)] = _e448;
     return;
 }
 "#;
@@ -168742,23 +171122,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var lambda_f: f32;
 
     let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
+    let owner = ((global_id.y * _e6) + global_id.x);
     let _e12 = grid.nx;
     let _e15 = grid.ny;
-    if (idx >= (_e12 * _e15)) {
+    if (owner >= (_e12 * _e15)) {
         return;
     }
     let _e20 = grid.nx;
-    let gi = (idx % _e20);
+    let gi = (owner % _e20);
     let _e24 = grid.nx;
-    let gj = (idx / _e24);
+    let gj = (owner / _e24);
     let _e31 = grid.dx;
     let _e38 = grid.dy;
     let center = Vector2_(((f32(gi) + 0.5f) * _e31), ((f32(gj) + 0.5f) * _e38));
     let _e43 = grid.dx;
     let _e46 = grid.dy;
     let vol = (_e43 * _e46);
-    let scalar_offset = (idx * 5u);
+    let scalar_offset = (owner * 5u);
     let start_row_0_ = (scalar_offset * 1u);
     loop {
         let _e54 = rank;
@@ -168788,7 +171168,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e102 = diag_0_;
     diag_0_ = (_e102 + (vol / _e100));
     let _e106 = constants.dt;
-    let _e115 = state_old[((idx * 2u) + 0u)];
+    let _e115 = state_old[((owner * 2u) + 0u)];
     let _e117 = rhs_0_;
     rhs_0_ = (_e117 + ((vol / _e106) * _e115));
     let _e121 = constants.time_scheme;
@@ -168805,21 +171185,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         diag_0_ = ((_e149 - (vol / _e152)) + diag_bdf2_);
         let _e156 = rhs_0_;
         let _e159 = constants.dt;
-        let _e167 = state_old[((idx * 2u) + 0u)];
+        let _e167 = state_old[((owner * 2u) + 0u)];
         let _e172 = constants.dt;
-        let _e180 = state_old[((idx * 2u) + 0u)];
-        let _e188 = state_old_old[((idx * 2u) + 0u)];
+        let _e180 = state_old[((owner * 2u) + 0u)];
+        let _e188 = state_old_old[((owner * 2u) + 0u)];
         rhs_0_ = ((_e156 - ((vol / _e159) * _e167)) + ((vol / _e172) * ((factor_n * _e180) - (factor_nm1_ * _e188))));
     }
     let _e195 = constants.dtau;
     if (_e195 > 0f) {
         let _e198 = diag_0_;
         diag_0_ = (_e198 + dual_time_scale);
-        let _e206 = state_iter[((idx * 2u) + 0u)];
+        let _e206 = state_iter[((owner * 2u) + 0u)];
         let _e208 = rhs_0_;
         rhs_0_ = (_e208 + (dual_time_scale * _e206));
     }
-    let _e216 = state[((idx * 2u) + 1u)];
+    let _e216 = state[((owner * 2u) + 1u)];
     let _e218 = rhs_0_;
     rhs_0_ = (_e218 + (_e216 * vol));
     loop {
@@ -168851,13 +171231,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e277 = grid.nx;
             let off_u = select(_e277, 1u, axis_is_x);
             let _e282 = k;
-            let neighbor = select((idx - off_u), (idx + off_u), (_e282 >= 2u));
-            let other_idx = select(neighbor, idx, is_boundary);
+            let neighbor = select((owner - off_u), (owner + off_u), (_e282 >= 2u));
+            let other_idx = select(neighbor, owner, is_boundary);
             let f_center = Vector2_((center.x + (half * normal.x)), (center.y + (half * normal.y)));
             let mult = select(spacing, half, is_boundary);
             let other_center = Vector2_((center.x + (mult * normal.x)), (center.y + (mult * normal.y)));
             let _e308 = k;
-            let face_idx = ((idx * 4u) + _e308);
+            let face_idx = ((owner * 4u) + _e308);
             let dx = (other_center.x - center.x);
             let dy = (other_center.y - center.y);
             let dist_proj = abs(((dx * normal.x) + (dy * normal.y)));
@@ -168916,7 +171296,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e440 = matrix_values[((start_row_0_ + (2u * 1u)) + 0u)];
     matrix_values[((start_row_0_ + (2u * 1u)) + 0u)] = (_e440 + _e439);
     let _e448 = rhs_0_;
-    rhs[((idx * 1u) + 0u)] = _e448;
+    rhs[((owner * 1u) + 0u)] = _e448;
     return;
 }
 "#;
@@ -175879,6 +178259,1351 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)] = (_e4921 + _e4920);
     let _e4929 = rhs_2_;
     rhs[((idx * 3u) + 2u)] = _e4929;
+    return;
+}
+"#;
+    }
+    pub mod generic_coupled_assembly_grad_state_incompressible_momentum_structured {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Vector2 {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub x: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub y: f32,
+        }
+        impl Vector2 {
+            pub const fn new(x: f32, y: f32) -> Self {
+                Self { x, y }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct StructuredGrid {
+            #[doc = "offset: 0, size: 4, type: `u32`"]
+            pub nx: u32,
+            #[doc = "offset: 4, size: 4, type: `u32`"]
+            pub ny: u32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dx: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub dy: f32,
+        }
+        impl StructuredGrid {
+            pub const fn new(nx: u32, ny: u32, dx: f32, dy: f32) -> Self {
+                Self { nx, ny, dx, dy }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+            #[doc = "offset: 48, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 52, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub grid: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub grid: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    grid: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.grid),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 1] {
+                [self.grid]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"grid\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: StructuredGrid > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumStructured::BindGroup0") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub state_old: wgpu::BufferBinding<'a>,
+            pub state_old_old: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+            pub state_iter: wgpu::BufferBinding<'a>,
+            pub grad_state: wgpu::BufferBinding<'a>,
+            pub fluxes: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup1Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub state_old: wgpu::BindGroupEntry<'a>,
+            pub state_old_old: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+            pub state_iter: wgpu::BindGroupEntry<'a>,
+            pub grad_state: wgpu::BindGroupEntry<'a>,
+            pub fluxes: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    state_old: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.state_old),
+                    },
+                    state_old_old: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.state_old_old),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                    state_iter: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.state_iter),
+                    },
+                    grad_state: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.grad_state),
+                    },
+                    fluxes: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.fluxes),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 7] {
+                [
+                    self.state,
+                    self.state_old,
+                    self.state_old_old,
+                    self.constants,
+                    self.state_iter,
+                    self.grad_state,
+                    self.fluxes,
+                ]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1(wgpu::BindGroup);
+        impl WgpuBindGroup1 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumStructured::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"state_old\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"state_old_old\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants > () as _) , } , count : None , } , # [doc = " @binding(4): \"state_iter\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"grad_state\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"fluxes\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumStructured::BindGroup1") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(1, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2EntriesParams<'a> {
+            pub matrix_values: wgpu::BufferBinding<'a>,
+            pub rhs: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup2Entries<'a> {
+            pub matrix_values: wgpu::BindGroupEntry<'a>,
+            pub rhs: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup2Entries<'a> {
+            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
+                Self {
+                    matrix_values: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.matrix_values),
+                    },
+                    rhs: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.rhs),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.matrix_values, self.rhs]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2(wgpu::BindGroup);
+        impl WgpuBindGroup2 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumStructured::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"matrix_values\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"rhs\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumStructured::BindGroup2") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(2, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup3EntriesParams<'a> {
+            pub bc_kind: wgpu::BufferBinding<'a>,
+            pub bc_value: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup3Entries<'a> {
+            pub bc_kind: wgpu::BindGroupEntry<'a>,
+            pub bc_value: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup3Entries<'a> {
+            pub fn new(params: WgpuBindGroup3EntriesParams<'a>) -> Self {
+                Self {
+                    bc_kind: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
+                    },
+                    bc_value: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.bc_value),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.bc_kind, self.bc_value]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup3(wgpu::BindGroup);
+        impl WgpuBindGroup3 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumStructured::BindGroup3::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup3Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumStructured::BindGroup3") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(3, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+            pub bind_group1: &'a WgpuBindGroup1,
+            pub bind_group2: &'a WgpuBindGroup2,
+            pub bind_group3: &'a WgpuBindGroup3,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+                self.bind_group1.set(pass);
+                self.bind_group2.set(pass);
+                self.bind_group3.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 4],
+            ) -> [wgpu::BindGroupLayout; 4] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device . create_pipeline_layout (& wgpu :: PipelineLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateIncompressibleMomentumStructured::PipelineLayout") , bind_group_layouts : & [& WgpuBindGroup0 :: get_bind_group_layout (device) , & WgpuBindGroup1 :: get_bind_group_layout (device) , & WgpuBindGroup2 :: get_bind_group_layout (device) , & WgpuBindGroup3 :: get_bind_group_layout (device)] , push_constant_ranges : & [] , })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(
+                    "generic_coupled_assembly_grad_state_incompressible_momentum_structured.wgsl",
+                ),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Vector2_ {
+    x: f32,
+    y: f32,
+}
+
+struct StructuredGrid {
+    nx: u32,
+    ny: u32,
+    dx: f32,
+    dy: f32,
+}
+
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
+}
+
+@group(0) @binding(0) 
+var<uniform> grid: StructuredGrid;
+@group(1) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(1) @binding(1) 
+var<storage> state_old: array<f32>;
+@group(1) @binding(2) 
+var<storage> state_old_old: array<f32>;
+@group(1) @binding(3) 
+var<uniform> constants: Constants;
+@group(1) @binding(4) 
+var<storage> state_iter: array<f32>;
+@group(1) @binding(5) 
+var<storage> grad_state: array<Vector2_>;
+@group(1) @binding(6) 
+var<storage, read_write> fluxes: array<f32>;
+@group(2) @binding(0) 
+var<storage, read_write> matrix_values: array<f32>;
+@group(2) @binding(1) 
+var<storage, read_write> rhs: array<f32>;
+@group(3) @binding(0) 
+var<storage> bc_kind: array<u32>;
+@group(3) @binding(1) 
+var<storage> bc_value: array<f32>;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var rank: u32 = 0u;
+    var diag_0_: f32 = 0f;
+    var rhs_0_: f32 = 0f;
+    var diag_1_: f32 = 0f;
+    var rhs_1_: f32 = 0f;
+    var diag_2_: f32 = 0f;
+    var rhs_2_: f32 = 0f;
+    var bounded_sum_phi_0_: f32 = 0f;
+    var bounded_sum_phi_1_: f32 = 0f;
+    var k: u32 = 0u;
+    var dist: f32;
+    var lambda_f: f32;
+    var phi_0_: f32;
+    var rec_0_phi_ho: f32;
+    var phi_1_: f32;
+    var rec_1_phi_ho: f32;
+    var phi_2_: f32;
+
+    let _e6 = constants.stride_x;
+    let owner = ((global_id.y * _e6) + global_id.x);
+    let _e12 = grid.nx;
+    let _e15 = grid.ny;
+    if (owner >= (_e12 * _e15)) {
+        return;
+    }
+    let _e20 = grid.nx;
+    let gi = (owner % _e20);
+    let _e24 = grid.nx;
+    let gj = (owner / _e24);
+    let _e31 = grid.dx;
+    let _e38 = grid.dy;
+    let center = Vector2_(((f32(gi) + 0.5f) * _e31), ((f32(gj) + 0.5f) * _e38));
+    let _e43 = grid.dx;
+    let _e46 = grid.dy;
+    let vol = (_e43 * _e46);
+    let scalar_offset = (owner * 5u);
+    let start_row_0_ = (scalar_offset * 9u);
+    let start_row_1_ = (start_row_0_ + ((5u * 3u) * 1u));
+    let start_row_2_ = (start_row_0_ + ((5u * 3u) * 2u));
+    loop {
+        let _e64 = rank;
+        if (_e64 < 5u) {
+        } else {
+            break;
+        }
+        {
+            let _e66 = rank;
+            matrix_values[((start_row_0_ + (_e66 * 3u)) + 0u)] = 0f;
+            let _e75 = rank;
+            matrix_values[((start_row_0_ + (_e75 * 3u)) + 1u)] = 0f;
+            let _e84 = rank;
+            matrix_values[((start_row_0_ + (_e84 * 3u)) + 2u)] = 0f;
+            let _e93 = rank;
+            matrix_values[((start_row_1_ + (_e93 * 3u)) + 0u)] = 0f;
+            let _e102 = rank;
+            matrix_values[((start_row_1_ + (_e102 * 3u)) + 1u)] = 0f;
+            let _e111 = rank;
+            matrix_values[((start_row_1_ + (_e111 * 3u)) + 2u)] = 0f;
+            let _e120 = rank;
+            matrix_values[((start_row_2_ + (_e120 * 3u)) + 0u)] = 0f;
+            let _e129 = rank;
+            matrix_values[((start_row_2_ + (_e129 * 3u)) + 1u)] = 0f;
+            let _e138 = rank;
+            matrix_values[((start_row_2_ + (_e138 * 3u)) + 2u)] = 0f;
+        }
+        continuing {
+            let _e148 = rank;
+            rank = (_e148 + 1u);
+        }
+    }
+    let _e152 = constants.dtau;
+    let dtau_safe = max(_e152, 0.000000000001f);
+    let _e157 = constants.dtau;
+    let global_dual_time_scale = (vol / max(_e157, 0.000000000001f));
+    let _e163 = grid.dx;
+    let _e166 = grid.dy;
+    let perimeter_sum = (2f * (_e163 + _e166));
+    let face_metric_scale = max(1f, ((perimeter_sum * perimeter_sum) / max((16f * vol), 0.000000000001f)));
+    let dual_time_scale = (global_dual_time_scale * face_metric_scale);
+    let _e181 = constants.density;
+    let _e186 = constants.dt;
+    let _e188 = diag_0_;
+    diag_0_ = (_e188 + ((vol * _e181) / _e186));
+    let _e192 = constants.density;
+    let _e196 = constants.dt;
+    let _e205 = state_old[((owner * 9u) + 0u)];
+    let _e207 = rhs_0_;
+    rhs_0_ = (_e207 + (((vol * _e192) / _e196) * _e205));
+    let _e211 = constants.time_scheme;
+    if (_e211 == 1u) {
+        let _e216 = constants.dt;
+        let _e219 = constants.dt_old;
+        let r = (_e216 / _e219);
+        let _e223 = constants.density;
+        let _e227 = constants.dt;
+        let diag_bdf2_ = ((((vol * _e223) / _e227) * ((r * 2f) + 1f)) / (r + 1f));
+        let factor_n = (r + 1f);
+        let factor_nm1_ = ((r * r) / (r + 1f));
+        let _e243 = diag_0_;
+        let _e246 = constants.density;
+        let _e250 = constants.dt;
+        diag_0_ = ((_e243 - ((vol * _e246) / _e250)) + diag_bdf2_);
+        let _e254 = rhs_0_;
+        let _e257 = constants.density;
+        let _e261 = constants.dt;
+        let _e269 = state_old[((owner * 9u) + 0u)];
+        let _e274 = constants.density;
+        let _e278 = constants.dt;
+        let _e286 = state_old[((owner * 9u) + 0u)];
+        let _e294 = state_old_old[((owner * 9u) + 0u)];
+        rhs_0_ = ((_e254 - (((vol * _e257) / _e261) * _e269)) + (((vol * _e274) / _e278) * ((factor_n * _e286) - (factor_nm1_ * _e294))));
+    }
+    let _e301 = constants.dtau;
+    if (_e301 > 0f) {
+        let _e306 = constants.density;
+        let _e308 = diag_0_;
+        diag_0_ = (_e308 + (_e306 * dual_time_scale));
+        let _e312 = constants.density;
+        let _e320 = state_iter[((owner * 9u) + 0u)];
+        let _e322 = rhs_0_;
+        rhs_0_ = (_e322 + ((_e312 * dual_time_scale) * _e320));
+    }
+    let _e326 = constants.density;
+    let _e331 = constants.dt;
+    let _e333 = diag_1_;
+    diag_1_ = (_e333 + ((vol * _e326) / _e331));
+    let _e337 = constants.density;
+    let _e341 = constants.dt;
+    let _e350 = state_old[((owner * 9u) + 1u)];
+    let _e352 = rhs_1_;
+    rhs_1_ = (_e352 + (((vol * _e337) / _e341) * _e350));
+    let _e356 = constants.time_scheme;
+    if (_e356 == 1u) {
+        let _e361 = constants.dt;
+        let _e364 = constants.dt_old;
+        let r_1 = (_e361 / _e364);
+        let _e368 = constants.density;
+        let _e372 = constants.dt;
+        let diag_bdf2_1 = ((((vol * _e368) / _e372) * ((r_1 * 2f) + 1f)) / (r_1 + 1f));
+        let factor_n_1 = (r_1 + 1f);
+        let factor_nm1_1 = ((r_1 * r_1) / (r_1 + 1f));
+        let _e388 = diag_1_;
+        let _e391 = constants.density;
+        let _e395 = constants.dt;
+        diag_1_ = ((_e388 - ((vol * _e391) / _e395)) + diag_bdf2_1);
+        let _e399 = rhs_1_;
+        let _e402 = constants.density;
+        let _e406 = constants.dt;
+        let _e414 = state_old[((owner * 9u) + 1u)];
+        let _e419 = constants.density;
+        let _e423 = constants.dt;
+        let _e431 = state_old[((owner * 9u) + 1u)];
+        let _e439 = state_old_old[((owner * 9u) + 1u)];
+        rhs_1_ = ((_e399 - (((vol * _e402) / _e406) * _e414)) + (((vol * _e419) / _e423) * ((factor_n_1 * _e431) - (factor_nm1_1 * _e439))));
+    }
+    let _e446 = constants.dtau;
+    if (_e446 > 0f) {
+        let _e451 = constants.density;
+        let _e453 = diag_1_;
+        diag_1_ = (_e453 + (_e451 * dual_time_scale));
+        let _e457 = constants.density;
+        let _e465 = state_iter[((owner * 9u) + 1u)];
+        let _e467 = rhs_1_;
+        rhs_1_ = (_e467 + ((_e457 * dual_time_scale) * _e465));
+    }
+    let _e475 = state[((owner * 9u) + 8u)];
+    let _e477 = diag_0_;
+    diag_0_ = (_e477 - (_e475 * vol));
+    let _e485 = state[((owner * 9u) + 8u)];
+    let _e487 = diag_1_;
+    diag_1_ = (_e487 - (_e485 * vol));
+    loop {
+        let _e490 = k;
+        if (_e490 < 4u) {
+        } else {
+            break;
+        }
+        {
+            let _e493 = k;
+            let _e496 = k;
+            let axis_is_x = ((_e493 >= 1u) && (_e496 <= 2u));
+            let _e500 = k;
+            let sign_f = select(-1f, 1f, (_e500 >= 2u));
+            let normal = Vector2_(select(0f, sign_f, axis_is_x), select(sign_f, 0f, axis_is_x));
+            let _e513 = grid.dx;
+            let _e516 = grid.dy;
+            let area = select(_e513, _e516, axis_is_x);
+            let _e520 = grid.dy;
+            let _e523 = grid.dx;
+            let spacing = select(_e520, _e523, axis_is_x);
+            let half = (0.5f * spacing);
+            let coord = select(gj, gi, axis_is_x);
+            let _e530 = grid.ny;
+            let _e533 = grid.nx;
+            let ext = select(_e530, _e533, axis_is_x);
+            let _e540 = k;
+            let is_boundary = select((coord == (ext - 1u)), (coord == 0u), (_e540 < 2u));
+            let _e546 = grid.nx;
+            let off_u = select(_e546, 1u, axis_is_x);
+            let _e551 = k;
+            let neighbor = select((owner - off_u), (owner + off_u), (_e551 >= 2u));
+            let other_idx = select(neighbor, owner, is_boundary);
+            let f_center = Vector2_((center.x + (half * normal.x)), (center.y + (half * normal.y)));
+            let mult = select(spacing, half, is_boundary);
+            let other_center = Vector2_((center.x + (mult * normal.x)), (center.y + (mult * normal.y)));
+            let _e577 = k;
+            let face_idx = ((owner * 4u) + _e577);
+            let dx = (other_center.x - center.x);
+            let dy = (other_center.y - center.y);
+            let dist_proj = abs(((dx * normal.x) + (dy * normal.y)));
+            let dist_euc = sqrt(((dx * dx) + (dy * dy)));
+            dist = max(dist_euc, 0.000001f);
+            if (dist_proj > 0.000001f) {
+                dist = dist_proj;
+            }
+            let lam_f_center_v = vec2<f32>(f_center.x, f_center.y);
+            let lam_d_own = distance(vec2<f32>(center.x, center.y), lam_f_center_v);
+            let lam_d_neigh = distance(vec2<f32>(other_center.x, other_center.y), lam_f_center_v);
+            let lam_total = (lam_d_own + lam_d_neigh);
+            lambda_f = 0.5f;
+            if (lam_total > 0.000001f) {
+                lambda_f = (lam_d_neigh / lam_total);
+            }
+            let _e617 = k;
+            let _e620 = k;
+            let _e621 = k;
+            let neighbor_rank = select((_e617 + 1u), _e620, (_e621 < 2u));
+            let _e627 = constants.viscosity;
+            let _e630 = constants.viscosity;
+            let _e631 = lambda_f;
+            let _e635 = constants.viscosity;
+            let _e636 = lambda_f;
+            let _e644 = dist;
+            let diff_coeff_U = ((select(_e627, ((_e630 * _e631) + (_e635 * (1f - _e636))), !(is_boundary)) * area) / _e644);
+            if !(is_boundary) {
+                let _e647 = diag_0_;
+                diag_0_ = (_e647 + diff_coeff_U);
+                let _e656 = matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)];
+                matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)] = (_e656 - diff_coeff_U);
+            } else {
+                if (0u == 4u) {
+                    let _e661 = diag_0_;
+                    diag_0_ = (_e661 + diff_coeff_U);
+                    let _e669 = state[((owner * 9u) + 0u)];
+                    let _e676 = state[((owner * 9u) + 0u)];
+                    let _e685 = state[((owner * 9u) + 1u)];
+                    let _e693 = rhs_0_;
+                    rhs_0_ = (_e693 + (diff_coeff_U * (_e669 - (((_e676 * normal.x) + (_e685 * normal.y)) * normal.x))));
+                } else {
+                    let _e701 = bc_kind[((face_idx * 3u) + 0u)];
+                    if (_e701 == 1u) {
+                        let _e704 = diag_0_;
+                        diag_0_ = (_e704 + diff_coeff_U);
+                        let _e712 = bc_value[((face_idx * 3u) + 0u)];
+                        let _e714 = rhs_0_;
+                        rhs_0_ = (_e714 + (diff_coeff_U * _e712));
+                    } else {
+                        let _e722 = bc_kind[((face_idx * 3u) + 0u)];
+                        if (_e722 == 2u) {
+                            let _e727 = constants.viscosity;
+                            let _e730 = constants.viscosity;
+                            let _e731 = lambda_f;
+                            let _e735 = constants.viscosity;
+                            let _e736 = lambda_f;
+                            let _e750 = bc_value[((face_idx * 3u) + 0u)];
+                            let _e752 = rhs_0_;
+                            rhs_0_ = (_e752 + ((select(_e727, ((_e730 * _e731) + (_e735 * (1f - _e736))), !(is_boundary)) * area) * _e750));
+                        }
+                    }
+                }
+            }
+            if !(is_boundary) {
+                let _e755 = diag_1_;
+                diag_1_ = (_e755 + diff_coeff_U);
+                let _e764 = matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)];
+                matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)] = (_e764 - diff_coeff_U);
+            } else {
+                if (0u == 4u) {
+                    let _e768 = diag_1_;
+                    diag_1_ = (_e768 + diff_coeff_U);
+                    let _e776 = state[((owner * 9u) + 1u)];
+                    let _e783 = state[((owner * 9u) + 0u)];
+                    let _e792 = state[((owner * 9u) + 1u)];
+                    let _e800 = rhs_1_;
+                    rhs_1_ = (_e800 + (diff_coeff_U * (_e776 - (((_e783 * normal.x) + (_e792 * normal.y)) * normal.y))));
+                } else {
+                    let _e808 = bc_kind[((face_idx * 3u) + 1u)];
+                    if (_e808 == 1u) {
+                        let _e811 = diag_1_;
+                        diag_1_ = (_e811 + diff_coeff_U);
+                        let _e819 = bc_value[((face_idx * 3u) + 1u)];
+                        let _e821 = rhs_1_;
+                        rhs_1_ = (_e821 + (diff_coeff_U * _e819));
+                    } else {
+                        let _e829 = bc_kind[((face_idx * 3u) + 1u)];
+                        if (_e829 == 2u) {
+                            let _e834 = constants.viscosity;
+                            let _e837 = constants.viscosity;
+                            let _e838 = lambda_f;
+                            let _e842 = constants.viscosity;
+                            let _e843 = lambda_f;
+                            let _e857 = bc_value[((face_idx * 3u) + 1u)];
+                            let _e859 = rhs_1_;
+                            rhs_1_ = (_e859 + ((select(_e834, ((_e837 * _e838) + (_e842 * (1f - _e843))), !(is_boundary)) * area) * _e857));
+                        }
+                    }
+                }
+            }
+            let _e868 = grad_state[((owner * 9u) + 0u)].x;
+            let _e876 = grad_state[((owner * 9u) + 0u)].y;
+            let _e885 = grad_state[((other_idx * 9u) + 0u)].x;
+            let _e893 = grad_state[((other_idx * 9u) + 0u)].y;
+            let dev2_U_U_gx = ((vec2<f32>(_e868, _e876) + vec2<f32>(_e885, _e893)) * 0.5f);
+            let _e905 = grad_state[((owner * 9u) + 1u)].x;
+            let _e913 = grad_state[((owner * 9u) + 1u)].y;
+            let _e922 = grad_state[((other_idx * 9u) + 1u)].x;
+            let _e930 = grad_state[((other_idx * 9u) + 1u)].y;
+            let dev2_U_U_gy = ((vec2<f32>(_e905, _e913) + vec2<f32>(_e922, _e930)) * 0.5f);
+            let dev2_U_U_div = (dev2_U_U_gx.x + dev2_U_U_gy.y);
+            let _e940 = constants.viscosity;
+            let _e943 = constants.viscosity;
+            let _e944 = lambda_f;
+            let _e948 = constants.viscosity;
+            let _e949 = lambda_f;
+            let dev2_U_U_mu = select(_e940, ((_e943 * _e944) + (_e948 * (1f - _e949))), !(is_boundary));
+            let _e970 = rhs_0_;
+            rhs_0_ = (_e970 + ((dev2_U_U_mu * area) * (((normal.x * dev2_U_U_gx.x) + (normal.y * dev2_U_U_gy.x)) - ((0.6666667f * dev2_U_U_div) * normal.x))));
+            let _e986 = rhs_1_;
+            rhs_1_ = (_e986 + ((dev2_U_U_mu * area) * (((normal.x * dev2_U_U_gx.y) + (normal.y * dev2_U_U_gy.y)) - ((0.6666667f * dev2_U_U_div) * normal.y))));
+            let _e994 = fluxes[((face_idx * 3u) + 0u)];
+            phi_0_ = _e994;
+            if (owner != owner) {
+                let _e997 = phi_0_;
+                let _e1000 = phi_0_;
+                phi_0_ = (_e1000 - (_e997 * 2f));
+            }
+            let _e1003 = phi_0_;
+            let _e1004 = bounded_sum_phi_0_;
+            bounded_sum_phi_0_ = (_e1004 + _e1003);
+            if !(is_boundary) {
+                let _e1013 = state[((owner * 9u) + 0u)];
+                let _e1020 = state[((other_idx * 9u) + 0u)];
+                let _e1021 = phi_0_;
+                rec_0_phi_ho = select(_e1013, _e1020, (_e1021 < 0f));
+                let _e1028 = constants.scheme;
+                if (_e1028 == 1u) {
+                    let _e1037 = state[((other_idx * 9u) + 0u)];
+                    let _e1045 = grad_state[((other_idx * 9u) + 0u)].x;
+                    let _e1053 = grad_state[((other_idx * 9u) + 0u)].y;
+                    let _e1070 = state[((owner * 9u) + 0u)];
+                    let _e1078 = grad_state[((owner * 9u) + 0u)].x;
+                    let _e1086 = grad_state[((owner * 9u) + 0u)].y;
+                    let _e1097 = phi_0_;
+                    rec_0_phi_ho = select((_e1037 + dot(vec2<f32>(_e1045, _e1053), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))), (_e1070 + dot(vec2<f32>(_e1078, _e1086), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e1097 > 0f));
+                } else {
+                    let _e1103 = constants.scheme;
+                    if (_e1103 == 2u) {
+                        let _e1112 = state[((other_idx * 9u) + 0u)];
+                        let _e1119 = state[((other_idx * 9u) + 0u)];
+                        let _e1129 = state[((owner * 9u) + 0u)];
+                        let _e1140 = grad_state[((other_idx * 9u) + 0u)].x;
+                        let _e1148 = grad_state[((other_idx * 9u) + 0u)].y;
+                        let _e1167 = state[((other_idx * 9u) + 0u)];
+                        let _e1175 = state[((owner * 9u) + 0u)];
+                        let _e1182 = state[((owner * 9u) + 0u)];
+                        let _e1192 = state[((other_idx * 9u) + 0u)];
+                        let _e1203 = grad_state[((owner * 9u) + 0u)].x;
+                        let _e1211 = grad_state[((owner * 9u) + 0u)].y;
+                        let _e1230 = state[((owner * 9u) + 0u)];
+                        let _e1232 = phi_0_;
+                        rec_0_phi_ho = select(((((_e1112 + (_e1119 * 0.625f)) + (_e1129 * 0.375f)) + (dot(vec2<f32>(_e1140, _e1148), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e1167), ((((_e1175 + (_e1182 * 0.625f)) + (_e1192 * 0.375f)) + (dot(vec2<f32>(_e1203, _e1211), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e1230), (_e1232 > 0f));
+                    } else {
+                        let _e1238 = constants.scheme;
+                        if (_e1238 == 3u) {
+                            let _e1247 = state[((other_idx * 9u) + 0u)];
+                            let _e1255 = grad_state[((other_idx * 9u) + 0u)].x;
+                            let _e1263 = grad_state[((other_idx * 9u) + 0u)].y;
+                            let _e1279 = state[((owner * 9u) + 0u)];
+                            let _e1286 = state[((other_idx * 9u) + 0u)];
+                            let _e1297 = state[((owner * 9u) + 0u)];
+                            let _e1304 = state[((other_idx * 9u) + 0u)];
+                            let _e1316 = state[((owner * 9u) + 0u)];
+                            let _e1324 = grad_state[((owner * 9u) + 0u)].x;
+                            let _e1332 = grad_state[((owner * 9u) + 0u)].y;
+                            let _e1348 = state[((other_idx * 9u) + 0u)];
+                            let _e1355 = state[((owner * 9u) + 0u)];
+                            let _e1366 = state[((other_idx * 9u) + 0u)];
+                            let _e1373 = state[((owner * 9u) + 0u)];
+                            let _e1379 = phi_0_;
+                            rec_0_phi_ho = select((_e1247 + min(max(dot(vec2<f32>(_e1255, _e1263), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))), min((_e1279 - _e1286), 0f)), max((_e1297 - _e1304), 0f))), (_e1316 + min(max(dot(vec2<f32>(_e1324, _e1332), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))), min((_e1348 - _e1355), 0f)), max((_e1366 - _e1373), 0f))), (_e1379 > 0f));
+                        } else {
+                            let _e1385 = constants.scheme;
+                            if (_e1385 == 4u) {
+                                let _e1394 = state[((other_idx * 9u) + 0u)];
+                                let _e1402 = grad_state[((other_idx * 9u) + 0u)].x;
+                                let _e1410 = grad_state[((other_idx * 9u) + 0u)].y;
+                                let _e1426 = state[((owner * 9u) + 0u)];
+                                let _e1433 = state[((other_idx * 9u) + 0u)];
+                                let _e1443 = state[((owner * 9u) + 0u)];
+                                let _e1450 = state[((other_idx * 9u) + 0u)];
+                                let _e1460 = grad_state[((other_idx * 9u) + 0u)].x;
+                                let _e1468 = grad_state[((other_idx * 9u) + 0u)].y;
+                                let _e1489 = state[((owner * 9u) + 0u)];
+                                let _e1496 = state[((other_idx * 9u) + 0u)];
+                                let _e1505 = grad_state[((other_idx * 9u) + 0u)].x;
+                                let _e1513 = grad_state[((other_idx * 9u) + 0u)].y;
+                                let _e1533 = state[((owner * 9u) + 0u)];
+                                let _e1540 = state[((other_idx * 9u) + 0u)];
+                                let _e1549 = grad_state[((other_idx * 9u) + 0u)].x;
+                                let _e1557 = grad_state[((other_idx * 9u) + 0u)].y;
+                                let _e1579 = state[((owner * 9u) + 0u)];
+                                let _e1587 = grad_state[((owner * 9u) + 0u)].x;
+                                let _e1595 = grad_state[((owner * 9u) + 0u)].y;
+                                let _e1611 = state[((other_idx * 9u) + 0u)];
+                                let _e1618 = state[((owner * 9u) + 0u)];
+                                let _e1628 = state[((other_idx * 9u) + 0u)];
+                                let _e1635 = state[((owner * 9u) + 0u)];
+                                let _e1645 = grad_state[((owner * 9u) + 0u)].x;
+                                let _e1653 = grad_state[((owner * 9u) + 0u)].y;
+                                let _e1674 = state[((other_idx * 9u) + 0u)];
+                                let _e1681 = state[((owner * 9u) + 0u)];
+                                let _e1690 = grad_state[((owner * 9u) + 0u)].x;
+                                let _e1698 = grad_state[((owner * 9u) + 0u)].y;
+                                let _e1718 = state[((other_idx * 9u) + 0u)];
+                                let _e1725 = state[((owner * 9u) + 0u)];
+                                let _e1734 = grad_state[((owner * 9u) + 0u)].x;
+                                let _e1742 = grad_state[((owner * 9u) + 0u)].y;
+                                let _e1758 = phi_0_;
+                                rec_0_phi_ho = select((_e1394 + ((((dot(vec2<f32>(_e1402, _e1410), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))) * abs((_e1426 - _e1433))) / max(abs((_e1443 - _e1450)), (abs(dot(vec2<f32>(_e1460, _e1468), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))) + 0.00000001f))) * max(((_e1489 - _e1496) * dot(vec2<f32>(_e1505, _e1513), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))), 0f)) / max(abs(((_e1533 - _e1540) * dot(vec2<f32>(_e1549, _e1557), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))))), 0.00000001f))), (_e1579 + ((((dot(vec2<f32>(_e1587, _e1595), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))) * abs((_e1611 - _e1618))) / max(abs((_e1628 - _e1635)), (abs(dot(vec2<f32>(_e1645, _e1653), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))) + 0.00000001f))) * max(((_e1674 - _e1681) * dot(vec2<f32>(_e1690, _e1698), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), 0f)) / max(abs(((_e1718 - _e1725) * dot(vec2<f32>(_e1734, _e1742), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))))), 0.00000001f))), (_e1758 > 0f));
+                            } else {
+                                let _e1764 = constants.scheme;
+                                if (_e1764 == 5u) {
+                                    let _e1773 = state[((other_idx * 9u) + 0u)];
+                                    let _e1780 = state[((other_idx * 9u) + 0u)];
+                                    let _e1789 = state[((owner * 9u) + 0u)];
+                                    let _e1800 = grad_state[((other_idx * 9u) + 0u)].x;
+                                    let _e1808 = grad_state[((other_idx * 9u) + 0u)].y;
+                                    let _e1827 = state[((other_idx * 9u) + 0u)];
+                                    let _e1835 = state[((owner * 9u) + 0u)];
+                                    let _e1842 = state[((other_idx * 9u) + 0u)];
+                                    let _e1853 = state[((owner * 9u) + 0u)];
+                                    let _e1860 = state[((other_idx * 9u) + 0u)];
+                                    let _e1872 = state[((owner * 9u) + 0u)];
+                                    let _e1879 = state[((owner * 9u) + 0u)];
+                                    let _e1888 = state[((other_idx * 9u) + 0u)];
+                                    let _e1899 = grad_state[((owner * 9u) + 0u)].x;
+                                    let _e1907 = grad_state[((owner * 9u) + 0u)].y;
+                                    let _e1926 = state[((owner * 9u) + 0u)];
+                                    let _e1934 = state[((other_idx * 9u) + 0u)];
+                                    let _e1941 = state[((owner * 9u) + 0u)];
+                                    let _e1952 = state[((other_idx * 9u) + 0u)];
+                                    let _e1959 = state[((owner * 9u) + 0u)];
+                                    let _e1965 = phi_0_;
+                                    rec_0_phi_ho = select((_e1773 + min(max(((((_e1780 * 0.625f) + (_e1789 * 0.375f)) + (dot(vec2<f32>(_e1800, _e1808), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e1827), min((_e1835 - _e1842), 0f)), max((_e1853 - _e1860), 0f))), (_e1872 + min(max(((((_e1879 * 0.625f) + (_e1888 * 0.375f)) + (dot(vec2<f32>(_e1899, _e1907), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e1926), min((_e1934 - _e1941), 0f)), max((_e1952 - _e1959), 0f))), (_e1965 > 0f));
+                                } else {
+                                    let _e1971 = constants.scheme;
+                                    if (_e1971 == 6u) {
+                                        let _e1980 = state[((other_idx * 9u) + 0u)];
+                                        let _e1987 = state[((other_idx * 9u) + 0u)];
+                                        let _e1996 = state[((owner * 9u) + 0u)];
+                                        let _e2007 = grad_state[((other_idx * 9u) + 0u)].x;
+                                        let _e2015 = grad_state[((other_idx * 9u) + 0u)].y;
+                                        let _e2034 = state[((other_idx * 9u) + 0u)];
+                                        let _e2042 = state[((owner * 9u) + 0u)];
+                                        let _e2049 = state[((other_idx * 9u) + 0u)];
+                                        let _e2059 = state[((owner * 9u) + 0u)];
+                                        let _e2066 = state[((other_idx * 9u) + 0u)];
+                                        let _e2075 = state[((other_idx * 9u) + 0u)];
+                                        let _e2084 = state[((owner * 9u) + 0u)];
+                                        let _e2095 = grad_state[((other_idx * 9u) + 0u)].x;
+                                        let _e2103 = grad_state[((other_idx * 9u) + 0u)].y;
+                                        let _e2122 = state[((other_idx * 9u) + 0u)];
+                                        let _e2135 = state[((owner * 9u) + 0u)];
+                                        let _e2142 = state[((other_idx * 9u) + 0u)];
+                                        let _e2150 = state[((other_idx * 9u) + 0u)];
+                                        let _e2159 = state[((owner * 9u) + 0u)];
+                                        let _e2170 = grad_state[((other_idx * 9u) + 0u)].x;
+                                        let _e2178 = grad_state[((other_idx * 9u) + 0u)].y;
+                                        let _e2197 = state[((other_idx * 9u) + 0u)];
+                                        let _e2209 = state[((owner * 9u) + 0u)];
+                                        let _e2216 = state[((other_idx * 9u) + 0u)];
+                                        let _e2224 = state[((other_idx * 9u) + 0u)];
+                                        let _e2233 = state[((owner * 9u) + 0u)];
+                                        let _e2244 = grad_state[((other_idx * 9u) + 0u)].x;
+                                        let _e2252 = grad_state[((other_idx * 9u) + 0u)].y;
+                                        let _e2271 = state[((other_idx * 9u) + 0u)];
+                                        let _e2285 = state[((owner * 9u) + 0u)];
+                                        let _e2292 = state[((owner * 9u) + 0u)];
+                                        let _e2301 = state[((other_idx * 9u) + 0u)];
+                                        let _e2312 = grad_state[((owner * 9u) + 0u)].x;
+                                        let _e2320 = grad_state[((owner * 9u) + 0u)].y;
+                                        let _e2339 = state[((owner * 9u) + 0u)];
+                                        let _e2347 = state[((other_idx * 9u) + 0u)];
+                                        let _e2354 = state[((owner * 9u) + 0u)];
+                                        let _e2364 = state[((other_idx * 9u) + 0u)];
+                                        let _e2371 = state[((owner * 9u) + 0u)];
+                                        let _e2380 = state[((owner * 9u) + 0u)];
+                                        let _e2389 = state[((other_idx * 9u) + 0u)];
+                                        let _e2400 = grad_state[((owner * 9u) + 0u)].x;
+                                        let _e2408 = grad_state[((owner * 9u) + 0u)].y;
+                                        let _e2427 = state[((owner * 9u) + 0u)];
+                                        let _e2440 = state[((other_idx * 9u) + 0u)];
+                                        let _e2447 = state[((owner * 9u) + 0u)];
+                                        let _e2455 = state[((owner * 9u) + 0u)];
+                                        let _e2464 = state[((other_idx * 9u) + 0u)];
+                                        let _e2475 = grad_state[((owner * 9u) + 0u)].x;
+                                        let _e2483 = grad_state[((owner * 9u) + 0u)].y;
+                                        let _e2502 = state[((owner * 9u) + 0u)];
+                                        let _e2514 = state[((other_idx * 9u) + 0u)];
+                                        let _e2521 = state[((owner * 9u) + 0u)];
+                                        let _e2529 = state[((owner * 9u) + 0u)];
+                                        let _e2538 = state[((other_idx * 9u) + 0u)];
+                                        let _e2549 = grad_state[((owner * 9u) + 0u)].x;
+                                        let _e2557 = grad_state[((owner * 9u) + 0u)].y;
+                                        let _e2576 = state[((owner * 9u) + 0u)];
+                                        let _e2584 = phi_0_;
+                                        rec_0_phi_ho = select((_e1980 + ((((((((_e1987 * 0.625f) + (_e1996 * 0.375f)) + (dot(vec2<f32>(_e2007, _e2015), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2034) * abs((_e2042 - _e2049))) / max(abs((_e2059 - _e2066)), (abs(((((_e2075 * 0.625f) + (_e2084 * 0.375f)) + (dot(vec2<f32>(_e2095, _e2103), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2122)) + 0.00000001f))) * max(((_e2135 - _e2142) * ((((_e2150 * 0.625f) + (_e2159 * 0.375f)) + (dot(vec2<f32>(_e2170, _e2178), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2197)), 0f)) / max(abs(((_e2209 - _e2216) * ((((_e2224 * 0.625f) + (_e2233 * 0.375f)) + (dot(vec2<f32>(_e2244, _e2252), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2271))), 0.00000001f))), (_e2285 + ((((((((_e2292 * 0.625f) + (_e2301 * 0.375f)) + (dot(vec2<f32>(_e2312, _e2320), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2339) * abs((_e2347 - _e2354))) / max(abs((_e2364 - _e2371)), (abs(((((_e2380 * 0.625f) + (_e2389 * 0.375f)) + (dot(vec2<f32>(_e2400, _e2408), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2427)) + 0.00000001f))) * max(((_e2440 - _e2447) * ((((_e2455 * 0.625f) + (_e2464 * 0.375f)) + (dot(vec2<f32>(_e2475, _e2483), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2502)), 0f)) / max(abs(((_e2514 - _e2521) * ((((_e2529 * 0.625f) + (_e2538 * 0.375f)) + (dot(vec2<f32>(_e2549, _e2557), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2576))), 0.00000001f))), (_e2584 > 0f));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let _e2588 = phi_0_;
+                let _e2591 = diag_0_;
+                diag_0_ = (_e2591 + max(_e2588, 0f));
+                let _e2600 = phi_0_;
+                let _e2603 = matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)];
+                matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)] = (_e2603 + min(_e2600, 0f));
+                let _e2605 = phi_0_;
+                let _e2606 = rec_0_phi_ho;
+                let _e2613 = state[((owner * 9u) + 0u)];
+                let _e2620 = state[((other_idx * 9u) + 0u)];
+                let _e2621 = phi_0_;
+                let _e2627 = rhs_0_;
+                rhs_0_ = (_e2627 - (_e2605 * (_e2606 - select(_e2613, _e2620, (_e2621 < 0f)))));
+            } else {
+                let _e2635 = bc_kind[((face_idx * 3u) + 0u)];
+                if (_e2635 == 1u) {
+                    let _e2638 = phi_0_;
+                    let _e2641 = diag_0_;
+                    diag_0_ = (_e2641 + max(_e2638, 0f));
+                    let _e2643 = phi_0_;
+                    let _e2652 = bc_value[((face_idx * 3u) + 0u)];
+                    let _e2654 = rhs_0_;
+                    rhs_0_ = (_e2654 - (min(_e2643, 0f) * _e2652));
+                } else {
+                    let _e2656 = phi_0_;
+                    let _e2657 = diag_0_;
+                    diag_0_ = (_e2657 + _e2656);
+                }
+            }
+            let _e2665 = fluxes[((face_idx * 3u) + 1u)];
+            phi_1_ = _e2665;
+            if (owner != owner) {
+                let _e2668 = phi_1_;
+                let _e2671 = phi_1_;
+                phi_1_ = (_e2671 - (_e2668 * 2f));
+            }
+            let _e2674 = phi_1_;
+            let _e2675 = bounded_sum_phi_1_;
+            bounded_sum_phi_1_ = (_e2675 + _e2674);
+            if !(is_boundary) {
+                let _e2684 = state[((owner * 9u) + 1u)];
+                let _e2691 = state[((other_idx * 9u) + 1u)];
+                let _e2692 = phi_1_;
+                rec_1_phi_ho = select(_e2684, _e2691, (_e2692 < 0f));
+                let _e2699 = constants.scheme;
+                if (_e2699 == 1u) {
+                    let _e2708 = state[((other_idx * 9u) + 1u)];
+                    let _e2716 = grad_state[((other_idx * 9u) + 1u)].x;
+                    let _e2724 = grad_state[((other_idx * 9u) + 1u)].y;
+                    let _e2741 = state[((owner * 9u) + 1u)];
+                    let _e2749 = grad_state[((owner * 9u) + 1u)].x;
+                    let _e2757 = grad_state[((owner * 9u) + 1u)].y;
+                    let _e2768 = phi_1_;
+                    rec_1_phi_ho = select((_e2708 + dot(vec2<f32>(_e2716, _e2724), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))), (_e2741 + dot(vec2<f32>(_e2749, _e2757), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e2768 > 0f));
+                } else {
+                    let _e2774 = constants.scheme;
+                    if (_e2774 == 2u) {
+                        let _e2783 = state[((other_idx * 9u) + 1u)];
+                        let _e2790 = state[((other_idx * 9u) + 1u)];
+                        let _e2800 = state[((owner * 9u) + 1u)];
+                        let _e2811 = grad_state[((other_idx * 9u) + 1u)].x;
+                        let _e2819 = grad_state[((other_idx * 9u) + 1u)].y;
+                        let _e2838 = state[((other_idx * 9u) + 1u)];
+                        let _e2846 = state[((owner * 9u) + 1u)];
+                        let _e2853 = state[((owner * 9u) + 1u)];
+                        let _e2863 = state[((other_idx * 9u) + 1u)];
+                        let _e2874 = grad_state[((owner * 9u) + 1u)].x;
+                        let _e2882 = grad_state[((owner * 9u) + 1u)].y;
+                        let _e2901 = state[((owner * 9u) + 1u)];
+                        let _e2903 = phi_1_;
+                        rec_1_phi_ho = select(((((_e2783 + (_e2790 * 0.625f)) + (_e2800 * 0.375f)) + (dot(vec2<f32>(_e2811, _e2819), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2838), ((((_e2846 + (_e2853 * 0.625f)) + (_e2863 * 0.375f)) + (dot(vec2<f32>(_e2874, _e2882), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2901), (_e2903 > 0f));
+                    } else {
+                        let _e2909 = constants.scheme;
+                        if (_e2909 == 3u) {
+                            let _e2918 = state[((other_idx * 9u) + 1u)];
+                            let _e2926 = grad_state[((other_idx * 9u) + 1u)].x;
+                            let _e2934 = grad_state[((other_idx * 9u) + 1u)].y;
+                            let _e2950 = state[((owner * 9u) + 1u)];
+                            let _e2957 = state[((other_idx * 9u) + 1u)];
+                            let _e2968 = state[((owner * 9u) + 1u)];
+                            let _e2975 = state[((other_idx * 9u) + 1u)];
+                            let _e2987 = state[((owner * 9u) + 1u)];
+                            let _e2995 = grad_state[((owner * 9u) + 1u)].x;
+                            let _e3003 = grad_state[((owner * 9u) + 1u)].y;
+                            let _e3019 = state[((other_idx * 9u) + 1u)];
+                            let _e3026 = state[((owner * 9u) + 1u)];
+                            let _e3037 = state[((other_idx * 9u) + 1u)];
+                            let _e3044 = state[((owner * 9u) + 1u)];
+                            let _e3050 = phi_1_;
+                            rec_1_phi_ho = select((_e2918 + min(max(dot(vec2<f32>(_e2926, _e2934), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))), min((_e2950 - _e2957), 0f)), max((_e2968 - _e2975), 0f))), (_e2987 + min(max(dot(vec2<f32>(_e2995, _e3003), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))), min((_e3019 - _e3026), 0f)), max((_e3037 - _e3044), 0f))), (_e3050 > 0f));
+                        } else {
+                            let _e3056 = constants.scheme;
+                            if (_e3056 == 4u) {
+                                let _e3065 = state[((other_idx * 9u) + 1u)];
+                                let _e3073 = grad_state[((other_idx * 9u) + 1u)].x;
+                                let _e3081 = grad_state[((other_idx * 9u) + 1u)].y;
+                                let _e3097 = state[((owner * 9u) + 1u)];
+                                let _e3104 = state[((other_idx * 9u) + 1u)];
+                                let _e3114 = state[((owner * 9u) + 1u)];
+                                let _e3121 = state[((other_idx * 9u) + 1u)];
+                                let _e3131 = grad_state[((other_idx * 9u) + 1u)].x;
+                                let _e3139 = grad_state[((other_idx * 9u) + 1u)].y;
+                                let _e3160 = state[((owner * 9u) + 1u)];
+                                let _e3167 = state[((other_idx * 9u) + 1u)];
+                                let _e3176 = grad_state[((other_idx * 9u) + 1u)].x;
+                                let _e3184 = grad_state[((other_idx * 9u) + 1u)].y;
+                                let _e3204 = state[((owner * 9u) + 1u)];
+                                let _e3211 = state[((other_idx * 9u) + 1u)];
+                                let _e3220 = grad_state[((other_idx * 9u) + 1u)].x;
+                                let _e3228 = grad_state[((other_idx * 9u) + 1u)].y;
+                                let _e3250 = state[((owner * 9u) + 1u)];
+                                let _e3258 = grad_state[((owner * 9u) + 1u)].x;
+                                let _e3266 = grad_state[((owner * 9u) + 1u)].y;
+                                let _e3282 = state[((other_idx * 9u) + 1u)];
+                                let _e3289 = state[((owner * 9u) + 1u)];
+                                let _e3299 = state[((other_idx * 9u) + 1u)];
+                                let _e3306 = state[((owner * 9u) + 1u)];
+                                let _e3316 = grad_state[((owner * 9u) + 1u)].x;
+                                let _e3324 = grad_state[((owner * 9u) + 1u)].y;
+                                let _e3345 = state[((other_idx * 9u) + 1u)];
+                                let _e3352 = state[((owner * 9u) + 1u)];
+                                let _e3361 = grad_state[((owner * 9u) + 1u)].x;
+                                let _e3369 = grad_state[((owner * 9u) + 1u)].y;
+                                let _e3389 = state[((other_idx * 9u) + 1u)];
+                                let _e3396 = state[((owner * 9u) + 1u)];
+                                let _e3405 = grad_state[((owner * 9u) + 1u)].x;
+                                let _e3413 = grad_state[((owner * 9u) + 1u)].y;
+                                let _e3429 = phi_1_;
+                                rec_1_phi_ho = select((_e3065 + ((((dot(vec2<f32>(_e3073, _e3081), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))) * abs((_e3097 - _e3104))) / max(abs((_e3114 - _e3121)), (abs(dot(vec2<f32>(_e3131, _e3139), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))) + 0.00000001f))) * max(((_e3160 - _e3167) * dot(vec2<f32>(_e3176, _e3184), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))), 0f)) / max(abs(((_e3204 - _e3211) * dot(vec2<f32>(_e3220, _e3228), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))))), 0.00000001f))), (_e3250 + ((((dot(vec2<f32>(_e3258, _e3266), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))) * abs((_e3282 - _e3289))) / max(abs((_e3299 - _e3306)), (abs(dot(vec2<f32>(_e3316, _e3324), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))) + 0.00000001f))) * max(((_e3345 - _e3352) * dot(vec2<f32>(_e3361, _e3369), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), 0f)) / max(abs(((_e3389 - _e3396) * dot(vec2<f32>(_e3405, _e3413), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))))), 0.00000001f))), (_e3429 > 0f));
+                            } else {
+                                let _e3435 = constants.scheme;
+                                if (_e3435 == 5u) {
+                                    let _e3444 = state[((other_idx * 9u) + 1u)];
+                                    let _e3451 = state[((other_idx * 9u) + 1u)];
+                                    let _e3460 = state[((owner * 9u) + 1u)];
+                                    let _e3471 = grad_state[((other_idx * 9u) + 1u)].x;
+                                    let _e3479 = grad_state[((other_idx * 9u) + 1u)].y;
+                                    let _e3498 = state[((other_idx * 9u) + 1u)];
+                                    let _e3506 = state[((owner * 9u) + 1u)];
+                                    let _e3513 = state[((other_idx * 9u) + 1u)];
+                                    let _e3524 = state[((owner * 9u) + 1u)];
+                                    let _e3531 = state[((other_idx * 9u) + 1u)];
+                                    let _e3543 = state[((owner * 9u) + 1u)];
+                                    let _e3550 = state[((owner * 9u) + 1u)];
+                                    let _e3559 = state[((other_idx * 9u) + 1u)];
+                                    let _e3570 = grad_state[((owner * 9u) + 1u)].x;
+                                    let _e3578 = grad_state[((owner * 9u) + 1u)].y;
+                                    let _e3597 = state[((owner * 9u) + 1u)];
+                                    let _e3605 = state[((other_idx * 9u) + 1u)];
+                                    let _e3612 = state[((owner * 9u) + 1u)];
+                                    let _e3623 = state[((other_idx * 9u) + 1u)];
+                                    let _e3630 = state[((owner * 9u) + 1u)];
+                                    let _e3636 = phi_1_;
+                                    rec_1_phi_ho = select((_e3444 + min(max(((((_e3451 * 0.625f) + (_e3460 * 0.375f)) + (dot(vec2<f32>(_e3471, _e3479), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e3498), min((_e3506 - _e3513), 0f)), max((_e3524 - _e3531), 0f))), (_e3543 + min(max(((((_e3550 * 0.625f) + (_e3559 * 0.375f)) + (dot(vec2<f32>(_e3570, _e3578), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e3597), min((_e3605 - _e3612), 0f)), max((_e3623 - _e3630), 0f))), (_e3636 > 0f));
+                                } else {
+                                    let _e3642 = constants.scheme;
+                                    if (_e3642 == 6u) {
+                                        let _e3651 = state[((other_idx * 9u) + 1u)];
+                                        let _e3658 = state[((other_idx * 9u) + 1u)];
+                                        let _e3667 = state[((owner * 9u) + 1u)];
+                                        let _e3678 = grad_state[((other_idx * 9u) + 1u)].x;
+                                        let _e3686 = grad_state[((other_idx * 9u) + 1u)].y;
+                                        let _e3705 = state[((other_idx * 9u) + 1u)];
+                                        let _e3713 = state[((owner * 9u) + 1u)];
+                                        let _e3720 = state[((other_idx * 9u) + 1u)];
+                                        let _e3730 = state[((owner * 9u) + 1u)];
+                                        let _e3737 = state[((other_idx * 9u) + 1u)];
+                                        let _e3746 = state[((other_idx * 9u) + 1u)];
+                                        let _e3755 = state[((owner * 9u) + 1u)];
+                                        let _e3766 = grad_state[((other_idx * 9u) + 1u)].x;
+                                        let _e3774 = grad_state[((other_idx * 9u) + 1u)].y;
+                                        let _e3793 = state[((other_idx * 9u) + 1u)];
+                                        let _e3806 = state[((owner * 9u) + 1u)];
+                                        let _e3813 = state[((other_idx * 9u) + 1u)];
+                                        let _e3821 = state[((other_idx * 9u) + 1u)];
+                                        let _e3830 = state[((owner * 9u) + 1u)];
+                                        let _e3841 = grad_state[((other_idx * 9u) + 1u)].x;
+                                        let _e3849 = grad_state[((other_idx * 9u) + 1u)].y;
+                                        let _e3868 = state[((other_idx * 9u) + 1u)];
+                                        let _e3880 = state[((owner * 9u) + 1u)];
+                                        let _e3887 = state[((other_idx * 9u) + 1u)];
+                                        let _e3895 = state[((other_idx * 9u) + 1u)];
+                                        let _e3904 = state[((owner * 9u) + 1u)];
+                                        let _e3915 = grad_state[((other_idx * 9u) + 1u)].x;
+                                        let _e3923 = grad_state[((other_idx * 9u) + 1u)].y;
+                                        let _e3942 = state[((other_idx * 9u) + 1u)];
+                                        let _e3956 = state[((owner * 9u) + 1u)];
+                                        let _e3963 = state[((owner * 9u) + 1u)];
+                                        let _e3972 = state[((other_idx * 9u) + 1u)];
+                                        let _e3983 = grad_state[((owner * 9u) + 1u)].x;
+                                        let _e3991 = grad_state[((owner * 9u) + 1u)].y;
+                                        let _e4010 = state[((owner * 9u) + 1u)];
+                                        let _e4018 = state[((other_idx * 9u) + 1u)];
+                                        let _e4025 = state[((owner * 9u) + 1u)];
+                                        let _e4035 = state[((other_idx * 9u) + 1u)];
+                                        let _e4042 = state[((owner * 9u) + 1u)];
+                                        let _e4051 = state[((owner * 9u) + 1u)];
+                                        let _e4060 = state[((other_idx * 9u) + 1u)];
+                                        let _e4071 = grad_state[((owner * 9u) + 1u)].x;
+                                        let _e4079 = grad_state[((owner * 9u) + 1u)].y;
+                                        let _e4098 = state[((owner * 9u) + 1u)];
+                                        let _e4111 = state[((other_idx * 9u) + 1u)];
+                                        let _e4118 = state[((owner * 9u) + 1u)];
+                                        let _e4126 = state[((owner * 9u) + 1u)];
+                                        let _e4135 = state[((other_idx * 9u) + 1u)];
+                                        let _e4146 = grad_state[((owner * 9u) + 1u)].x;
+                                        let _e4154 = grad_state[((owner * 9u) + 1u)].y;
+                                        let _e4173 = state[((owner * 9u) + 1u)];
+                                        let _e4185 = state[((other_idx * 9u) + 1u)];
+                                        let _e4192 = state[((owner * 9u) + 1u)];
+                                        let _e4200 = state[((owner * 9u) + 1u)];
+                                        let _e4209 = state[((other_idx * 9u) + 1u)];
+                                        let _e4220 = grad_state[((owner * 9u) + 1u)].x;
+                                        let _e4228 = grad_state[((owner * 9u) + 1u)].y;
+                                        let _e4247 = state[((owner * 9u) + 1u)];
+                                        let _e4255 = phi_1_;
+                                        rec_1_phi_ho = select((_e3651 + ((((((((_e3658 * 0.625f) + (_e3667 * 0.375f)) + (dot(vec2<f32>(_e3678, _e3686), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e3705) * abs((_e3713 - _e3720))) / max(abs((_e3730 - _e3737)), (abs(((((_e3746 * 0.625f) + (_e3755 * 0.375f)) + (dot(vec2<f32>(_e3766, _e3774), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e3793)) + 0.00000001f))) * max(((_e3806 - _e3813) * ((((_e3821 * 0.625f) + (_e3830 * 0.375f)) + (dot(vec2<f32>(_e3841, _e3849), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e3868)), 0f)) / max(abs(((_e3880 - _e3887) * ((((_e3895 * 0.625f) + (_e3904 * 0.375f)) + (dot(vec2<f32>(_e3915, _e3923), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e3942))), 0.00000001f))), (_e3956 + ((((((((_e3963 * 0.625f) + (_e3972 * 0.375f)) + (dot(vec2<f32>(_e3983, _e3991), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e4010) * abs((_e4018 - _e4025))) / max(abs((_e4035 - _e4042)), (abs(((((_e4051 * 0.625f) + (_e4060 * 0.375f)) + (dot(vec2<f32>(_e4071, _e4079), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e4098)) + 0.00000001f))) * max(((_e4111 - _e4118) * ((((_e4126 * 0.625f) + (_e4135 * 0.375f)) + (dot(vec2<f32>(_e4146, _e4154), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e4173)), 0f)) / max(abs(((_e4185 - _e4192) * ((((_e4200 * 0.625f) + (_e4209 * 0.375f)) + (dot(vec2<f32>(_e4220, _e4228), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e4247))), 0.00000001f))), (_e4255 > 0f));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let _e4259 = phi_1_;
+                let _e4262 = diag_1_;
+                diag_1_ = (_e4262 + max(_e4259, 0f));
+                let _e4271 = phi_1_;
+                let _e4274 = matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)];
+                matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)] = (_e4274 + min(_e4271, 0f));
+                let _e4276 = phi_1_;
+                let _e4277 = rec_1_phi_ho;
+                let _e4284 = state[((owner * 9u) + 1u)];
+                let _e4291 = state[((other_idx * 9u) + 1u)];
+                let _e4292 = phi_1_;
+                let _e4298 = rhs_1_;
+                rhs_1_ = (_e4298 - (_e4276 * (_e4277 - select(_e4284, _e4291, (_e4292 < 0f)))));
+            } else {
+                let _e4306 = bc_kind[((face_idx * 3u) + 1u)];
+                if (_e4306 == 1u) {
+                    let _e4309 = phi_1_;
+                    let _e4312 = diag_1_;
+                    diag_1_ = (_e4312 + max(_e4309, 0f));
+                    let _e4314 = phi_1_;
+                    let _e4323 = bc_value[((face_idx * 3u) + 1u)];
+                    let _e4325 = rhs_1_;
+                    rhs_1_ = (_e4325 - (min(_e4314, 0f) * _e4323));
+                } else {
+                    let _e4327 = phi_1_;
+                    let _e4328 = diag_1_;
+                    diag_1_ = (_e4328 + _e4327);
+                }
+            }
+            if !(is_boundary) {
+                let _e4341 = state[((owner * 9u) + 2u)];
+                let _e4348 = state[((other_idx * 9u) + 2u)];
+                let _e4351 = rhs_0_;
+                rhs_0_ = (_e4351 - (((0.5f * area) * normal.x) * (_e4341 + _e4348)));
+            } else {
+                let _e4363 = state[((owner * 9u) + 2u)];
+                let _e4370 = bc_value[((face_idx * 3u) + 2u)];
+                let _e4377 = bc_kind[((face_idx * 3u) + 2u)];
+                let _e4387 = state[((owner * 9u) + 2u)];
+                let _e4394 = bc_value[((face_idx * 3u) + 2u)];
+                let _e4395 = dist;
+                let _e4404 = bc_kind[((face_idx * 3u) + 2u)];
+                let _e4411 = rhs_0_;
+                rhs_0_ = (_e4411 - ((((0.5f * area) * normal.x) * select(select(_e4363, _e4370, (_e4377 == 1u)), (_e4387 + (_e4394 * _e4395)), (_e4404 == 2u))) * 2f));
+            }
+            if !(is_boundary) {
+                let _e4424 = state[((owner * 9u) + 2u)];
+                let _e4431 = state[((other_idx * 9u) + 2u)];
+                let _e4434 = rhs_1_;
+                rhs_1_ = (_e4434 - (((0.5f * area) * normal.y) * (_e4424 + _e4431)));
+            } else {
+                let _e4446 = state[((owner * 9u) + 2u)];
+                let _e4453 = bc_value[((face_idx * 3u) + 2u)];
+                let _e4460 = bc_kind[((face_idx * 3u) + 2u)];
+                let _e4470 = state[((owner * 9u) + 2u)];
+                let _e4477 = bc_value[((face_idx * 3u) + 2u)];
+                let _e4478 = dist;
+                let _e4487 = bc_kind[((face_idx * 3u) + 2u)];
+                let _e4494 = rhs_1_;
+                rhs_1_ = (_e4494 - ((((0.5f * area) * normal.y) * select(select(_e4446, _e4453, (_e4460 == 1u)), (_e4470 + (_e4477 * _e4478)), (_e4487 == 2u))) * 2f));
+            }
+            let _e4498 = constants.density;
+            let _e4505 = state[((owner * 9u) + 3u)];
+            let _e4509 = constants.density;
+            let _e4516 = state[((owner * 9u) + 3u)];
+            let _e4518 = lambda_f;
+            let _e4522 = constants.density;
+            let _e4529 = state[((other_idx * 9u) + 3u)];
+            let _e4531 = lambda_f;
+            let _e4539 = dist;
+            let diff_coeff_p = ((select((_e4498 * _e4505), (((_e4509 * _e4516) * _e4518) + ((_e4522 * _e4529) * (1f - _e4531))), !(is_boundary)) * area) / _e4539);
+            if !(is_boundary) {
+                let _e4543 = diag_2_;
+                diag_2_ = (_e4543 + diff_coeff_p);
+                let _e4552 = matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)];
+                matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)] = (_e4552 - diff_coeff_p);
+            } else {
+                let _e4560 = bc_kind[((face_idx * 3u) + 2u)];
+                if (_e4560 == 1u) {
+                    let _e4563 = diag_2_;
+                    diag_2_ = (_e4563 + diff_coeff_p);
+                    let _e4572 = bc_value[((face_idx * 3u) + 2u)];
+                    let _e4574 = rhs_2_;
+                    rhs_2_ = (_e4574 + (diff_coeff_p * _e4572));
+                } else {
+                    let _e4582 = bc_kind[((face_idx * 3u) + 2u)];
+                    if (_e4582 == 2u) {
+                        let _e4587 = constants.density;
+                        let _e4594 = state[((owner * 9u) + 3u)];
+                        let _e4598 = constants.density;
+                        let _e4605 = state[((owner * 9u) + 3u)];
+                        let _e4607 = lambda_f;
+                        let _e4611 = constants.density;
+                        let _e4618 = state[((other_idx * 9u) + 3u)];
+                        let _e4620 = lambda_f;
+                        let _e4634 = bc_value[((face_idx * 3u) + 2u)];
+                        let _e4636 = rhs_2_;
+                        rhs_2_ = (_e4636 + ((select((_e4587 * _e4594), (((_e4598 * _e4605) * _e4607) + ((_e4611 * _e4618) * (1f - _e4620))), !(is_boundary)) * area) * _e4634));
+                    }
+                }
+            }
+            let _e4644 = fluxes[((face_idx * 3u) + 2u)];
+            phi_2_ = _e4644;
+            if (owner != owner) {
+                let _e4647 = phi_2_;
+                let _e4650 = phi_2_;
+                phi_2_ = (_e4650 - (_e4647 * 2f));
+            }
+            let _e4652 = phi_2_;
+            let _e4653 = rhs_2_;
+            rhs_2_ = (_e4653 - _e4652);
+        }
+        continuing {
+            let _e4656 = k;
+            k = (_e4656 + 1u);
+        }
+    }
+    let _e4658 = bounded_sum_phi_0_;
+    let _e4659 = diag_0_;
+    diag_0_ = (_e4659 - _e4658);
+    let _e4661 = bounded_sum_phi_1_;
+    let _e4662 = diag_1_;
+    diag_1_ = (_e4662 - _e4661);
+    let _e4672 = diag_0_;
+    let _e4673 = matrix_values[((start_row_0_ + (2u * 3u)) + 0u)];
+    matrix_values[((start_row_0_ + (2u * 3u)) + 0u)] = (_e4673 + _e4672);
+    let _e4681 = rhs_0_;
+    rhs[((owner * 3u) + 0u)] = _e4681;
+    let _e4689 = diag_1_;
+    let _e4690 = matrix_values[((start_row_1_ + (2u * 3u)) + 1u)];
+    matrix_values[((start_row_1_ + (2u * 3u)) + 1u)] = (_e4690 + _e4689);
+    let _e4698 = rhs_1_;
+    rhs[((owner * 3u) + 1u)] = _e4698;
+    let _e4706 = diag_2_;
+    let _e4707 = matrix_values[((start_row_2_ + (2u * 3u)) + 2u)];
+    matrix_values[((start_row_2_ + (2u * 3u)) + 2u)] = (_e4707 + _e4706);
+    let _e4715 = rhs_2_;
+    rhs[((owner * 3u) + 2u)] = _e4715;
     return;
 }
 "#;
@@ -202692,23 +206417,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var lambda_f: f32;
 
     let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
+    let owner = ((global_id.y * _e6) + global_id.x);
     let _e12 = grid.nx;
     let _e15 = grid.ny;
-    if (idx >= (_e12 * _e15)) {
+    if (owner >= (_e12 * _e15)) {
         return;
     }
     let _e20 = grid.nx;
-    let gi = (idx % _e20);
+    let gi = (owner % _e20);
     let _e24 = grid.nx;
-    let gj = (idx / _e24);
+    let gj = (owner / _e24);
     let _e31 = grid.dx;
     let _e38 = grid.dy;
     let center = Vector2_(((f32(gi) + 0.5f) * _e31), ((f32(gj) + 0.5f) * _e38));
     let _e43 = grid.dx;
     let _e46 = grid.dy;
     let vol = (_e43 * _e46);
-    let scalar_offset = (idx * 5u);
+    let scalar_offset = (owner * 5u);
     let start_row_0_ = (scalar_offset * 1u);
     loop {
         let _e54 = rank;
@@ -202733,7 +206458,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let face_metric_scale = max(1f, ((perimeter_sum * perimeter_sum) / max((16f * vol), 0.000000000001f)));
     let dual_time_scale = (global_dual_time_scale * face_metric_scale);
     let _e90 = constants.dt;
-    let _e99 = state_old[((idx * 1u) + 0u)];
+    let _e99 = state_old[((owner * 1u) + 0u)];
     let _e101 = rhs_0_;
     rhs_0_ = (_e101 + ((vol / _e90) * _e99));
     let _e105 = constants.time_scheme;
@@ -202747,15 +206472,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let factor_nm1_ = ((r * r) / (r + 1f));
         let _e133 = rhs_0_;
         let _e136 = constants.dt;
-        let _e144 = state_old[((idx * 1u) + 0u)];
+        let _e144 = state_old[((owner * 1u) + 0u)];
         let _e149 = constants.dt;
-        let _e157 = state_old[((idx * 1u) + 0u)];
-        let _e165 = state_old_old[((idx * 1u) + 0u)];
+        let _e157 = state_old[((owner * 1u) + 0u)];
+        let _e165 = state_old_old[((owner * 1u) + 0u)];
         rhs_0_ = ((_e133 - ((vol / _e136) * _e144)) + ((vol / _e149) * ((factor_n * _e157) - (factor_nm1_ * _e165))));
     }
     let _e172 = constants.dtau;
     if (_e172 > 0f) {
-        let _e181 = state_iter[((idx * 1u) + 0u)];
+        let _e181 = state_iter[((owner * 1u) + 0u)];
         let _e183 = rhs_0_;
         rhs_0_ = (_e183 + (dual_time_scale * _e181));
     }
@@ -202788,13 +206513,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e242 = grid.nx;
             let off_u = select(_e242, 1u, axis_is_x);
             let _e247 = k;
-            let neighbor = select((idx - off_u), (idx + off_u), (_e247 >= 2u));
-            let other_idx = select(neighbor, idx, is_boundary);
+            let neighbor = select((owner - off_u), (owner + off_u), (_e247 >= 2u));
+            let other_idx = select(neighbor, owner, is_boundary);
             let f_center = Vector2_((center.x + (half * normal.x)), (center.y + (half * normal.y)));
             let mult = select(spacing, half, is_boundary);
             let other_center = Vector2_((center.x + (mult * normal.x)), (center.y + (mult * normal.y)));
             let _e273 = k;
-            let face_idx = ((idx * 4u) + _e273);
+            let face_idx = ((owner * 4u) + _e273);
             let dx = (other_center.x - center.x);
             let dy = (other_center.y - center.y);
             let dist_proj = abs(((dx * normal.x) + (dy * normal.y)));
@@ -202844,7 +206569,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     let _e389 = rhs_0_;
-    rhs[((idx * 1u) + 0u)] = _e389;
+    rhs[((owner * 1u) + 0u)] = _e389;
     return;
 }
 "#;
@@ -203300,23 +207025,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var lambda_f: f32;
 
     let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
+    let owner = ((global_id.y * _e6) + global_id.x);
     let _e12 = grid.nx;
     let _e15 = grid.ny;
-    if (idx >= (_e12 * _e15)) {
+    if (owner >= (_e12 * _e15)) {
         return;
     }
     let _e20 = grid.nx;
-    let gi = (idx % _e20);
+    let gi = (owner % _e20);
     let _e24 = grid.nx;
-    let gj = (idx / _e24);
+    let gj = (owner / _e24);
     let _e31 = grid.dx;
     let _e38 = grid.dy;
     let center = Vector2_(((f32(gi) + 0.5f) * _e31), ((f32(gj) + 0.5f) * _e38));
     let _e43 = grid.dx;
     let _e46 = grid.dy;
     let vol = (_e43 * _e46);
-    let scalar_offset = (idx * 5u);
+    let scalar_offset = (owner * 5u);
     let start_row_0_ = (scalar_offset * 1u);
     loop {
         let _e54 = rank;
@@ -203341,7 +207066,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let face_metric_scale = max(1f, ((perimeter_sum * perimeter_sum) / max((16f * vol), 0.000000000001f)));
     let dual_time_scale = (global_dual_time_scale * face_metric_scale);
     let _e90 = constants.dt;
-    let _e99 = state_old[((idx * 2u) + 0u)];
+    let _e99 = state_old[((owner * 2u) + 0u)];
     let _e101 = rhs_0_;
     rhs_0_ = (_e101 + ((vol / _e90) * _e99));
     let _e105 = constants.time_scheme;
@@ -203355,15 +207080,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let factor_nm1_ = ((r * r) / (r + 1f));
         let _e133 = rhs_0_;
         let _e136 = constants.dt;
-        let _e144 = state_old[((idx * 2u) + 0u)];
+        let _e144 = state_old[((owner * 2u) + 0u)];
         let _e149 = constants.dt;
-        let _e157 = state_old[((idx * 2u) + 0u)];
-        let _e165 = state_old_old[((idx * 2u) + 0u)];
+        let _e157 = state_old[((owner * 2u) + 0u)];
+        let _e165 = state_old_old[((owner * 2u) + 0u)];
         rhs_0_ = ((_e133 - ((vol / _e136) * _e144)) + ((vol / _e149) * ((factor_n * _e157) - (factor_nm1_ * _e165))));
     }
     let _e172 = constants.dtau;
     if (_e172 > 0f) {
-        let _e181 = state_iter[((idx * 2u) + 0u)];
+        let _e181 = state_iter[((owner * 2u) + 0u)];
         let _e183 = rhs_0_;
         rhs_0_ = (_e183 + (dual_time_scale * _e181));
     }
@@ -203396,13 +207121,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e242 = grid.nx;
             let off_u = select(_e242, 1u, axis_is_x);
             let _e247 = k;
-            let neighbor = select((idx - off_u), (idx + off_u), (_e247 >= 2u));
-            let other_idx = select(neighbor, idx, is_boundary);
+            let neighbor = select((owner - off_u), (owner + off_u), (_e247 >= 2u));
+            let other_idx = select(neighbor, owner, is_boundary);
             let f_center = Vector2_((center.x + (half * normal.x)), (center.y + (half * normal.y)));
             let mult = select(spacing, half, is_boundary);
             let other_center = Vector2_((center.x + (mult * normal.x)), (center.y + (mult * normal.y)));
             let _e273 = k;
-            let face_idx = ((idx * 4u) + _e273);
+            let face_idx = ((owner * 4u) + _e273);
             let dx = (other_center.x - center.x);
             let dy = (other_center.y - center.y);
             let dist_proj = abs(((dx * normal.x) + (dy * normal.y)));
@@ -203452,7 +207177,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     let _e389 = rhs_0_;
-    rhs[((idx * 1u) + 0u)] = _e389;
+    rhs[((owner * 1u) + 0u)] = _e389;
     return;
 }
 "#;
@@ -203908,23 +207633,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var lambda_f: f32;
 
     let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
+    let owner = ((global_id.y * _e6) + global_id.x);
     let _e12 = grid.nx;
     let _e15 = grid.ny;
-    if (idx >= (_e12 * _e15)) {
+    if (owner >= (_e12 * _e15)) {
         return;
     }
     let _e20 = grid.nx;
-    let gi = (idx % _e20);
+    let gi = (owner % _e20);
     let _e24 = grid.nx;
-    let gj = (idx / _e24);
+    let gj = (owner / _e24);
     let _e31 = grid.dx;
     let _e38 = grid.dy;
     let center = Vector2_(((f32(gi) + 0.5f) * _e31), ((f32(gj) + 0.5f) * _e38));
     let _e43 = grid.dx;
     let _e46 = grid.dy;
     let vol = (_e43 * _e46);
-    let scalar_offset = (idx * 5u);
+    let scalar_offset = (owner * 5u);
     let start_row_0_ = (scalar_offset * 1u);
     loop {
         let _e54 = rank;
@@ -203949,7 +207674,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let face_metric_scale = max(1f, ((perimeter_sum * perimeter_sum) / max((16f * vol), 0.000000000001f)));
     let dual_time_scale = (global_dual_time_scale * face_metric_scale);
     let _e90 = constants.dt;
-    let _e99 = state_old[((idx * 2u) + 0u)];
+    let _e99 = state_old[((owner * 2u) + 0u)];
     let _e101 = rhs_0_;
     rhs_0_ = (_e101 + ((vol / _e90) * _e99));
     let _e105 = constants.time_scheme;
@@ -203963,19 +207688,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let factor_nm1_ = ((r * r) / (r + 1f));
         let _e133 = rhs_0_;
         let _e136 = constants.dt;
-        let _e144 = state_old[((idx * 2u) + 0u)];
+        let _e144 = state_old[((owner * 2u) + 0u)];
         let _e149 = constants.dt;
-        let _e157 = state_old[((idx * 2u) + 0u)];
-        let _e165 = state_old_old[((idx * 2u) + 0u)];
+        let _e157 = state_old[((owner * 2u) + 0u)];
+        let _e165 = state_old_old[((owner * 2u) + 0u)];
         rhs_0_ = ((_e133 - ((vol / _e136) * _e144)) + ((vol / _e149) * ((factor_n * _e157) - (factor_nm1_ * _e165))));
     }
     let _e172 = constants.dtau;
     if (_e172 > 0f) {
-        let _e181 = state_iter[((idx * 2u) + 0u)];
+        let _e181 = state_iter[((owner * 2u) + 0u)];
         let _e183 = rhs_0_;
         rhs_0_ = (_e183 + (dual_time_scale * _e181));
     }
-    let _e191 = state[((idx * 2u) + 1u)];
+    let _e191 = state[((owner * 2u) + 1u)];
     let _e193 = rhs_0_;
     rhs_0_ = (_e193 + (_e191 * vol));
     loop {
@@ -204007,13 +207732,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e252 = grid.nx;
             let off_u = select(_e252, 1u, axis_is_x);
             let _e257 = k;
-            let neighbor = select((idx - off_u), (idx + off_u), (_e257 >= 2u));
-            let other_idx = select(neighbor, idx, is_boundary);
+            let neighbor = select((owner - off_u), (owner + off_u), (_e257 >= 2u));
+            let other_idx = select(neighbor, owner, is_boundary);
             let f_center = Vector2_((center.x + (half * normal.x)), (center.y + (half * normal.y)));
             let mult = select(spacing, half, is_boundary);
             let other_center = Vector2_((center.x + (mult * normal.x)), (center.y + (mult * normal.y)));
             let _e283 = k;
-            let face_idx = ((idx * 4u) + _e283);
+            let face_idx = ((owner * 4u) + _e283);
             let dx = (other_center.x - center.x);
             let dy = (other_center.y - center.y);
             let dist_proj = abs(((dx * normal.x) + (dy * normal.y)));
@@ -204063,7 +207788,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     let _e399 = rhs_0_;
-    rhs[((idx * 1u) + 0u)] = _e399;
+    rhs[((owner * 1u) + 0u)] = _e399;
     return;
 }
 "#;
@@ -210615,6 +214340,1237 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     rhs[((idx * 3u) + 1u)] = _e4655;
     let _e4662 = rhs_2_;
     rhs[((idx * 3u) + 2u)] = _e4662;
+    return;
+}
+"#;
+    }
+    pub mod generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Vector2 {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub x: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub y: f32,
+        }
+        impl Vector2 {
+            pub const fn new(x: f32, y: f32) -> Self {
+                Self { x, y }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct StructuredGrid {
+            #[doc = "offset: 0, size: 4, type: `u32`"]
+            pub nx: u32,
+            #[doc = "offset: 4, size: 4, type: `u32`"]
+            pub ny: u32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dx: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub dy: f32,
+        }
+        impl StructuredGrid {
+            pub const fn new(nx: u32, ny: u32, dx: f32, dy: f32) -> Self {
+                Self { nx, ny, dx, dy }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+            #[doc = "offset: 48, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 52, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub grid: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub grid: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    grid: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.grid),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 1] {
+                [self.grid]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"grid\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: StructuredGrid > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumStructured::BindGroup0") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub state_old: wgpu::BufferBinding<'a>,
+            pub state_old_old: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+            pub state_iter: wgpu::BufferBinding<'a>,
+            pub grad_state: wgpu::BufferBinding<'a>,
+            pub fluxes: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup1Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub state_old: wgpu::BindGroupEntry<'a>,
+            pub state_old_old: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+            pub state_iter: wgpu::BindGroupEntry<'a>,
+            pub grad_state: wgpu::BindGroupEntry<'a>,
+            pub fluxes: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    state_old: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.state_old),
+                    },
+                    state_old_old: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.state_old_old),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                    state_iter: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.state_iter),
+                    },
+                    grad_state: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.grad_state),
+                    },
+                    fluxes: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.fluxes),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 7] {
+                [
+                    self.state,
+                    self.state_old,
+                    self.state_old_old,
+                    self.constants,
+                    self.state_iter,
+                    self.grad_state,
+                    self.fluxes,
+                ]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1(wgpu::BindGroup);
+        impl WgpuBindGroup1 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumStructured::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"state_old\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"state_old_old\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants > () as _) , } , count : None , } , # [doc = " @binding(4): \"state_iter\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"grad_state\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"fluxes\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumStructured::BindGroup1") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(1, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2EntriesParams<'a> {
+            pub matrix_values: wgpu::BufferBinding<'a>,
+            pub rhs: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup2Entries<'a> {
+            pub matrix_values: wgpu::BindGroupEntry<'a>,
+            pub rhs: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup2Entries<'a> {
+            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
+                Self {
+                    matrix_values: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.matrix_values),
+                    },
+                    rhs: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.rhs),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.matrix_values, self.rhs]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2(wgpu::BindGroup);
+        impl WgpuBindGroup2 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumStructured::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"matrix_values\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"rhs\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumStructured::BindGroup2") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(2, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup3EntriesParams<'a> {
+            pub bc_kind: wgpu::BufferBinding<'a>,
+            pub bc_value: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup3Entries<'a> {
+            pub bc_kind: wgpu::BindGroupEntry<'a>,
+            pub bc_value: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup3Entries<'a> {
+            pub fn new(params: WgpuBindGroup3EntriesParams<'a>) -> Self {
+                Self {
+                    bc_kind: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
+                    },
+                    bc_value: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.bc_value),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.bc_kind, self.bc_value]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup3(wgpu::BindGroup);
+        impl WgpuBindGroup3 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumStructured::BindGroup3::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup3Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumStructured::BindGroup3") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(3, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+            pub bind_group1: &'a WgpuBindGroup1,
+            pub bind_group2: &'a WgpuBindGroup2,
+            pub bind_group3: &'a WgpuBindGroup3,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+                self.bind_group1.set(pass);
+                self.bind_group2.set(pass);
+                self.bind_group3.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 4],
+            ) -> [wgpu::BindGroupLayout; 4] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device . create_pipeline_layout (& wgpu :: PipelineLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyGradStateRhsOnlyIncompressibleMomentumStructured::PipelineLayout") , bind_group_layouts : & [& WgpuBindGroup0 :: get_bind_group_layout (device) , & WgpuBindGroup1 :: get_bind_group_layout (device) , & WgpuBindGroup2 :: get_bind_group_layout (device) , & WgpuBindGroup3 :: get_bind_group_layout (device)] , push_constant_ranges : & [] , })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device . create_shader_module (wgpu :: ShaderModuleDescriptor { label : Some ("generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured.wgsl") , source : wgpu :: ShaderSource :: Wgsl (source) })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Vector2_ {
+    x: f32,
+    y: f32,
+}
+
+struct StructuredGrid {
+    nx: u32,
+    ny: u32,
+    dx: f32,
+    dy: f32,
+}
+
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
+}
+
+@group(0) @binding(0) 
+var<uniform> grid: StructuredGrid;
+@group(1) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(1) @binding(1) 
+var<storage> state_old: array<f32>;
+@group(1) @binding(2) 
+var<storage> state_old_old: array<f32>;
+@group(1) @binding(3) 
+var<uniform> constants: Constants;
+@group(1) @binding(4) 
+var<storage> state_iter: array<f32>;
+@group(1) @binding(5) 
+var<storage> grad_state: array<Vector2_>;
+@group(1) @binding(6) 
+var<storage, read_write> fluxes: array<f32>;
+@group(2) @binding(0) 
+var<storage, read_write> matrix_values: array<f32>;
+@group(2) @binding(1) 
+var<storage, read_write> rhs: array<f32>;
+@group(3) @binding(0) 
+var<storage> bc_kind: array<u32>;
+@group(3) @binding(1) 
+var<storage> bc_value: array<f32>;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var rank: u32 = 0u;
+    var diag_0_: f32 = 0f;
+    var rhs_0_: f32 = 0f;
+    var diag_1_: f32 = 0f;
+    var rhs_1_: f32 = 0f;
+    var diag_2_: f32 = 0f;
+    var rhs_2_: f32 = 0f;
+    var bounded_sum_phi_0_: f32 = 0f;
+    var bounded_sum_phi_1_: f32 = 0f;
+    var k: u32 = 0u;
+    var dist: f32;
+    var lambda_f: f32;
+    var phi_0_: f32;
+    var rec_0_phi_ho: f32;
+    var phi_1_: f32;
+    var rec_1_phi_ho: f32;
+    var phi_2_: f32;
+
+    let _e6 = constants.stride_x;
+    let owner = ((global_id.y * _e6) + global_id.x);
+    let _e12 = grid.nx;
+    let _e15 = grid.ny;
+    if (owner >= (_e12 * _e15)) {
+        return;
+    }
+    let _e20 = grid.nx;
+    let gi = (owner % _e20);
+    let _e24 = grid.nx;
+    let gj = (owner / _e24);
+    let _e31 = grid.dx;
+    let _e38 = grid.dy;
+    let center = Vector2_(((f32(gi) + 0.5f) * _e31), ((f32(gj) + 0.5f) * _e38));
+    let _e43 = grid.dx;
+    let _e46 = grid.dy;
+    let vol = (_e43 * _e46);
+    let scalar_offset = (owner * 5u);
+    let start_row_0_ = (scalar_offset * 9u);
+    let start_row_1_ = (start_row_0_ + ((5u * 3u) * 1u));
+    let start_row_2_ = (start_row_0_ + ((5u * 3u) * 2u));
+    loop {
+        let _e64 = rank;
+        if (_e64 < 5u) {
+        } else {
+            break;
+        }
+        {
+        }
+        continuing {
+            let _e67 = rank;
+            rank = (_e67 + 1u);
+        }
+    }
+    let _e71 = constants.dtau;
+    let dtau_safe = max(_e71, 0.000000000001f);
+    let _e76 = constants.dtau;
+    let global_dual_time_scale = (vol / max(_e76, 0.000000000001f));
+    let _e82 = grid.dx;
+    let _e85 = grid.dy;
+    let perimeter_sum = (2f * (_e82 + _e85));
+    let face_metric_scale = max(1f, ((perimeter_sum * perimeter_sum) / max((16f * vol), 0.000000000001f)));
+    let dual_time_scale = (global_dual_time_scale * face_metric_scale);
+    let _e100 = constants.density;
+    let _e104 = constants.dt;
+    let _e113 = state_old[((owner * 9u) + 0u)];
+    let _e115 = rhs_0_;
+    rhs_0_ = (_e115 + (((vol * _e100) / _e104) * _e113));
+    let _e119 = constants.time_scheme;
+    if (_e119 == 1u) {
+        let _e124 = constants.dt;
+        let _e127 = constants.dt_old;
+        let r = (_e124 / _e127);
+        let _e131 = constants.density;
+        let _e135 = constants.dt;
+        let diag_bdf2_ = ((((vol * _e131) / _e135) * ((r * 2f) + 1f)) / (r + 1f));
+        let factor_n = (r + 1f);
+        let factor_nm1_ = ((r * r) / (r + 1f));
+        let _e151 = rhs_0_;
+        let _e154 = constants.density;
+        let _e158 = constants.dt;
+        let _e166 = state_old[((owner * 9u) + 0u)];
+        let _e171 = constants.density;
+        let _e175 = constants.dt;
+        let _e183 = state_old[((owner * 9u) + 0u)];
+        let _e191 = state_old_old[((owner * 9u) + 0u)];
+        rhs_0_ = ((_e151 - (((vol * _e154) / _e158) * _e166)) + (((vol * _e171) / _e175) * ((factor_n * _e183) - (factor_nm1_ * _e191))));
+    }
+    let _e198 = constants.dtau;
+    if (_e198 > 0f) {
+        let _e203 = constants.density;
+        let _e211 = state_iter[((owner * 9u) + 0u)];
+        let _e213 = rhs_0_;
+        rhs_0_ = (_e213 + ((_e203 * dual_time_scale) * _e211));
+    }
+    let _e217 = constants.density;
+    let _e221 = constants.dt;
+    let _e230 = state_old[((owner * 9u) + 1u)];
+    let _e232 = rhs_1_;
+    rhs_1_ = (_e232 + (((vol * _e217) / _e221) * _e230));
+    let _e236 = constants.time_scheme;
+    if (_e236 == 1u) {
+        let _e241 = constants.dt;
+        let _e244 = constants.dt_old;
+        let r_1 = (_e241 / _e244);
+        let _e248 = constants.density;
+        let _e252 = constants.dt;
+        let diag_bdf2_1 = ((((vol * _e248) / _e252) * ((r_1 * 2f) + 1f)) / (r_1 + 1f));
+        let factor_n_1 = (r_1 + 1f);
+        let factor_nm1_1 = ((r_1 * r_1) / (r_1 + 1f));
+        let _e268 = rhs_1_;
+        let _e271 = constants.density;
+        let _e275 = constants.dt;
+        let _e283 = state_old[((owner * 9u) + 1u)];
+        let _e288 = constants.density;
+        let _e292 = constants.dt;
+        let _e300 = state_old[((owner * 9u) + 1u)];
+        let _e308 = state_old_old[((owner * 9u) + 1u)];
+        rhs_1_ = ((_e268 - (((vol * _e271) / _e275) * _e283)) + (((vol * _e288) / _e292) * ((factor_n_1 * _e300) - (factor_nm1_1 * _e308))));
+    }
+    let _e315 = constants.dtau;
+    if (_e315 > 0f) {
+        let _e320 = constants.density;
+        let _e328 = state_iter[((owner * 9u) + 1u)];
+        let _e330 = rhs_1_;
+        rhs_1_ = (_e330 + ((_e320 * dual_time_scale) * _e328));
+    }
+    loop {
+        let _e333 = k;
+        if (_e333 < 4u) {
+        } else {
+            break;
+        }
+        {
+            let _e336 = k;
+            let _e339 = k;
+            let axis_is_x = ((_e336 >= 1u) && (_e339 <= 2u));
+            let _e343 = k;
+            let sign_f = select(-1f, 1f, (_e343 >= 2u));
+            let normal = Vector2_(select(0f, sign_f, axis_is_x), select(sign_f, 0f, axis_is_x));
+            let _e356 = grid.dx;
+            let _e359 = grid.dy;
+            let area = select(_e356, _e359, axis_is_x);
+            let _e363 = grid.dy;
+            let _e366 = grid.dx;
+            let spacing = select(_e363, _e366, axis_is_x);
+            let half = (0.5f * spacing);
+            let coord = select(gj, gi, axis_is_x);
+            let _e373 = grid.ny;
+            let _e376 = grid.nx;
+            let ext = select(_e373, _e376, axis_is_x);
+            let _e383 = k;
+            let is_boundary = select((coord == (ext - 1u)), (coord == 0u), (_e383 < 2u));
+            let _e389 = grid.nx;
+            let off_u = select(_e389, 1u, axis_is_x);
+            let _e394 = k;
+            let neighbor = select((owner - off_u), (owner + off_u), (_e394 >= 2u));
+            let other_idx = select(neighbor, owner, is_boundary);
+            let f_center = Vector2_((center.x + (half * normal.x)), (center.y + (half * normal.y)));
+            let mult = select(spacing, half, is_boundary);
+            let other_center = Vector2_((center.x + (mult * normal.x)), (center.y + (mult * normal.y)));
+            let _e420 = k;
+            let face_idx = ((owner * 4u) + _e420);
+            let dx = (other_center.x - center.x);
+            let dy = (other_center.y - center.y);
+            let dist_proj = abs(((dx * normal.x) + (dy * normal.y)));
+            let dist_euc = sqrt(((dx * dx) + (dy * dy)));
+            dist = max(dist_euc, 0.000001f);
+            if (dist_proj > 0.000001f) {
+                dist = dist_proj;
+            }
+            let lam_f_center_v = vec2<f32>(f_center.x, f_center.y);
+            let lam_d_own = distance(vec2<f32>(center.x, center.y), lam_f_center_v);
+            let lam_d_neigh = distance(vec2<f32>(other_center.x, other_center.y), lam_f_center_v);
+            let lam_total = (lam_d_own + lam_d_neigh);
+            lambda_f = 0.5f;
+            if (lam_total > 0.000001f) {
+                lambda_f = (lam_d_neigh / lam_total);
+            }
+            let _e460 = k;
+            let _e463 = k;
+            let _e464 = k;
+            let neighbor_rank = select((_e460 + 1u), _e463, (_e464 < 2u));
+            let _e470 = constants.viscosity;
+            let _e473 = constants.viscosity;
+            let _e474 = lambda_f;
+            let _e478 = constants.viscosity;
+            let _e479 = lambda_f;
+            let _e487 = dist;
+            let diff_coeff_U = ((select(_e470, ((_e473 * _e474) + (_e478 * (1f - _e479))), !(is_boundary)) * area) / _e487);
+            if !(is_boundary) {
+            } else {
+                if (0u == 4u) {
+                    let _e499 = state[((owner * 9u) + 0u)];
+                    let _e506 = state[((owner * 9u) + 0u)];
+                    let _e515 = state[((owner * 9u) + 1u)];
+                    let _e523 = rhs_0_;
+                    rhs_0_ = (_e523 + (diff_coeff_U * (_e499 - (((_e506 * normal.x) + (_e515 * normal.y)) * normal.x))));
+                } else {
+                    let _e531 = bc_kind[((face_idx * 3u) + 0u)];
+                    if (_e531 == 1u) {
+                        let _e540 = bc_value[((face_idx * 3u) + 0u)];
+                        let _e542 = rhs_0_;
+                        rhs_0_ = (_e542 + (diff_coeff_U * _e540));
+                    } else {
+                        let _e550 = bc_kind[((face_idx * 3u) + 0u)];
+                        if (_e550 == 2u) {
+                            let _e555 = constants.viscosity;
+                            let _e558 = constants.viscosity;
+                            let _e559 = lambda_f;
+                            let _e563 = constants.viscosity;
+                            let _e564 = lambda_f;
+                            let _e578 = bc_value[((face_idx * 3u) + 0u)];
+                            let _e580 = rhs_0_;
+                            rhs_0_ = (_e580 + ((select(_e555, ((_e558 * _e559) + (_e563 * (1f - _e564))), !(is_boundary)) * area) * _e578));
+                        }
+                    }
+                }
+            }
+            if !(is_boundary) {
+            } else {
+                if (0u == 4u) {
+                    let _e591 = state[((owner * 9u) + 1u)];
+                    let _e598 = state[((owner * 9u) + 0u)];
+                    let _e607 = state[((owner * 9u) + 1u)];
+                    let _e615 = rhs_1_;
+                    rhs_1_ = (_e615 + (diff_coeff_U * (_e591 - (((_e598 * normal.x) + (_e607 * normal.y)) * normal.y))));
+                } else {
+                    let _e623 = bc_kind[((face_idx * 3u) + 1u)];
+                    if (_e623 == 1u) {
+                        let _e632 = bc_value[((face_idx * 3u) + 1u)];
+                        let _e634 = rhs_1_;
+                        rhs_1_ = (_e634 + (diff_coeff_U * _e632));
+                    } else {
+                        let _e642 = bc_kind[((face_idx * 3u) + 1u)];
+                        if (_e642 == 2u) {
+                            let _e647 = constants.viscosity;
+                            let _e650 = constants.viscosity;
+                            let _e651 = lambda_f;
+                            let _e655 = constants.viscosity;
+                            let _e656 = lambda_f;
+                            let _e670 = bc_value[((face_idx * 3u) + 1u)];
+                            let _e672 = rhs_1_;
+                            rhs_1_ = (_e672 + ((select(_e647, ((_e650 * _e651) + (_e655 * (1f - _e656))), !(is_boundary)) * area) * _e670));
+                        }
+                    }
+                }
+            }
+            let _e681 = grad_state[((owner * 9u) + 0u)].x;
+            let _e689 = grad_state[((owner * 9u) + 0u)].y;
+            let _e698 = grad_state[((other_idx * 9u) + 0u)].x;
+            let _e706 = grad_state[((other_idx * 9u) + 0u)].y;
+            let dev2_U_U_gx = ((vec2<f32>(_e681, _e689) + vec2<f32>(_e698, _e706)) * 0.5f);
+            let _e718 = grad_state[((owner * 9u) + 1u)].x;
+            let _e726 = grad_state[((owner * 9u) + 1u)].y;
+            let _e735 = grad_state[((other_idx * 9u) + 1u)].x;
+            let _e743 = grad_state[((other_idx * 9u) + 1u)].y;
+            let dev2_U_U_gy = ((vec2<f32>(_e718, _e726) + vec2<f32>(_e735, _e743)) * 0.5f);
+            let dev2_U_U_div = (dev2_U_U_gx.x + dev2_U_U_gy.y);
+            let _e753 = constants.viscosity;
+            let _e756 = constants.viscosity;
+            let _e757 = lambda_f;
+            let _e761 = constants.viscosity;
+            let _e762 = lambda_f;
+            let dev2_U_U_mu = select(_e753, ((_e756 * _e757) + (_e761 * (1f - _e762))), !(is_boundary));
+            let _e783 = rhs_0_;
+            rhs_0_ = (_e783 + ((dev2_U_U_mu * area) * (((normal.x * dev2_U_U_gx.x) + (normal.y * dev2_U_U_gy.x)) - ((0.6666667f * dev2_U_U_div) * normal.x))));
+            let _e799 = rhs_1_;
+            rhs_1_ = (_e799 + ((dev2_U_U_mu * area) * (((normal.x * dev2_U_U_gx.y) + (normal.y * dev2_U_U_gy.y)) - ((0.6666667f * dev2_U_U_div) * normal.y))));
+            let _e807 = fluxes[((face_idx * 3u) + 0u)];
+            phi_0_ = _e807;
+            if (owner != owner) {
+                let _e810 = phi_0_;
+                let _e813 = phi_0_;
+                phi_0_ = (_e813 - (_e810 * 2f));
+            }
+            let _e816 = phi_0_;
+            let _e817 = bounded_sum_phi_0_;
+            bounded_sum_phi_0_ = (_e817 + _e816);
+            if !(is_boundary) {
+                let _e826 = state[((owner * 9u) + 0u)];
+                let _e833 = state[((other_idx * 9u) + 0u)];
+                let _e834 = phi_0_;
+                rec_0_phi_ho = select(_e826, _e833, (_e834 < 0f));
+                let _e841 = constants.scheme;
+                if (_e841 == 1u) {
+                    let _e850 = state[((other_idx * 9u) + 0u)];
+                    let _e858 = grad_state[((other_idx * 9u) + 0u)].x;
+                    let _e866 = grad_state[((other_idx * 9u) + 0u)].y;
+                    let _e883 = state[((owner * 9u) + 0u)];
+                    let _e891 = grad_state[((owner * 9u) + 0u)].x;
+                    let _e899 = grad_state[((owner * 9u) + 0u)].y;
+                    let _e910 = phi_0_;
+                    rec_0_phi_ho = select((_e850 + dot(vec2<f32>(_e858, _e866), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))), (_e883 + dot(vec2<f32>(_e891, _e899), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e910 > 0f));
+                } else {
+                    let _e916 = constants.scheme;
+                    if (_e916 == 2u) {
+                        let _e925 = state[((other_idx * 9u) + 0u)];
+                        let _e932 = state[((other_idx * 9u) + 0u)];
+                        let _e942 = state[((owner * 9u) + 0u)];
+                        let _e953 = grad_state[((other_idx * 9u) + 0u)].x;
+                        let _e961 = grad_state[((other_idx * 9u) + 0u)].y;
+                        let _e980 = state[((other_idx * 9u) + 0u)];
+                        let _e988 = state[((owner * 9u) + 0u)];
+                        let _e995 = state[((owner * 9u) + 0u)];
+                        let _e1005 = state[((other_idx * 9u) + 0u)];
+                        let _e1016 = grad_state[((owner * 9u) + 0u)].x;
+                        let _e1024 = grad_state[((owner * 9u) + 0u)].y;
+                        let _e1043 = state[((owner * 9u) + 0u)];
+                        let _e1045 = phi_0_;
+                        rec_0_phi_ho = select(((((_e925 + (_e932 * 0.625f)) + (_e942 * 0.375f)) + (dot(vec2<f32>(_e953, _e961), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e980), ((((_e988 + (_e995 * 0.625f)) + (_e1005 * 0.375f)) + (dot(vec2<f32>(_e1016, _e1024), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e1043), (_e1045 > 0f));
+                    } else {
+                        let _e1051 = constants.scheme;
+                        if (_e1051 == 3u) {
+                            let _e1060 = state[((other_idx * 9u) + 0u)];
+                            let _e1068 = grad_state[((other_idx * 9u) + 0u)].x;
+                            let _e1076 = grad_state[((other_idx * 9u) + 0u)].y;
+                            let _e1092 = state[((owner * 9u) + 0u)];
+                            let _e1099 = state[((other_idx * 9u) + 0u)];
+                            let _e1110 = state[((owner * 9u) + 0u)];
+                            let _e1117 = state[((other_idx * 9u) + 0u)];
+                            let _e1129 = state[((owner * 9u) + 0u)];
+                            let _e1137 = grad_state[((owner * 9u) + 0u)].x;
+                            let _e1145 = grad_state[((owner * 9u) + 0u)].y;
+                            let _e1161 = state[((other_idx * 9u) + 0u)];
+                            let _e1168 = state[((owner * 9u) + 0u)];
+                            let _e1179 = state[((other_idx * 9u) + 0u)];
+                            let _e1186 = state[((owner * 9u) + 0u)];
+                            let _e1192 = phi_0_;
+                            rec_0_phi_ho = select((_e1060 + min(max(dot(vec2<f32>(_e1068, _e1076), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))), min((_e1092 - _e1099), 0f)), max((_e1110 - _e1117), 0f))), (_e1129 + min(max(dot(vec2<f32>(_e1137, _e1145), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))), min((_e1161 - _e1168), 0f)), max((_e1179 - _e1186), 0f))), (_e1192 > 0f));
+                        } else {
+                            let _e1198 = constants.scheme;
+                            if (_e1198 == 4u) {
+                                let _e1207 = state[((other_idx * 9u) + 0u)];
+                                let _e1215 = grad_state[((other_idx * 9u) + 0u)].x;
+                                let _e1223 = grad_state[((other_idx * 9u) + 0u)].y;
+                                let _e1239 = state[((owner * 9u) + 0u)];
+                                let _e1246 = state[((other_idx * 9u) + 0u)];
+                                let _e1256 = state[((owner * 9u) + 0u)];
+                                let _e1263 = state[((other_idx * 9u) + 0u)];
+                                let _e1273 = grad_state[((other_idx * 9u) + 0u)].x;
+                                let _e1281 = grad_state[((other_idx * 9u) + 0u)].y;
+                                let _e1302 = state[((owner * 9u) + 0u)];
+                                let _e1309 = state[((other_idx * 9u) + 0u)];
+                                let _e1318 = grad_state[((other_idx * 9u) + 0u)].x;
+                                let _e1326 = grad_state[((other_idx * 9u) + 0u)].y;
+                                let _e1346 = state[((owner * 9u) + 0u)];
+                                let _e1353 = state[((other_idx * 9u) + 0u)];
+                                let _e1362 = grad_state[((other_idx * 9u) + 0u)].x;
+                                let _e1370 = grad_state[((other_idx * 9u) + 0u)].y;
+                                let _e1392 = state[((owner * 9u) + 0u)];
+                                let _e1400 = grad_state[((owner * 9u) + 0u)].x;
+                                let _e1408 = grad_state[((owner * 9u) + 0u)].y;
+                                let _e1424 = state[((other_idx * 9u) + 0u)];
+                                let _e1431 = state[((owner * 9u) + 0u)];
+                                let _e1441 = state[((other_idx * 9u) + 0u)];
+                                let _e1448 = state[((owner * 9u) + 0u)];
+                                let _e1458 = grad_state[((owner * 9u) + 0u)].x;
+                                let _e1466 = grad_state[((owner * 9u) + 0u)].y;
+                                let _e1487 = state[((other_idx * 9u) + 0u)];
+                                let _e1494 = state[((owner * 9u) + 0u)];
+                                let _e1503 = grad_state[((owner * 9u) + 0u)].x;
+                                let _e1511 = grad_state[((owner * 9u) + 0u)].y;
+                                let _e1531 = state[((other_idx * 9u) + 0u)];
+                                let _e1538 = state[((owner * 9u) + 0u)];
+                                let _e1547 = grad_state[((owner * 9u) + 0u)].x;
+                                let _e1555 = grad_state[((owner * 9u) + 0u)].y;
+                                let _e1571 = phi_0_;
+                                rec_0_phi_ho = select((_e1207 + ((((dot(vec2<f32>(_e1215, _e1223), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))) * abs((_e1239 - _e1246))) / max(abs((_e1256 - _e1263)), (abs(dot(vec2<f32>(_e1273, _e1281), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))) + 0.00000001f))) * max(((_e1302 - _e1309) * dot(vec2<f32>(_e1318, _e1326), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))), 0f)) / max(abs(((_e1346 - _e1353) * dot(vec2<f32>(_e1362, _e1370), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))))), 0.00000001f))), (_e1392 + ((((dot(vec2<f32>(_e1400, _e1408), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))) * abs((_e1424 - _e1431))) / max(abs((_e1441 - _e1448)), (abs(dot(vec2<f32>(_e1458, _e1466), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))) + 0.00000001f))) * max(((_e1487 - _e1494) * dot(vec2<f32>(_e1503, _e1511), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), 0f)) / max(abs(((_e1531 - _e1538) * dot(vec2<f32>(_e1547, _e1555), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))))), 0.00000001f))), (_e1571 > 0f));
+                            } else {
+                                let _e1577 = constants.scheme;
+                                if (_e1577 == 5u) {
+                                    let _e1586 = state[((other_idx * 9u) + 0u)];
+                                    let _e1593 = state[((other_idx * 9u) + 0u)];
+                                    let _e1602 = state[((owner * 9u) + 0u)];
+                                    let _e1613 = grad_state[((other_idx * 9u) + 0u)].x;
+                                    let _e1621 = grad_state[((other_idx * 9u) + 0u)].y;
+                                    let _e1640 = state[((other_idx * 9u) + 0u)];
+                                    let _e1648 = state[((owner * 9u) + 0u)];
+                                    let _e1655 = state[((other_idx * 9u) + 0u)];
+                                    let _e1666 = state[((owner * 9u) + 0u)];
+                                    let _e1673 = state[((other_idx * 9u) + 0u)];
+                                    let _e1685 = state[((owner * 9u) + 0u)];
+                                    let _e1692 = state[((owner * 9u) + 0u)];
+                                    let _e1701 = state[((other_idx * 9u) + 0u)];
+                                    let _e1712 = grad_state[((owner * 9u) + 0u)].x;
+                                    let _e1720 = grad_state[((owner * 9u) + 0u)].y;
+                                    let _e1739 = state[((owner * 9u) + 0u)];
+                                    let _e1747 = state[((other_idx * 9u) + 0u)];
+                                    let _e1754 = state[((owner * 9u) + 0u)];
+                                    let _e1765 = state[((other_idx * 9u) + 0u)];
+                                    let _e1772 = state[((owner * 9u) + 0u)];
+                                    let _e1778 = phi_0_;
+                                    rec_0_phi_ho = select((_e1586 + min(max(((((_e1593 * 0.625f) + (_e1602 * 0.375f)) + (dot(vec2<f32>(_e1613, _e1621), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e1640), min((_e1648 - _e1655), 0f)), max((_e1666 - _e1673), 0f))), (_e1685 + min(max(((((_e1692 * 0.625f) + (_e1701 * 0.375f)) + (dot(vec2<f32>(_e1712, _e1720), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e1739), min((_e1747 - _e1754), 0f)), max((_e1765 - _e1772), 0f))), (_e1778 > 0f));
+                                } else {
+                                    let _e1784 = constants.scheme;
+                                    if (_e1784 == 6u) {
+                                        let _e1793 = state[((other_idx * 9u) + 0u)];
+                                        let _e1800 = state[((other_idx * 9u) + 0u)];
+                                        let _e1809 = state[((owner * 9u) + 0u)];
+                                        let _e1820 = grad_state[((other_idx * 9u) + 0u)].x;
+                                        let _e1828 = grad_state[((other_idx * 9u) + 0u)].y;
+                                        let _e1847 = state[((other_idx * 9u) + 0u)];
+                                        let _e1855 = state[((owner * 9u) + 0u)];
+                                        let _e1862 = state[((other_idx * 9u) + 0u)];
+                                        let _e1872 = state[((owner * 9u) + 0u)];
+                                        let _e1879 = state[((other_idx * 9u) + 0u)];
+                                        let _e1888 = state[((other_idx * 9u) + 0u)];
+                                        let _e1897 = state[((owner * 9u) + 0u)];
+                                        let _e1908 = grad_state[((other_idx * 9u) + 0u)].x;
+                                        let _e1916 = grad_state[((other_idx * 9u) + 0u)].y;
+                                        let _e1935 = state[((other_idx * 9u) + 0u)];
+                                        let _e1948 = state[((owner * 9u) + 0u)];
+                                        let _e1955 = state[((other_idx * 9u) + 0u)];
+                                        let _e1963 = state[((other_idx * 9u) + 0u)];
+                                        let _e1972 = state[((owner * 9u) + 0u)];
+                                        let _e1983 = grad_state[((other_idx * 9u) + 0u)].x;
+                                        let _e1991 = grad_state[((other_idx * 9u) + 0u)].y;
+                                        let _e2010 = state[((other_idx * 9u) + 0u)];
+                                        let _e2022 = state[((owner * 9u) + 0u)];
+                                        let _e2029 = state[((other_idx * 9u) + 0u)];
+                                        let _e2037 = state[((other_idx * 9u) + 0u)];
+                                        let _e2046 = state[((owner * 9u) + 0u)];
+                                        let _e2057 = grad_state[((other_idx * 9u) + 0u)].x;
+                                        let _e2065 = grad_state[((other_idx * 9u) + 0u)].y;
+                                        let _e2084 = state[((other_idx * 9u) + 0u)];
+                                        let _e2098 = state[((owner * 9u) + 0u)];
+                                        let _e2105 = state[((owner * 9u) + 0u)];
+                                        let _e2114 = state[((other_idx * 9u) + 0u)];
+                                        let _e2125 = grad_state[((owner * 9u) + 0u)].x;
+                                        let _e2133 = grad_state[((owner * 9u) + 0u)].y;
+                                        let _e2152 = state[((owner * 9u) + 0u)];
+                                        let _e2160 = state[((other_idx * 9u) + 0u)];
+                                        let _e2167 = state[((owner * 9u) + 0u)];
+                                        let _e2177 = state[((other_idx * 9u) + 0u)];
+                                        let _e2184 = state[((owner * 9u) + 0u)];
+                                        let _e2193 = state[((owner * 9u) + 0u)];
+                                        let _e2202 = state[((other_idx * 9u) + 0u)];
+                                        let _e2213 = grad_state[((owner * 9u) + 0u)].x;
+                                        let _e2221 = grad_state[((owner * 9u) + 0u)].y;
+                                        let _e2240 = state[((owner * 9u) + 0u)];
+                                        let _e2253 = state[((other_idx * 9u) + 0u)];
+                                        let _e2260 = state[((owner * 9u) + 0u)];
+                                        let _e2268 = state[((owner * 9u) + 0u)];
+                                        let _e2277 = state[((other_idx * 9u) + 0u)];
+                                        let _e2288 = grad_state[((owner * 9u) + 0u)].x;
+                                        let _e2296 = grad_state[((owner * 9u) + 0u)].y;
+                                        let _e2315 = state[((owner * 9u) + 0u)];
+                                        let _e2327 = state[((other_idx * 9u) + 0u)];
+                                        let _e2334 = state[((owner * 9u) + 0u)];
+                                        let _e2342 = state[((owner * 9u) + 0u)];
+                                        let _e2351 = state[((other_idx * 9u) + 0u)];
+                                        let _e2362 = grad_state[((owner * 9u) + 0u)].x;
+                                        let _e2370 = grad_state[((owner * 9u) + 0u)].y;
+                                        let _e2389 = state[((owner * 9u) + 0u)];
+                                        let _e2397 = phi_0_;
+                                        rec_0_phi_ho = select((_e1793 + ((((((((_e1800 * 0.625f) + (_e1809 * 0.375f)) + (dot(vec2<f32>(_e1820, _e1828), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e1847) * abs((_e1855 - _e1862))) / max(abs((_e1872 - _e1879)), (abs(((((_e1888 * 0.625f) + (_e1897 * 0.375f)) + (dot(vec2<f32>(_e1908, _e1916), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e1935)) + 0.00000001f))) * max(((_e1948 - _e1955) * ((((_e1963 * 0.625f) + (_e1972 * 0.375f)) + (dot(vec2<f32>(_e1983, _e1991), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2010)), 0f)) / max(abs(((_e2022 - _e2029) * ((((_e2037 * 0.625f) + (_e2046 * 0.375f)) + (dot(vec2<f32>(_e2057, _e2065), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2084))), 0.00000001f))), (_e2098 + ((((((((_e2105 * 0.625f) + (_e2114 * 0.375f)) + (dot(vec2<f32>(_e2125, _e2133), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2152) * abs((_e2160 - _e2167))) / max(abs((_e2177 - _e2184)), (abs(((((_e2193 * 0.625f) + (_e2202 * 0.375f)) + (dot(vec2<f32>(_e2213, _e2221), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2240)) + 0.00000001f))) * max(((_e2253 - _e2260) * ((((_e2268 * 0.625f) + (_e2277 * 0.375f)) + (dot(vec2<f32>(_e2288, _e2296), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2315)), 0f)) / max(abs(((_e2327 - _e2334) * ((((_e2342 * 0.625f) + (_e2351 * 0.375f)) + (dot(vec2<f32>(_e2362, _e2370), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2389))), 0.00000001f))), (_e2397 > 0f));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let _e2401 = phi_0_;
+                let _e2402 = rec_0_phi_ho;
+                let _e2409 = state[((owner * 9u) + 0u)];
+                let _e2416 = state[((other_idx * 9u) + 0u)];
+                let _e2417 = phi_0_;
+                let _e2423 = rhs_0_;
+                rhs_0_ = (_e2423 - (_e2401 * (_e2402 - select(_e2409, _e2416, (_e2417 < 0f)))));
+            } else {
+                let _e2431 = bc_kind[((face_idx * 3u) + 0u)];
+                if (_e2431 == 1u) {
+                    let _e2434 = phi_0_;
+                    let _e2443 = bc_value[((face_idx * 3u) + 0u)];
+                    let _e2445 = rhs_0_;
+                    rhs_0_ = (_e2445 - (min(_e2434, 0f) * _e2443));
+                }
+            }
+            let _e2453 = fluxes[((face_idx * 3u) + 1u)];
+            phi_1_ = _e2453;
+            if (owner != owner) {
+                let _e2456 = phi_1_;
+                let _e2459 = phi_1_;
+                phi_1_ = (_e2459 - (_e2456 * 2f));
+            }
+            let _e2462 = phi_1_;
+            let _e2463 = bounded_sum_phi_1_;
+            bounded_sum_phi_1_ = (_e2463 + _e2462);
+            if !(is_boundary) {
+                let _e2472 = state[((owner * 9u) + 1u)];
+                let _e2479 = state[((other_idx * 9u) + 1u)];
+                let _e2480 = phi_1_;
+                rec_1_phi_ho = select(_e2472, _e2479, (_e2480 < 0f));
+                let _e2487 = constants.scheme;
+                if (_e2487 == 1u) {
+                    let _e2496 = state[((other_idx * 9u) + 1u)];
+                    let _e2504 = grad_state[((other_idx * 9u) + 1u)].x;
+                    let _e2512 = grad_state[((other_idx * 9u) + 1u)].y;
+                    let _e2529 = state[((owner * 9u) + 1u)];
+                    let _e2537 = grad_state[((owner * 9u) + 1u)].x;
+                    let _e2545 = grad_state[((owner * 9u) + 1u)].y;
+                    let _e2556 = phi_1_;
+                    rec_1_phi_ho = select((_e2496 + dot(vec2<f32>(_e2504, _e2512), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))), (_e2529 + dot(vec2<f32>(_e2537, _e2545), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e2556 > 0f));
+                } else {
+                    let _e2562 = constants.scheme;
+                    if (_e2562 == 2u) {
+                        let _e2571 = state[((other_idx * 9u) + 1u)];
+                        let _e2578 = state[((other_idx * 9u) + 1u)];
+                        let _e2588 = state[((owner * 9u) + 1u)];
+                        let _e2599 = grad_state[((other_idx * 9u) + 1u)].x;
+                        let _e2607 = grad_state[((other_idx * 9u) + 1u)].y;
+                        let _e2626 = state[((other_idx * 9u) + 1u)];
+                        let _e2634 = state[((owner * 9u) + 1u)];
+                        let _e2641 = state[((owner * 9u) + 1u)];
+                        let _e2651 = state[((other_idx * 9u) + 1u)];
+                        let _e2662 = grad_state[((owner * 9u) + 1u)].x;
+                        let _e2670 = grad_state[((owner * 9u) + 1u)].y;
+                        let _e2689 = state[((owner * 9u) + 1u)];
+                        let _e2691 = phi_1_;
+                        rec_1_phi_ho = select(((((_e2571 + (_e2578 * 0.625f)) + (_e2588 * 0.375f)) + (dot(vec2<f32>(_e2599, _e2607), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2626), ((((_e2634 + (_e2641 * 0.625f)) + (_e2651 * 0.375f)) + (dot(vec2<f32>(_e2662, _e2670), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2689), (_e2691 > 0f));
+                    } else {
+                        let _e2697 = constants.scheme;
+                        if (_e2697 == 3u) {
+                            let _e2706 = state[((other_idx * 9u) + 1u)];
+                            let _e2714 = grad_state[((other_idx * 9u) + 1u)].x;
+                            let _e2722 = grad_state[((other_idx * 9u) + 1u)].y;
+                            let _e2738 = state[((owner * 9u) + 1u)];
+                            let _e2745 = state[((other_idx * 9u) + 1u)];
+                            let _e2756 = state[((owner * 9u) + 1u)];
+                            let _e2763 = state[((other_idx * 9u) + 1u)];
+                            let _e2775 = state[((owner * 9u) + 1u)];
+                            let _e2783 = grad_state[((owner * 9u) + 1u)].x;
+                            let _e2791 = grad_state[((owner * 9u) + 1u)].y;
+                            let _e2807 = state[((other_idx * 9u) + 1u)];
+                            let _e2814 = state[((owner * 9u) + 1u)];
+                            let _e2825 = state[((other_idx * 9u) + 1u)];
+                            let _e2832 = state[((owner * 9u) + 1u)];
+                            let _e2838 = phi_1_;
+                            rec_1_phi_ho = select((_e2706 + min(max(dot(vec2<f32>(_e2714, _e2722), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))), min((_e2738 - _e2745), 0f)), max((_e2756 - _e2763), 0f))), (_e2775 + min(max(dot(vec2<f32>(_e2783, _e2791), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))), min((_e2807 - _e2814), 0f)), max((_e2825 - _e2832), 0f))), (_e2838 > 0f));
+                        } else {
+                            let _e2844 = constants.scheme;
+                            if (_e2844 == 4u) {
+                                let _e2853 = state[((other_idx * 9u) + 1u)];
+                                let _e2861 = grad_state[((other_idx * 9u) + 1u)].x;
+                                let _e2869 = grad_state[((other_idx * 9u) + 1u)].y;
+                                let _e2885 = state[((owner * 9u) + 1u)];
+                                let _e2892 = state[((other_idx * 9u) + 1u)];
+                                let _e2902 = state[((owner * 9u) + 1u)];
+                                let _e2909 = state[((other_idx * 9u) + 1u)];
+                                let _e2919 = grad_state[((other_idx * 9u) + 1u)].x;
+                                let _e2927 = grad_state[((other_idx * 9u) + 1u)].y;
+                                let _e2948 = state[((owner * 9u) + 1u)];
+                                let _e2955 = state[((other_idx * 9u) + 1u)];
+                                let _e2964 = grad_state[((other_idx * 9u) + 1u)].x;
+                                let _e2972 = grad_state[((other_idx * 9u) + 1u)].y;
+                                let _e2992 = state[((owner * 9u) + 1u)];
+                                let _e2999 = state[((other_idx * 9u) + 1u)];
+                                let _e3008 = grad_state[((other_idx * 9u) + 1u)].x;
+                                let _e3016 = grad_state[((other_idx * 9u) + 1u)].y;
+                                let _e3038 = state[((owner * 9u) + 1u)];
+                                let _e3046 = grad_state[((owner * 9u) + 1u)].x;
+                                let _e3054 = grad_state[((owner * 9u) + 1u)].y;
+                                let _e3070 = state[((other_idx * 9u) + 1u)];
+                                let _e3077 = state[((owner * 9u) + 1u)];
+                                let _e3087 = state[((other_idx * 9u) + 1u)];
+                                let _e3094 = state[((owner * 9u) + 1u)];
+                                let _e3104 = grad_state[((owner * 9u) + 1u)].x;
+                                let _e3112 = grad_state[((owner * 9u) + 1u)].y;
+                                let _e3133 = state[((other_idx * 9u) + 1u)];
+                                let _e3140 = state[((owner * 9u) + 1u)];
+                                let _e3149 = grad_state[((owner * 9u) + 1u)].x;
+                                let _e3157 = grad_state[((owner * 9u) + 1u)].y;
+                                let _e3177 = state[((other_idx * 9u) + 1u)];
+                                let _e3184 = state[((owner * 9u) + 1u)];
+                                let _e3193 = grad_state[((owner * 9u) + 1u)].x;
+                                let _e3201 = grad_state[((owner * 9u) + 1u)].y;
+                                let _e3217 = phi_1_;
+                                rec_1_phi_ho = select((_e2853 + ((((dot(vec2<f32>(_e2861, _e2869), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))) * abs((_e2885 - _e2892))) / max(abs((_e2902 - _e2909)), (abs(dot(vec2<f32>(_e2919, _e2927), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))) + 0.00000001f))) * max(((_e2948 - _e2955) * dot(vec2<f32>(_e2964, _e2972), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))), 0f)) / max(abs(((_e2992 - _e2999) * dot(vec2<f32>(_e3008, _e3016), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))))), 0.00000001f))), (_e3038 + ((((dot(vec2<f32>(_e3046, _e3054), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))) * abs((_e3070 - _e3077))) / max(abs((_e3087 - _e3094)), (abs(dot(vec2<f32>(_e3104, _e3112), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))) + 0.00000001f))) * max(((_e3133 - _e3140) * dot(vec2<f32>(_e3149, _e3157), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), 0f)) / max(abs(((_e3177 - _e3184) * dot(vec2<f32>(_e3193, _e3201), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))))), 0.00000001f))), (_e3217 > 0f));
+                            } else {
+                                let _e3223 = constants.scheme;
+                                if (_e3223 == 5u) {
+                                    let _e3232 = state[((other_idx * 9u) + 1u)];
+                                    let _e3239 = state[((other_idx * 9u) + 1u)];
+                                    let _e3248 = state[((owner * 9u) + 1u)];
+                                    let _e3259 = grad_state[((other_idx * 9u) + 1u)].x;
+                                    let _e3267 = grad_state[((other_idx * 9u) + 1u)].y;
+                                    let _e3286 = state[((other_idx * 9u) + 1u)];
+                                    let _e3294 = state[((owner * 9u) + 1u)];
+                                    let _e3301 = state[((other_idx * 9u) + 1u)];
+                                    let _e3312 = state[((owner * 9u) + 1u)];
+                                    let _e3319 = state[((other_idx * 9u) + 1u)];
+                                    let _e3331 = state[((owner * 9u) + 1u)];
+                                    let _e3338 = state[((owner * 9u) + 1u)];
+                                    let _e3347 = state[((other_idx * 9u) + 1u)];
+                                    let _e3358 = grad_state[((owner * 9u) + 1u)].x;
+                                    let _e3366 = grad_state[((owner * 9u) + 1u)].y;
+                                    let _e3385 = state[((owner * 9u) + 1u)];
+                                    let _e3393 = state[((other_idx * 9u) + 1u)];
+                                    let _e3400 = state[((owner * 9u) + 1u)];
+                                    let _e3411 = state[((other_idx * 9u) + 1u)];
+                                    let _e3418 = state[((owner * 9u) + 1u)];
+                                    let _e3424 = phi_1_;
+                                    rec_1_phi_ho = select((_e3232 + min(max(((((_e3239 * 0.625f) + (_e3248 * 0.375f)) + (dot(vec2<f32>(_e3259, _e3267), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e3286), min((_e3294 - _e3301), 0f)), max((_e3312 - _e3319), 0f))), (_e3331 + min(max(((((_e3338 * 0.625f) + (_e3347 * 0.375f)) + (dot(vec2<f32>(_e3358, _e3366), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e3385), min((_e3393 - _e3400), 0f)), max((_e3411 - _e3418), 0f))), (_e3424 > 0f));
+                                } else {
+                                    let _e3430 = constants.scheme;
+                                    if (_e3430 == 6u) {
+                                        let _e3439 = state[((other_idx * 9u) + 1u)];
+                                        let _e3446 = state[((other_idx * 9u) + 1u)];
+                                        let _e3455 = state[((owner * 9u) + 1u)];
+                                        let _e3466 = grad_state[((other_idx * 9u) + 1u)].x;
+                                        let _e3474 = grad_state[((other_idx * 9u) + 1u)].y;
+                                        let _e3493 = state[((other_idx * 9u) + 1u)];
+                                        let _e3501 = state[((owner * 9u) + 1u)];
+                                        let _e3508 = state[((other_idx * 9u) + 1u)];
+                                        let _e3518 = state[((owner * 9u) + 1u)];
+                                        let _e3525 = state[((other_idx * 9u) + 1u)];
+                                        let _e3534 = state[((other_idx * 9u) + 1u)];
+                                        let _e3543 = state[((owner * 9u) + 1u)];
+                                        let _e3554 = grad_state[((other_idx * 9u) + 1u)].x;
+                                        let _e3562 = grad_state[((other_idx * 9u) + 1u)].y;
+                                        let _e3581 = state[((other_idx * 9u) + 1u)];
+                                        let _e3594 = state[((owner * 9u) + 1u)];
+                                        let _e3601 = state[((other_idx * 9u) + 1u)];
+                                        let _e3609 = state[((other_idx * 9u) + 1u)];
+                                        let _e3618 = state[((owner * 9u) + 1u)];
+                                        let _e3629 = grad_state[((other_idx * 9u) + 1u)].x;
+                                        let _e3637 = grad_state[((other_idx * 9u) + 1u)].y;
+                                        let _e3656 = state[((other_idx * 9u) + 1u)];
+                                        let _e3668 = state[((owner * 9u) + 1u)];
+                                        let _e3675 = state[((other_idx * 9u) + 1u)];
+                                        let _e3683 = state[((other_idx * 9u) + 1u)];
+                                        let _e3692 = state[((owner * 9u) + 1u)];
+                                        let _e3703 = grad_state[((other_idx * 9u) + 1u)].x;
+                                        let _e3711 = grad_state[((other_idx * 9u) + 1u)].y;
+                                        let _e3730 = state[((other_idx * 9u) + 1u)];
+                                        let _e3744 = state[((owner * 9u) + 1u)];
+                                        let _e3751 = state[((owner * 9u) + 1u)];
+                                        let _e3760 = state[((other_idx * 9u) + 1u)];
+                                        let _e3771 = grad_state[((owner * 9u) + 1u)].x;
+                                        let _e3779 = grad_state[((owner * 9u) + 1u)].y;
+                                        let _e3798 = state[((owner * 9u) + 1u)];
+                                        let _e3806 = state[((other_idx * 9u) + 1u)];
+                                        let _e3813 = state[((owner * 9u) + 1u)];
+                                        let _e3823 = state[((other_idx * 9u) + 1u)];
+                                        let _e3830 = state[((owner * 9u) + 1u)];
+                                        let _e3839 = state[((owner * 9u) + 1u)];
+                                        let _e3848 = state[((other_idx * 9u) + 1u)];
+                                        let _e3859 = grad_state[((owner * 9u) + 1u)].x;
+                                        let _e3867 = grad_state[((owner * 9u) + 1u)].y;
+                                        let _e3886 = state[((owner * 9u) + 1u)];
+                                        let _e3899 = state[((other_idx * 9u) + 1u)];
+                                        let _e3906 = state[((owner * 9u) + 1u)];
+                                        let _e3914 = state[((owner * 9u) + 1u)];
+                                        let _e3923 = state[((other_idx * 9u) + 1u)];
+                                        let _e3934 = grad_state[((owner * 9u) + 1u)].x;
+                                        let _e3942 = grad_state[((owner * 9u) + 1u)].y;
+                                        let _e3961 = state[((owner * 9u) + 1u)];
+                                        let _e3973 = state[((other_idx * 9u) + 1u)];
+                                        let _e3980 = state[((owner * 9u) + 1u)];
+                                        let _e3988 = state[((owner * 9u) + 1u)];
+                                        let _e3997 = state[((other_idx * 9u) + 1u)];
+                                        let _e4008 = grad_state[((owner * 9u) + 1u)].x;
+                                        let _e4016 = grad_state[((owner * 9u) + 1u)].y;
+                                        let _e4035 = state[((owner * 9u) + 1u)];
+                                        let _e4043 = phi_1_;
+                                        rec_1_phi_ho = select((_e3439 + ((((((((_e3446 * 0.625f) + (_e3455 * 0.375f)) + (dot(vec2<f32>(_e3466, _e3474), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e3493) * abs((_e3501 - _e3508))) / max(abs((_e3518 - _e3525)), (abs(((((_e3534 * 0.625f) + (_e3543 * 0.375f)) + (dot(vec2<f32>(_e3554, _e3562), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e3581)) + 0.00000001f))) * max(((_e3594 - _e3601) * ((((_e3609 * 0.625f) + (_e3618 * 0.375f)) + (dot(vec2<f32>(_e3629, _e3637), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e3656)), 0f)) / max(abs(((_e3668 - _e3675) * ((((_e3683 * 0.625f) + (_e3692 * 0.375f)) + (dot(vec2<f32>(_e3703, _e3711), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e3730))), 0.00000001f))), (_e3744 + ((((((((_e3751 * 0.625f) + (_e3760 * 0.375f)) + (dot(vec2<f32>(_e3771, _e3779), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e3798) * abs((_e3806 - _e3813))) / max(abs((_e3823 - _e3830)), (abs(((((_e3839 * 0.625f) + (_e3848 * 0.375f)) + (dot(vec2<f32>(_e3859, _e3867), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e3886)) + 0.00000001f))) * max(((_e3899 - _e3906) * ((((_e3914 * 0.625f) + (_e3923 * 0.375f)) + (dot(vec2<f32>(_e3934, _e3942), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e3961)), 0f)) / max(abs(((_e3973 - _e3980) * ((((_e3988 * 0.625f) + (_e3997 * 0.375f)) + (dot(vec2<f32>(_e4008, _e4016), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e4035))), 0.00000001f))), (_e4043 > 0f));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let _e4047 = phi_1_;
+                let _e4048 = rec_1_phi_ho;
+                let _e4055 = state[((owner * 9u) + 1u)];
+                let _e4062 = state[((other_idx * 9u) + 1u)];
+                let _e4063 = phi_1_;
+                let _e4069 = rhs_1_;
+                rhs_1_ = (_e4069 - (_e4047 * (_e4048 - select(_e4055, _e4062, (_e4063 < 0f)))));
+            } else {
+                let _e4077 = bc_kind[((face_idx * 3u) + 1u)];
+                if (_e4077 == 1u) {
+                    let _e4080 = phi_1_;
+                    let _e4089 = bc_value[((face_idx * 3u) + 1u)];
+                    let _e4091 = rhs_1_;
+                    rhs_1_ = (_e4091 - (min(_e4080, 0f) * _e4089));
+                }
+            }
+            if !(is_boundary) {
+                let _e4104 = state[((owner * 9u) + 2u)];
+                let _e4111 = state[((other_idx * 9u) + 2u)];
+                let _e4114 = rhs_0_;
+                rhs_0_ = (_e4114 - (((0.5f * area) * normal.x) * (_e4104 + _e4111)));
+            } else {
+                let _e4126 = state[((owner * 9u) + 2u)];
+                let _e4133 = bc_value[((face_idx * 3u) + 2u)];
+                let _e4140 = bc_kind[((face_idx * 3u) + 2u)];
+                let _e4150 = state[((owner * 9u) + 2u)];
+                let _e4157 = bc_value[((face_idx * 3u) + 2u)];
+                let _e4158 = dist;
+                let _e4167 = bc_kind[((face_idx * 3u) + 2u)];
+                let _e4174 = rhs_0_;
+                rhs_0_ = (_e4174 - ((((0.5f * area) * normal.x) * select(select(_e4126, _e4133, (_e4140 == 1u)), (_e4150 + (_e4157 * _e4158)), (_e4167 == 2u))) * 2f));
+            }
+            if !(is_boundary) {
+                let _e4187 = state[((owner * 9u) + 2u)];
+                let _e4194 = state[((other_idx * 9u) + 2u)];
+                let _e4197 = rhs_1_;
+                rhs_1_ = (_e4197 - (((0.5f * area) * normal.y) * (_e4187 + _e4194)));
+            } else {
+                let _e4209 = state[((owner * 9u) + 2u)];
+                let _e4216 = bc_value[((face_idx * 3u) + 2u)];
+                let _e4223 = bc_kind[((face_idx * 3u) + 2u)];
+                let _e4233 = state[((owner * 9u) + 2u)];
+                let _e4240 = bc_value[((face_idx * 3u) + 2u)];
+                let _e4241 = dist;
+                let _e4250 = bc_kind[((face_idx * 3u) + 2u)];
+                let _e4257 = rhs_1_;
+                rhs_1_ = (_e4257 - ((((0.5f * area) * normal.y) * select(select(_e4209, _e4216, (_e4223 == 1u)), (_e4233 + (_e4240 * _e4241)), (_e4250 == 2u))) * 2f));
+            }
+            let _e4261 = constants.density;
+            let _e4268 = state[((owner * 9u) + 3u)];
+            let _e4272 = constants.density;
+            let _e4279 = state[((owner * 9u) + 3u)];
+            let _e4281 = lambda_f;
+            let _e4285 = constants.density;
+            let _e4292 = state[((other_idx * 9u) + 3u)];
+            let _e4294 = lambda_f;
+            let _e4302 = dist;
+            let diff_coeff_p = ((select((_e4261 * _e4268), (((_e4272 * _e4279) * _e4281) + ((_e4285 * _e4292) * (1f - _e4294))), !(is_boundary)) * area) / _e4302);
+            if !(is_boundary) {
+            } else {
+                let _e4311 = bc_kind[((face_idx * 3u) + 2u)];
+                if (_e4311 == 1u) {
+                    let _e4321 = bc_value[((face_idx * 3u) + 2u)];
+                    let _e4323 = rhs_2_;
+                    rhs_2_ = (_e4323 + (diff_coeff_p * _e4321));
+                } else {
+                    let _e4331 = bc_kind[((face_idx * 3u) + 2u)];
+                    if (_e4331 == 2u) {
+                        let _e4336 = constants.density;
+                        let _e4343 = state[((owner * 9u) + 3u)];
+                        let _e4347 = constants.density;
+                        let _e4354 = state[((owner * 9u) + 3u)];
+                        let _e4356 = lambda_f;
+                        let _e4360 = constants.density;
+                        let _e4367 = state[((other_idx * 9u) + 3u)];
+                        let _e4369 = lambda_f;
+                        let _e4383 = bc_value[((face_idx * 3u) + 2u)];
+                        let _e4385 = rhs_2_;
+                        rhs_2_ = (_e4385 + ((select((_e4336 * _e4343), (((_e4347 * _e4354) * _e4356) + ((_e4360 * _e4367) * (1f - _e4369))), !(is_boundary)) * area) * _e4383));
+                    }
+                }
+            }
+            let _e4393 = fluxes[((face_idx * 3u) + 2u)];
+            phi_2_ = _e4393;
+            if (owner != owner) {
+                let _e4396 = phi_2_;
+                let _e4399 = phi_2_;
+                phi_2_ = (_e4399 - (_e4396 * 2f));
+            }
+            let _e4401 = phi_2_;
+            let _e4402 = rhs_2_;
+            rhs_2_ = (_e4402 - _e4401);
+        }
+        continuing {
+            let _e4405 = k;
+            k = (_e4405 + 1u);
+        }
+    }
+    let _e4413 = rhs_0_;
+    rhs[((owner * 3u) + 0u)] = _e4413;
+    let _e4420 = rhs_1_;
+    rhs[((owner * 3u) + 1u)] = _e4420;
+    let _e4427 = rhs_2_;
+    rhs[((owner * 3u) + 2u)] = _e4427;
     return;
 }
 "#;
@@ -222065,6 +227021,1423 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     matrix_values[((start_row_2_ + (diag_rank * 3u)) + 2u)] = (_e6329 + _e6328);
     let _e6337 = rhs_2_;
     rhs[((idx * 3u) + 2u)] = _e6337;
+    return;
+}
+"#;
+    }
+    pub mod generic_coupled_assembly_incompressible_momentum_structured {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct StructuredGrid {
+            #[doc = "offset: 0, size: 4, type: `u32`"]
+            pub nx: u32,
+            #[doc = "offset: 4, size: 4, type: `u32`"]
+            pub ny: u32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dx: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub dy: f32,
+        }
+        impl StructuredGrid {
+            pub const fn new(nx: u32, ny: u32, dx: f32, dy: f32) -> Self {
+                Self { nx, ny, dx, dy }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+            #[doc = "offset: 48, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 52, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub grid: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub grid: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    grid: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.grid),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 1] {
+                [self.grid]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyIncompressibleMomentumStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"grid\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: generic_coupled_assembly_incompressible_momentum_structured :: StructuredGrid > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyIncompressibleMomentumStructured::BindGroup0") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub state_old: wgpu::BufferBinding<'a>,
+            pub state_old_old: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+            pub state_iter: wgpu::BufferBinding<'a>,
+            pub fluxes: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup1Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub state_old: wgpu::BindGroupEntry<'a>,
+            pub state_old_old: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+            pub state_iter: wgpu::BindGroupEntry<'a>,
+            pub fluxes: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    state_old: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.state_old),
+                    },
+                    state_old_old: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.state_old_old),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                    state_iter: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.state_iter),
+                    },
+                    fluxes: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.fluxes),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 6] {
+                [
+                    self.state,
+                    self.state_old,
+                    self.state_old_old,
+                    self.constants,
+                    self.state_iter,
+                    self.fluxes,
+                ]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1(wgpu::BindGroup);
+        impl WgpuBindGroup1 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyIncompressibleMomentumStructured::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"state_old\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"state_old_old\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: generic_coupled_assembly_incompressible_momentum_structured :: Constants > () as _) , } , count : None , } , # [doc = " @binding(4): \"state_iter\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"fluxes\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyIncompressibleMomentumStructured::BindGroup1") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(1, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2EntriesParams<'a> {
+            pub matrix_values: wgpu::BufferBinding<'a>,
+            pub rhs: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup2Entries<'a> {
+            pub matrix_values: wgpu::BindGroupEntry<'a>,
+            pub rhs: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup2Entries<'a> {
+            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
+                Self {
+                    matrix_values: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.matrix_values),
+                    },
+                    rhs: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.rhs),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.matrix_values, self.rhs]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2(wgpu::BindGroup);
+        impl WgpuBindGroup2 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyIncompressibleMomentumStructured::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"matrix_values\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"rhs\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyIncompressibleMomentumStructured::BindGroup2") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(2, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup3EntriesParams<'a> {
+            pub bc_kind: wgpu::BufferBinding<'a>,
+            pub bc_value: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup3Entries<'a> {
+            pub bc_kind: wgpu::BindGroupEntry<'a>,
+            pub bc_value: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup3Entries<'a> {
+            pub fn new(params: WgpuBindGroup3EntriesParams<'a>) -> Self {
+                Self {
+                    bc_kind: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
+                    },
+                    bc_value: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.bc_value),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.bc_kind, self.bc_value]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup3(wgpu::BindGroup);
+        impl WgpuBindGroup3 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyIncompressibleMomentumStructured::BindGroup3::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup3Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyIncompressibleMomentumStructured::BindGroup3") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(3, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+            pub bind_group1: &'a WgpuBindGroup1,
+            pub bind_group2: &'a WgpuBindGroup2,
+            pub bind_group3: &'a WgpuBindGroup3,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+                self.bind_group1.set(pass);
+                self.bind_group2.set(pass);
+                self.bind_group3.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 4],
+            ) -> [wgpu::BindGroupLayout; 4] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device . create_pipeline_layout (& wgpu :: PipelineLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyIncompressibleMomentumStructured::PipelineLayout") , bind_group_layouts : & [& WgpuBindGroup0 :: get_bind_group_layout (device) , & WgpuBindGroup1 :: get_bind_group_layout (device) , & WgpuBindGroup2 :: get_bind_group_layout (device) , & WgpuBindGroup3 :: get_bind_group_layout (device)] , push_constant_ranges : & [] , })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("generic_coupled_assembly_incompressible_momentum_structured.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Vector2_ {
+    x: f32,
+    y: f32,
+}
+
+struct StructuredGrid {
+    nx: u32,
+    ny: u32,
+    dx: f32,
+    dy: f32,
+}
+
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
+}
+
+@group(0) @binding(0) 
+var<uniform> grid: StructuredGrid;
+@group(1) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(1) @binding(1) 
+var<storage> state_old: array<f32>;
+@group(1) @binding(2) 
+var<storage> state_old_old: array<f32>;
+@group(1) @binding(3) 
+var<uniform> constants: Constants;
+@group(1) @binding(4) 
+var<storage> state_iter: array<f32>;
+@group(1) @binding(6) 
+var<storage, read_write> fluxes: array<f32>;
+@group(2) @binding(0) 
+var<storage, read_write> matrix_values: array<f32>;
+@group(2) @binding(1) 
+var<storage, read_write> rhs: array<f32>;
+@group(3) @binding(0) 
+var<storage> bc_kind: array<u32>;
+@group(3) @binding(1) 
+var<storage> bc_value: array<f32>;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var rank: u32 = 0u;
+    var diag_0_: f32 = 0f;
+    var rhs_0_: f32 = 0f;
+    var diag_1_: f32 = 0f;
+    var rhs_1_: f32 = 0f;
+    var diag_2_: f32 = 0f;
+    var rhs_2_: f32 = 0f;
+    var bounded_sum_phi_0_: f32 = 0f;
+    var bounded_sum_phi_1_: f32 = 0f;
+    var k: u32 = 0u;
+    var dist: f32;
+    var lambda_f: f32;
+    var phi_0_: f32;
+    var rec_0_phi_ho: f32;
+    var phi_1_: f32;
+    var rec_1_phi_ho: f32;
+    var phi_2_: f32;
+
+    let _e6 = constants.stride_x;
+    let owner = ((global_id.y * _e6) + global_id.x);
+    let _e12 = grid.nx;
+    let _e15 = grid.ny;
+    if (owner >= (_e12 * _e15)) {
+        return;
+    }
+    let _e20 = grid.nx;
+    let gi = (owner % _e20);
+    let _e24 = grid.nx;
+    let gj = (owner / _e24);
+    let _e31 = grid.dx;
+    let _e38 = grid.dy;
+    let center = Vector2_(((f32(gi) + 0.5f) * _e31), ((f32(gj) + 0.5f) * _e38));
+    let _e43 = grid.dx;
+    let _e46 = grid.dy;
+    let vol = (_e43 * _e46);
+    let scalar_offset = (owner * 5u);
+    let start_row_0_ = (scalar_offset * 9u);
+    let start_row_1_ = (start_row_0_ + ((5u * 3u) * 1u));
+    let start_row_2_ = (start_row_0_ + ((5u * 3u) * 2u));
+    loop {
+        let _e64 = rank;
+        if (_e64 < 5u) {
+        } else {
+            break;
+        }
+        {
+            let _e66 = rank;
+            matrix_values[((start_row_0_ + (_e66 * 3u)) + 0u)] = 0f;
+            let _e75 = rank;
+            matrix_values[((start_row_0_ + (_e75 * 3u)) + 1u)] = 0f;
+            let _e84 = rank;
+            matrix_values[((start_row_0_ + (_e84 * 3u)) + 2u)] = 0f;
+            let _e93 = rank;
+            matrix_values[((start_row_1_ + (_e93 * 3u)) + 0u)] = 0f;
+            let _e102 = rank;
+            matrix_values[((start_row_1_ + (_e102 * 3u)) + 1u)] = 0f;
+            let _e111 = rank;
+            matrix_values[((start_row_1_ + (_e111 * 3u)) + 2u)] = 0f;
+            let _e120 = rank;
+            matrix_values[((start_row_2_ + (_e120 * 3u)) + 0u)] = 0f;
+            let _e129 = rank;
+            matrix_values[((start_row_2_ + (_e129 * 3u)) + 1u)] = 0f;
+            let _e138 = rank;
+            matrix_values[((start_row_2_ + (_e138 * 3u)) + 2u)] = 0f;
+        }
+        continuing {
+            let _e148 = rank;
+            rank = (_e148 + 1u);
+        }
+    }
+    let _e152 = constants.dtau;
+    let dtau_safe = max(_e152, 0.000000000001f);
+    let _e157 = constants.dtau;
+    let global_dual_time_scale = (vol / max(_e157, 0.000000000001f));
+    let _e163 = grid.dx;
+    let _e166 = grid.dy;
+    let perimeter_sum = (2f * (_e163 + _e166));
+    let face_metric_scale = max(1f, ((perimeter_sum * perimeter_sum) / max((16f * vol), 0.000000000001f)));
+    let dual_time_scale = (global_dual_time_scale * face_metric_scale);
+    let _e181 = constants.density;
+    let _e186 = constants.dt;
+    let _e188 = diag_0_;
+    diag_0_ = (_e188 + ((vol * _e181) / _e186));
+    let _e192 = constants.density;
+    let _e196 = constants.dt;
+    let _e205 = state_old[((owner * 9u) + 0u)];
+    let _e207 = rhs_0_;
+    rhs_0_ = (_e207 + (((vol * _e192) / _e196) * _e205));
+    let _e211 = constants.time_scheme;
+    if (_e211 == 1u) {
+        let _e216 = constants.dt;
+        let _e219 = constants.dt_old;
+        let r = (_e216 / _e219);
+        let _e223 = constants.density;
+        let _e227 = constants.dt;
+        let diag_bdf2_ = ((((vol * _e223) / _e227) * ((r * 2f) + 1f)) / (r + 1f));
+        let factor_n = (r + 1f);
+        let factor_nm1_ = ((r * r) / (r + 1f));
+        let _e243 = diag_0_;
+        let _e246 = constants.density;
+        let _e250 = constants.dt;
+        diag_0_ = ((_e243 - ((vol * _e246) / _e250)) + diag_bdf2_);
+        let _e254 = rhs_0_;
+        let _e257 = constants.density;
+        let _e261 = constants.dt;
+        let _e269 = state_old[((owner * 9u) + 0u)];
+        let _e274 = constants.density;
+        let _e278 = constants.dt;
+        let _e286 = state_old[((owner * 9u) + 0u)];
+        let _e294 = state_old_old[((owner * 9u) + 0u)];
+        rhs_0_ = ((_e254 - (((vol * _e257) / _e261) * _e269)) + (((vol * _e274) / _e278) * ((factor_n * _e286) - (factor_nm1_ * _e294))));
+    }
+    let _e301 = constants.dtau;
+    if (_e301 > 0f) {
+        let _e306 = constants.density;
+        let _e308 = diag_0_;
+        diag_0_ = (_e308 + (_e306 * dual_time_scale));
+        let _e312 = constants.density;
+        let _e320 = state_iter[((owner * 9u) + 0u)];
+        let _e322 = rhs_0_;
+        rhs_0_ = (_e322 + ((_e312 * dual_time_scale) * _e320));
+    }
+    let _e326 = constants.density;
+    let _e331 = constants.dt;
+    let _e333 = diag_1_;
+    diag_1_ = (_e333 + ((vol * _e326) / _e331));
+    let _e337 = constants.density;
+    let _e341 = constants.dt;
+    let _e350 = state_old[((owner * 9u) + 1u)];
+    let _e352 = rhs_1_;
+    rhs_1_ = (_e352 + (((vol * _e337) / _e341) * _e350));
+    let _e356 = constants.time_scheme;
+    if (_e356 == 1u) {
+        let _e361 = constants.dt;
+        let _e364 = constants.dt_old;
+        let r_1 = (_e361 / _e364);
+        let _e368 = constants.density;
+        let _e372 = constants.dt;
+        let diag_bdf2_1 = ((((vol * _e368) / _e372) * ((r_1 * 2f) + 1f)) / (r_1 + 1f));
+        let factor_n_1 = (r_1 + 1f);
+        let factor_nm1_1 = ((r_1 * r_1) / (r_1 + 1f));
+        let _e388 = diag_1_;
+        let _e391 = constants.density;
+        let _e395 = constants.dt;
+        diag_1_ = ((_e388 - ((vol * _e391) / _e395)) + diag_bdf2_1);
+        let _e399 = rhs_1_;
+        let _e402 = constants.density;
+        let _e406 = constants.dt;
+        let _e414 = state_old[((owner * 9u) + 1u)];
+        let _e419 = constants.density;
+        let _e423 = constants.dt;
+        let _e431 = state_old[((owner * 9u) + 1u)];
+        let _e439 = state_old_old[((owner * 9u) + 1u)];
+        rhs_1_ = ((_e399 - (((vol * _e402) / _e406) * _e414)) + (((vol * _e419) / _e423) * ((factor_n_1 * _e431) - (factor_nm1_1 * _e439))));
+    }
+    let _e446 = constants.dtau;
+    if (_e446 > 0f) {
+        let _e451 = constants.density;
+        let _e453 = diag_1_;
+        diag_1_ = (_e453 + (_e451 * dual_time_scale));
+        let _e457 = constants.density;
+        let _e465 = state_iter[((owner * 9u) + 1u)];
+        let _e467 = rhs_1_;
+        rhs_1_ = (_e467 + ((_e457 * dual_time_scale) * _e465));
+    }
+    let _e475 = state[((owner * 9u) + 8u)];
+    let _e477 = diag_0_;
+    diag_0_ = (_e477 - (_e475 * vol));
+    let _e485 = state[((owner * 9u) + 8u)];
+    let _e487 = diag_1_;
+    diag_1_ = (_e487 - (_e485 * vol));
+    loop {
+        let _e490 = k;
+        if (_e490 < 4u) {
+        } else {
+            break;
+        }
+        {
+            let _e493 = k;
+            let _e496 = k;
+            let axis_is_x = ((_e493 >= 1u) && (_e496 <= 2u));
+            let _e500 = k;
+            let sign_f = select(-1f, 1f, (_e500 >= 2u));
+            let normal = Vector2_(select(0f, sign_f, axis_is_x), select(sign_f, 0f, axis_is_x));
+            let _e513 = grid.dx;
+            let _e516 = grid.dy;
+            let area = select(_e513, _e516, axis_is_x);
+            let _e520 = grid.dy;
+            let _e523 = grid.dx;
+            let spacing = select(_e520, _e523, axis_is_x);
+            let half = (0.5f * spacing);
+            let coord = select(gj, gi, axis_is_x);
+            let _e530 = grid.ny;
+            let _e533 = grid.nx;
+            let ext = select(_e530, _e533, axis_is_x);
+            let _e540 = k;
+            let is_boundary = select((coord == (ext - 1u)), (coord == 0u), (_e540 < 2u));
+            let _e546 = grid.nx;
+            let off_u = select(_e546, 1u, axis_is_x);
+            let _e551 = k;
+            let neighbor = select((owner - off_u), (owner + off_u), (_e551 >= 2u));
+            let other_idx = select(neighbor, owner, is_boundary);
+            let f_center = Vector2_((center.x + (half * normal.x)), (center.y + (half * normal.y)));
+            let mult = select(spacing, half, is_boundary);
+            let other_center = Vector2_((center.x + (mult * normal.x)), (center.y + (mult * normal.y)));
+            let _e577 = k;
+            let face_idx = ((owner * 4u) + _e577);
+            let dx = (other_center.x - center.x);
+            let dy = (other_center.y - center.y);
+            let dist_proj = abs(((dx * normal.x) + (dy * normal.y)));
+            let dist_euc = sqrt(((dx * dx) + (dy * dy)));
+            dist = max(dist_euc, 0.000001f);
+            if (dist_proj > 0.000001f) {
+                dist = dist_proj;
+            }
+            let lam_f_center_v = vec2<f32>(f_center.x, f_center.y);
+            let lam_d_own = distance(vec2<f32>(center.x, center.y), lam_f_center_v);
+            let lam_d_neigh = distance(vec2<f32>(other_center.x, other_center.y), lam_f_center_v);
+            let lam_total = (lam_d_own + lam_d_neigh);
+            lambda_f = 0.5f;
+            if (lam_total > 0.000001f) {
+                lambda_f = (lam_d_neigh / lam_total);
+            }
+            let _e617 = k;
+            let _e620 = k;
+            let _e621 = k;
+            let neighbor_rank = select((_e617 + 1u), _e620, (_e621 < 2u));
+            let _e627 = constants.viscosity;
+            let _e630 = constants.viscosity;
+            let _e631 = lambda_f;
+            let _e635 = constants.viscosity;
+            let _e636 = lambda_f;
+            let _e644 = dist;
+            let diff_coeff_U = ((select(_e627, ((_e630 * _e631) + (_e635 * (1f - _e636))), !(is_boundary)) * area) / _e644);
+            if !(is_boundary) {
+                let _e647 = diag_0_;
+                diag_0_ = (_e647 + diff_coeff_U);
+                let _e656 = matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)];
+                matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)] = (_e656 - diff_coeff_U);
+            } else {
+                if (0u == 4u) {
+                    let _e661 = diag_0_;
+                    diag_0_ = (_e661 + diff_coeff_U);
+                    let _e669 = state[((owner * 9u) + 0u)];
+                    let _e676 = state[((owner * 9u) + 0u)];
+                    let _e685 = state[((owner * 9u) + 1u)];
+                    let _e693 = rhs_0_;
+                    rhs_0_ = (_e693 + (diff_coeff_U * (_e669 - (((_e676 * normal.x) + (_e685 * normal.y)) * normal.x))));
+                } else {
+                    let _e701 = bc_kind[((face_idx * 3u) + 0u)];
+                    if (_e701 == 1u) {
+                        let _e704 = diag_0_;
+                        diag_0_ = (_e704 + diff_coeff_U);
+                        let _e712 = bc_value[((face_idx * 3u) + 0u)];
+                        let _e714 = rhs_0_;
+                        rhs_0_ = (_e714 + (diff_coeff_U * _e712));
+                    } else {
+                        let _e722 = bc_kind[((face_idx * 3u) + 0u)];
+                        if (_e722 == 2u) {
+                            let _e727 = constants.viscosity;
+                            let _e730 = constants.viscosity;
+                            let _e731 = lambda_f;
+                            let _e735 = constants.viscosity;
+                            let _e736 = lambda_f;
+                            let _e750 = bc_value[((face_idx * 3u) + 0u)];
+                            let _e752 = rhs_0_;
+                            rhs_0_ = (_e752 + ((select(_e727, ((_e730 * _e731) + (_e735 * (1f - _e736))), !(is_boundary)) * area) * _e750));
+                        }
+                    }
+                }
+            }
+            if !(is_boundary) {
+                let _e755 = diag_1_;
+                diag_1_ = (_e755 + diff_coeff_U);
+                let _e764 = matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)];
+                matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)] = (_e764 - diff_coeff_U);
+            } else {
+                if (0u == 4u) {
+                    let _e768 = diag_1_;
+                    diag_1_ = (_e768 + diff_coeff_U);
+                    let _e776 = state[((owner * 9u) + 1u)];
+                    let _e783 = state[((owner * 9u) + 0u)];
+                    let _e792 = state[((owner * 9u) + 1u)];
+                    let _e800 = rhs_1_;
+                    rhs_1_ = (_e800 + (diff_coeff_U * (_e776 - (((_e783 * normal.x) + (_e792 * normal.y)) * normal.y))));
+                } else {
+                    let _e808 = bc_kind[((face_idx * 3u) + 1u)];
+                    if (_e808 == 1u) {
+                        let _e811 = diag_1_;
+                        diag_1_ = (_e811 + diff_coeff_U);
+                        let _e819 = bc_value[((face_idx * 3u) + 1u)];
+                        let _e821 = rhs_1_;
+                        rhs_1_ = (_e821 + (diff_coeff_U * _e819));
+                    } else {
+                        let _e829 = bc_kind[((face_idx * 3u) + 1u)];
+                        if (_e829 == 2u) {
+                            let _e834 = constants.viscosity;
+                            let _e837 = constants.viscosity;
+                            let _e838 = lambda_f;
+                            let _e842 = constants.viscosity;
+                            let _e843 = lambda_f;
+                            let _e857 = bc_value[((face_idx * 3u) + 1u)];
+                            let _e859 = rhs_1_;
+                            rhs_1_ = (_e859 + ((select(_e834, ((_e837 * _e838) + (_e842 * (1f - _e843))), !(is_boundary)) * area) * _e857));
+                        }
+                    }
+                }
+            }
+            let _e867 = state[((other_idx * 9u) + 0u)];
+            let _e874 = state[((owner * 9u) + 0u)];
+            let _e889 = state[((other_idx * 9u) + 0u)];
+            let _e896 = state[((owner * 9u) + 0u)];
+            let dev2_U_U_gx = vec2<f32>((((_e867 - _e874) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e889 - _e896) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f)));
+            let _e912 = state[((other_idx * 9u) + 1u)];
+            let _e919 = state[((owner * 9u) + 1u)];
+            let _e934 = state[((other_idx * 9u) + 1u)];
+            let _e941 = state[((owner * 9u) + 1u)];
+            let dev2_U_U_gy = vec2<f32>((((_e912 - _e919) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e934 - _e941) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f)));
+            let dev2_U_U_div = (dev2_U_U_gx.x + dev2_U_U_gy.y);
+            let _e956 = constants.viscosity;
+            let _e959 = constants.viscosity;
+            let _e960 = lambda_f;
+            let _e964 = constants.viscosity;
+            let _e965 = lambda_f;
+            let dev2_U_U_mu = select(_e956, ((_e959 * _e960) + (_e964 * (1f - _e965))), !(is_boundary));
+            let _e986 = rhs_0_;
+            rhs_0_ = (_e986 + ((dev2_U_U_mu * area) * (((normal.x * dev2_U_U_gx.x) + (normal.y * dev2_U_U_gy.x)) - ((0.6666667f * dev2_U_U_div) * normal.x))));
+            let _e1002 = rhs_1_;
+            rhs_1_ = (_e1002 + ((dev2_U_U_mu * area) * (((normal.x * dev2_U_U_gx.y) + (normal.y * dev2_U_U_gy.y)) - ((0.6666667f * dev2_U_U_div) * normal.y))));
+            let _e1010 = fluxes[((face_idx * 3u) + 0u)];
+            phi_0_ = _e1010;
+            if (owner != owner) {
+                let _e1013 = phi_0_;
+                let _e1016 = phi_0_;
+                phi_0_ = (_e1016 - (_e1013 * 2f));
+            }
+            let _e1019 = phi_0_;
+            let _e1020 = bounded_sum_phi_0_;
+            bounded_sum_phi_0_ = (_e1020 + _e1019);
+            if !(is_boundary) {
+                let _e1029 = state[((owner * 9u) + 0u)];
+                let _e1036 = state[((other_idx * 9u) + 0u)];
+                let _e1037 = phi_0_;
+                rec_0_phi_ho = select(_e1029, _e1036, (_e1037 < 0f));
+                let _e1044 = constants.scheme;
+                if (_e1044 == 1u) {
+                    let _e1053 = state[((other_idx * 9u) + 0u)];
+                    let _e1060 = state[((other_idx * 9u) + 0u)];
+                    let _e1067 = state[((owner * 9u) + 0u)];
+                    let _e1082 = state[((other_idx * 9u) + 0u)];
+                    let _e1089 = state[((owner * 9u) + 0u)];
+                    let _e1114 = state[((owner * 9u) + 0u)];
+                    let _e1121 = state[((other_idx * 9u) + 0u)];
+                    let _e1128 = state[((owner * 9u) + 0u)];
+                    let _e1143 = state[((other_idx * 9u) + 0u)];
+                    let _e1150 = state[((owner * 9u) + 0u)];
+                    let _e1169 = phi_0_;
+                    rec_0_phi_ho = select((_e1053 + dot(vec2<f32>((((_e1060 - _e1067) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1082 - _e1089) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))), (_e1114 + dot(vec2<f32>((((_e1121 - _e1128) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1143 - _e1150) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e1169 > 0f));
+                } else {
+                    let _e1175 = constants.scheme;
+                    if (_e1175 == 2u) {
+                        let _e1184 = state[((other_idx * 9u) + 0u)];
+                        let _e1191 = state[((other_idx * 9u) + 0u)];
+                        let _e1201 = state[((owner * 9u) + 0u)];
+                        let _e1211 = state[((other_idx * 9u) + 0u)];
+                        let _e1218 = state[((owner * 9u) + 0u)];
+                        let _e1233 = state[((other_idx * 9u) + 0u)];
+                        let _e1240 = state[((owner * 9u) + 0u)];
+                        let _e1267 = state[((other_idx * 9u) + 0u)];
+                        let _e1275 = state[((owner * 9u) + 0u)];
+                        let _e1282 = state[((owner * 9u) + 0u)];
+                        let _e1292 = state[((other_idx * 9u) + 0u)];
+                        let _e1302 = state[((other_idx * 9u) + 0u)];
+                        let _e1309 = state[((owner * 9u) + 0u)];
+                        let _e1324 = state[((other_idx * 9u) + 0u)];
+                        let _e1331 = state[((owner * 9u) + 0u)];
+                        let _e1358 = state[((owner * 9u) + 0u)];
+                        let _e1360 = phi_0_;
+                        rec_0_phi_ho = select(((((_e1184 + (_e1191 * 0.625f)) + (_e1201 * 0.375f)) + (dot(vec2<f32>((((_e1211 - _e1218) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1233 - _e1240) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e1267), ((((_e1275 + (_e1282 * 0.625f)) + (_e1292 * 0.375f)) + (dot(vec2<f32>((((_e1302 - _e1309) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1324 - _e1331) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e1358), (_e1360 > 0f));
+                    } else {
+                        let _e1366 = constants.scheme;
+                        if (_e1366 == 3u) {
+                            let _e1375 = state[((other_idx * 9u) + 0u)];
+                            let _e1382 = state[((other_idx * 9u) + 0u)];
+                            let _e1389 = state[((owner * 9u) + 0u)];
+                            let _e1404 = state[((other_idx * 9u) + 0u)];
+                            let _e1411 = state[((owner * 9u) + 0u)];
+                            let _e1435 = state[((owner * 9u) + 0u)];
+                            let _e1442 = state[((other_idx * 9u) + 0u)];
+                            let _e1453 = state[((owner * 9u) + 0u)];
+                            let _e1460 = state[((other_idx * 9u) + 0u)];
+                            let _e1472 = state[((owner * 9u) + 0u)];
+                            let _e1479 = state[((other_idx * 9u) + 0u)];
+                            let _e1486 = state[((owner * 9u) + 0u)];
+                            let _e1501 = state[((other_idx * 9u) + 0u)];
+                            let _e1508 = state[((owner * 9u) + 0u)];
+                            let _e1532 = state[((other_idx * 9u) + 0u)];
+                            let _e1539 = state[((owner * 9u) + 0u)];
+                            let _e1550 = state[((other_idx * 9u) + 0u)];
+                            let _e1557 = state[((owner * 9u) + 0u)];
+                            let _e1563 = phi_0_;
+                            rec_0_phi_ho = select((_e1375 + min(max(dot(vec2<f32>((((_e1382 - _e1389) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1404 - _e1411) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))), min((_e1435 - _e1442), 0f)), max((_e1453 - _e1460), 0f))), (_e1472 + min(max(dot(vec2<f32>((((_e1479 - _e1486) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1501 - _e1508) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))), min((_e1532 - _e1539), 0f)), max((_e1550 - _e1557), 0f))), (_e1563 > 0f));
+                        } else {
+                            let _e1569 = constants.scheme;
+                            if (_e1569 == 4u) {
+                                let _e1578 = state[((other_idx * 9u) + 0u)];
+                                let _e1585 = state[((other_idx * 9u) + 0u)];
+                                let _e1592 = state[((owner * 9u) + 0u)];
+                                let _e1607 = state[((other_idx * 9u) + 0u)];
+                                let _e1614 = state[((owner * 9u) + 0u)];
+                                let _e1638 = state[((owner * 9u) + 0u)];
+                                let _e1645 = state[((other_idx * 9u) + 0u)];
+                                let _e1655 = state[((owner * 9u) + 0u)];
+                                let _e1662 = state[((other_idx * 9u) + 0u)];
+                                let _e1671 = state[((other_idx * 9u) + 0u)];
+                                let _e1678 = state[((owner * 9u) + 0u)];
+                                let _e1693 = state[((other_idx * 9u) + 0u)];
+                                let _e1700 = state[((owner * 9u) + 0u)];
+                                let _e1729 = state[((owner * 9u) + 0u)];
+                                let _e1736 = state[((other_idx * 9u) + 0u)];
+                                let _e1744 = state[((other_idx * 9u) + 0u)];
+                                let _e1751 = state[((owner * 9u) + 0u)];
+                                let _e1766 = state[((other_idx * 9u) + 0u)];
+                                let _e1773 = state[((owner * 9u) + 0u)];
+                                let _e1801 = state[((owner * 9u) + 0u)];
+                                let _e1808 = state[((other_idx * 9u) + 0u)];
+                                let _e1816 = state[((other_idx * 9u) + 0u)];
+                                let _e1823 = state[((owner * 9u) + 0u)];
+                                let _e1838 = state[((other_idx * 9u) + 0u)];
+                                let _e1845 = state[((owner * 9u) + 0u)];
+                                let _e1875 = state[((owner * 9u) + 0u)];
+                                let _e1882 = state[((other_idx * 9u) + 0u)];
+                                let _e1889 = state[((owner * 9u) + 0u)];
+                                let _e1904 = state[((other_idx * 9u) + 0u)];
+                                let _e1911 = state[((owner * 9u) + 0u)];
+                                let _e1935 = state[((other_idx * 9u) + 0u)];
+                                let _e1942 = state[((owner * 9u) + 0u)];
+                                let _e1952 = state[((other_idx * 9u) + 0u)];
+                                let _e1959 = state[((owner * 9u) + 0u)];
+                                let _e1968 = state[((other_idx * 9u) + 0u)];
+                                let _e1975 = state[((owner * 9u) + 0u)];
+                                let _e1990 = state[((other_idx * 9u) + 0u)];
+                                let _e1997 = state[((owner * 9u) + 0u)];
+                                let _e2026 = state[((other_idx * 9u) + 0u)];
+                                let _e2033 = state[((owner * 9u) + 0u)];
+                                let _e2041 = state[((other_idx * 9u) + 0u)];
+                                let _e2048 = state[((owner * 9u) + 0u)];
+                                let _e2063 = state[((other_idx * 9u) + 0u)];
+                                let _e2070 = state[((owner * 9u) + 0u)];
+                                let _e2098 = state[((other_idx * 9u) + 0u)];
+                                let _e2105 = state[((owner * 9u) + 0u)];
+                                let _e2113 = state[((other_idx * 9u) + 0u)];
+                                let _e2120 = state[((owner * 9u) + 0u)];
+                                let _e2135 = state[((other_idx * 9u) + 0u)];
+                                let _e2142 = state[((owner * 9u) + 0u)];
+                                let _e2166 = phi_0_;
+                                rec_0_phi_ho = select((_e1578 + ((((dot(vec2<f32>((((_e1585 - _e1592) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1607 - _e1614) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))) * abs((_e1638 - _e1645))) / max(abs((_e1655 - _e1662)), (abs(dot(vec2<f32>((((_e1671 - _e1678) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1693 - _e1700) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))) + 0.00000001f))) * max(((_e1729 - _e1736) * dot(vec2<f32>((((_e1744 - _e1751) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1766 - _e1773) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))), 0f)) / max(abs(((_e1801 - _e1808) * dot(vec2<f32>((((_e1816 - _e1823) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1838 - _e1845) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))))), 0.00000001f))), (_e1875 + ((((dot(vec2<f32>((((_e1882 - _e1889) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1904 - _e1911) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))) * abs((_e1935 - _e1942))) / max(abs((_e1952 - _e1959)), (abs(dot(vec2<f32>((((_e1968 - _e1975) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1990 - _e1997) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))) + 0.00000001f))) * max(((_e2026 - _e2033) * dot(vec2<f32>((((_e2041 - _e2048) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2063 - _e2070) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), 0f)) / max(abs(((_e2098 - _e2105) * dot(vec2<f32>((((_e2113 - _e2120) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2135 - _e2142) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))))), 0.00000001f))), (_e2166 > 0f));
+                            } else {
+                                let _e2172 = constants.scheme;
+                                if (_e2172 == 5u) {
+                                    let _e2181 = state[((other_idx * 9u) + 0u)];
+                                    let _e2188 = state[((other_idx * 9u) + 0u)];
+                                    let _e2197 = state[((owner * 9u) + 0u)];
+                                    let _e2207 = state[((other_idx * 9u) + 0u)];
+                                    let _e2214 = state[((owner * 9u) + 0u)];
+                                    let _e2229 = state[((other_idx * 9u) + 0u)];
+                                    let _e2236 = state[((owner * 9u) + 0u)];
+                                    let _e2263 = state[((other_idx * 9u) + 0u)];
+                                    let _e2271 = state[((owner * 9u) + 0u)];
+                                    let _e2278 = state[((other_idx * 9u) + 0u)];
+                                    let _e2289 = state[((owner * 9u) + 0u)];
+                                    let _e2296 = state[((other_idx * 9u) + 0u)];
+                                    let _e2308 = state[((owner * 9u) + 0u)];
+                                    let _e2315 = state[((owner * 9u) + 0u)];
+                                    let _e2324 = state[((other_idx * 9u) + 0u)];
+                                    let _e2334 = state[((other_idx * 9u) + 0u)];
+                                    let _e2341 = state[((owner * 9u) + 0u)];
+                                    let _e2356 = state[((other_idx * 9u) + 0u)];
+                                    let _e2363 = state[((owner * 9u) + 0u)];
+                                    let _e2390 = state[((owner * 9u) + 0u)];
+                                    let _e2398 = state[((other_idx * 9u) + 0u)];
+                                    let _e2405 = state[((owner * 9u) + 0u)];
+                                    let _e2416 = state[((other_idx * 9u) + 0u)];
+                                    let _e2423 = state[((owner * 9u) + 0u)];
+                                    let _e2429 = phi_0_;
+                                    rec_0_phi_ho = select((_e2181 + min(max(((((_e2188 * 0.625f) + (_e2197 * 0.375f)) + (dot(vec2<f32>((((_e2207 - _e2214) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2229 - _e2236) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2263), min((_e2271 - _e2278), 0f)), max((_e2289 - _e2296), 0f))), (_e2308 + min(max(((((_e2315 * 0.625f) + (_e2324 * 0.375f)) + (dot(vec2<f32>((((_e2334 - _e2341) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2356 - _e2363) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2390), min((_e2398 - _e2405), 0f)), max((_e2416 - _e2423), 0f))), (_e2429 > 0f));
+                                } else {
+                                    let _e2435 = constants.scheme;
+                                    if (_e2435 == 6u) {
+                                        let _e2444 = state[((other_idx * 9u) + 0u)];
+                                        let _e2451 = state[((other_idx * 9u) + 0u)];
+                                        let _e2460 = state[((owner * 9u) + 0u)];
+                                        let _e2470 = state[((other_idx * 9u) + 0u)];
+                                        let _e2477 = state[((owner * 9u) + 0u)];
+                                        let _e2492 = state[((other_idx * 9u) + 0u)];
+                                        let _e2499 = state[((owner * 9u) + 0u)];
+                                        let _e2526 = state[((other_idx * 9u) + 0u)];
+                                        let _e2534 = state[((owner * 9u) + 0u)];
+                                        let _e2541 = state[((other_idx * 9u) + 0u)];
+                                        let _e2551 = state[((owner * 9u) + 0u)];
+                                        let _e2558 = state[((other_idx * 9u) + 0u)];
+                                        let _e2567 = state[((other_idx * 9u) + 0u)];
+                                        let _e2576 = state[((owner * 9u) + 0u)];
+                                        let _e2586 = state[((other_idx * 9u) + 0u)];
+                                        let _e2593 = state[((owner * 9u) + 0u)];
+                                        let _e2608 = state[((other_idx * 9u) + 0u)];
+                                        let _e2615 = state[((owner * 9u) + 0u)];
+                                        let _e2642 = state[((other_idx * 9u) + 0u)];
+                                        let _e2655 = state[((owner * 9u) + 0u)];
+                                        let _e2662 = state[((other_idx * 9u) + 0u)];
+                                        let _e2670 = state[((other_idx * 9u) + 0u)];
+                                        let _e2679 = state[((owner * 9u) + 0u)];
+                                        let _e2689 = state[((other_idx * 9u) + 0u)];
+                                        let _e2696 = state[((owner * 9u) + 0u)];
+                                        let _e2711 = state[((other_idx * 9u) + 0u)];
+                                        let _e2718 = state[((owner * 9u) + 0u)];
+                                        let _e2745 = state[((other_idx * 9u) + 0u)];
+                                        let _e2757 = state[((owner * 9u) + 0u)];
+                                        let _e2764 = state[((other_idx * 9u) + 0u)];
+                                        let _e2772 = state[((other_idx * 9u) + 0u)];
+                                        let _e2781 = state[((owner * 9u) + 0u)];
+                                        let _e2791 = state[((other_idx * 9u) + 0u)];
+                                        let _e2798 = state[((owner * 9u) + 0u)];
+                                        let _e2813 = state[((other_idx * 9u) + 0u)];
+                                        let _e2820 = state[((owner * 9u) + 0u)];
+                                        let _e2847 = state[((other_idx * 9u) + 0u)];
+                                        let _e2861 = state[((owner * 9u) + 0u)];
+                                        let _e2868 = state[((owner * 9u) + 0u)];
+                                        let _e2877 = state[((other_idx * 9u) + 0u)];
+                                        let _e2887 = state[((other_idx * 9u) + 0u)];
+                                        let _e2894 = state[((owner * 9u) + 0u)];
+                                        let _e2909 = state[((other_idx * 9u) + 0u)];
+                                        let _e2916 = state[((owner * 9u) + 0u)];
+                                        let _e2943 = state[((owner * 9u) + 0u)];
+                                        let _e2951 = state[((other_idx * 9u) + 0u)];
+                                        let _e2958 = state[((owner * 9u) + 0u)];
+                                        let _e2968 = state[((other_idx * 9u) + 0u)];
+                                        let _e2975 = state[((owner * 9u) + 0u)];
+                                        let _e2984 = state[((owner * 9u) + 0u)];
+                                        let _e2993 = state[((other_idx * 9u) + 0u)];
+                                        let _e3003 = state[((other_idx * 9u) + 0u)];
+                                        let _e3010 = state[((owner * 9u) + 0u)];
+                                        let _e3025 = state[((other_idx * 9u) + 0u)];
+                                        let _e3032 = state[((owner * 9u) + 0u)];
+                                        let _e3059 = state[((owner * 9u) + 0u)];
+                                        let _e3072 = state[((other_idx * 9u) + 0u)];
+                                        let _e3079 = state[((owner * 9u) + 0u)];
+                                        let _e3087 = state[((owner * 9u) + 0u)];
+                                        let _e3096 = state[((other_idx * 9u) + 0u)];
+                                        let _e3106 = state[((other_idx * 9u) + 0u)];
+                                        let _e3113 = state[((owner * 9u) + 0u)];
+                                        let _e3128 = state[((other_idx * 9u) + 0u)];
+                                        let _e3135 = state[((owner * 9u) + 0u)];
+                                        let _e3162 = state[((owner * 9u) + 0u)];
+                                        let _e3174 = state[((other_idx * 9u) + 0u)];
+                                        let _e3181 = state[((owner * 9u) + 0u)];
+                                        let _e3189 = state[((owner * 9u) + 0u)];
+                                        let _e3198 = state[((other_idx * 9u) + 0u)];
+                                        let _e3208 = state[((other_idx * 9u) + 0u)];
+                                        let _e3215 = state[((owner * 9u) + 0u)];
+                                        let _e3230 = state[((other_idx * 9u) + 0u)];
+                                        let _e3237 = state[((owner * 9u) + 0u)];
+                                        let _e3264 = state[((owner * 9u) + 0u)];
+                                        let _e3272 = phi_0_;
+                                        rec_0_phi_ho = select((_e2444 + ((((((((_e2451 * 0.625f) + (_e2460 * 0.375f)) + (dot(vec2<f32>((((_e2470 - _e2477) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2492 - _e2499) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2526) * abs((_e2534 - _e2541))) / max(abs((_e2551 - _e2558)), (abs(((((_e2567 * 0.625f) + (_e2576 * 0.375f)) + (dot(vec2<f32>((((_e2586 - _e2593) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2608 - _e2615) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2642)) + 0.00000001f))) * max(((_e2655 - _e2662) * ((((_e2670 * 0.625f) + (_e2679 * 0.375f)) + (dot(vec2<f32>((((_e2689 - _e2696) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2711 - _e2718) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2745)), 0f)) / max(abs(((_e2757 - _e2764) * ((((_e2772 * 0.625f) + (_e2781 * 0.375f)) + (dot(vec2<f32>((((_e2791 - _e2798) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2813 - _e2820) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2847))), 0.00000001f))), (_e2861 + ((((((((_e2868 * 0.625f) + (_e2877 * 0.375f)) + (dot(vec2<f32>((((_e2887 - _e2894) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2909 - _e2916) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2943) * abs((_e2951 - _e2958))) / max(abs((_e2968 - _e2975)), (abs(((((_e2984 * 0.625f) + (_e2993 * 0.375f)) + (dot(vec2<f32>((((_e3003 - _e3010) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3025 - _e3032) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e3059)) + 0.00000001f))) * max(((_e3072 - _e3079) * ((((_e3087 * 0.625f) + (_e3096 * 0.375f)) + (dot(vec2<f32>((((_e3106 - _e3113) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3128 - _e3135) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e3162)), 0f)) / max(abs(((_e3174 - _e3181) * ((((_e3189 * 0.625f) + (_e3198 * 0.375f)) + (dot(vec2<f32>((((_e3208 - _e3215) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3230 - _e3237) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e3264))), 0.00000001f))), (_e3272 > 0f));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let _e3276 = phi_0_;
+                let _e3279 = diag_0_;
+                diag_0_ = (_e3279 + max(_e3276, 0f));
+                let _e3288 = phi_0_;
+                let _e3291 = matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)];
+                matrix_values[((start_row_0_ + (neighbor_rank * 3u)) + 0u)] = (_e3291 + min(_e3288, 0f));
+                let _e3293 = phi_0_;
+                let _e3294 = rec_0_phi_ho;
+                let _e3301 = state[((owner * 9u) + 0u)];
+                let _e3308 = state[((other_idx * 9u) + 0u)];
+                let _e3309 = phi_0_;
+                let _e3315 = rhs_0_;
+                rhs_0_ = (_e3315 - (_e3293 * (_e3294 - select(_e3301, _e3308, (_e3309 < 0f)))));
+            } else {
+                let _e3323 = bc_kind[((face_idx * 3u) + 0u)];
+                if (_e3323 == 1u) {
+                    let _e3326 = phi_0_;
+                    let _e3329 = diag_0_;
+                    diag_0_ = (_e3329 + max(_e3326, 0f));
+                    let _e3331 = phi_0_;
+                    let _e3340 = bc_value[((face_idx * 3u) + 0u)];
+                    let _e3342 = rhs_0_;
+                    rhs_0_ = (_e3342 - (min(_e3331, 0f) * _e3340));
+                } else {
+                    let _e3344 = phi_0_;
+                    let _e3345 = diag_0_;
+                    diag_0_ = (_e3345 + _e3344);
+                }
+            }
+            let _e3353 = fluxes[((face_idx * 3u) + 1u)];
+            phi_1_ = _e3353;
+            if (owner != owner) {
+                let _e3356 = phi_1_;
+                let _e3359 = phi_1_;
+                phi_1_ = (_e3359 - (_e3356 * 2f));
+            }
+            let _e3362 = phi_1_;
+            let _e3363 = bounded_sum_phi_1_;
+            bounded_sum_phi_1_ = (_e3363 + _e3362);
+            if !(is_boundary) {
+                let _e3372 = state[((owner * 9u) + 1u)];
+                let _e3379 = state[((other_idx * 9u) + 1u)];
+                let _e3380 = phi_1_;
+                rec_1_phi_ho = select(_e3372, _e3379, (_e3380 < 0f));
+                let _e3387 = constants.scheme;
+                if (_e3387 == 1u) {
+                    let _e3396 = state[((other_idx * 9u) + 1u)];
+                    let _e3403 = state[((other_idx * 9u) + 1u)];
+                    let _e3410 = state[((owner * 9u) + 1u)];
+                    let _e3425 = state[((other_idx * 9u) + 1u)];
+                    let _e3432 = state[((owner * 9u) + 1u)];
+                    let _e3457 = state[((owner * 9u) + 1u)];
+                    let _e3464 = state[((other_idx * 9u) + 1u)];
+                    let _e3471 = state[((owner * 9u) + 1u)];
+                    let _e3486 = state[((other_idx * 9u) + 1u)];
+                    let _e3493 = state[((owner * 9u) + 1u)];
+                    let _e3512 = phi_1_;
+                    rec_1_phi_ho = select((_e3396 + dot(vec2<f32>((((_e3403 - _e3410) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3425 - _e3432) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))), (_e3457 + dot(vec2<f32>((((_e3464 - _e3471) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3486 - _e3493) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e3512 > 0f));
+                } else {
+                    let _e3518 = constants.scheme;
+                    if (_e3518 == 2u) {
+                        let _e3527 = state[((other_idx * 9u) + 1u)];
+                        let _e3534 = state[((other_idx * 9u) + 1u)];
+                        let _e3544 = state[((owner * 9u) + 1u)];
+                        let _e3554 = state[((other_idx * 9u) + 1u)];
+                        let _e3561 = state[((owner * 9u) + 1u)];
+                        let _e3576 = state[((other_idx * 9u) + 1u)];
+                        let _e3583 = state[((owner * 9u) + 1u)];
+                        let _e3610 = state[((other_idx * 9u) + 1u)];
+                        let _e3618 = state[((owner * 9u) + 1u)];
+                        let _e3625 = state[((owner * 9u) + 1u)];
+                        let _e3635 = state[((other_idx * 9u) + 1u)];
+                        let _e3645 = state[((other_idx * 9u) + 1u)];
+                        let _e3652 = state[((owner * 9u) + 1u)];
+                        let _e3667 = state[((other_idx * 9u) + 1u)];
+                        let _e3674 = state[((owner * 9u) + 1u)];
+                        let _e3701 = state[((owner * 9u) + 1u)];
+                        let _e3703 = phi_1_;
+                        rec_1_phi_ho = select(((((_e3527 + (_e3534 * 0.625f)) + (_e3544 * 0.375f)) + (dot(vec2<f32>((((_e3554 - _e3561) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3576 - _e3583) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e3610), ((((_e3618 + (_e3625 * 0.625f)) + (_e3635 * 0.375f)) + (dot(vec2<f32>((((_e3645 - _e3652) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3667 - _e3674) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e3701), (_e3703 > 0f));
+                    } else {
+                        let _e3709 = constants.scheme;
+                        if (_e3709 == 3u) {
+                            let _e3718 = state[((other_idx * 9u) + 1u)];
+                            let _e3725 = state[((other_idx * 9u) + 1u)];
+                            let _e3732 = state[((owner * 9u) + 1u)];
+                            let _e3747 = state[((other_idx * 9u) + 1u)];
+                            let _e3754 = state[((owner * 9u) + 1u)];
+                            let _e3778 = state[((owner * 9u) + 1u)];
+                            let _e3785 = state[((other_idx * 9u) + 1u)];
+                            let _e3796 = state[((owner * 9u) + 1u)];
+                            let _e3803 = state[((other_idx * 9u) + 1u)];
+                            let _e3815 = state[((owner * 9u) + 1u)];
+                            let _e3822 = state[((other_idx * 9u) + 1u)];
+                            let _e3829 = state[((owner * 9u) + 1u)];
+                            let _e3844 = state[((other_idx * 9u) + 1u)];
+                            let _e3851 = state[((owner * 9u) + 1u)];
+                            let _e3875 = state[((other_idx * 9u) + 1u)];
+                            let _e3882 = state[((owner * 9u) + 1u)];
+                            let _e3893 = state[((other_idx * 9u) + 1u)];
+                            let _e3900 = state[((owner * 9u) + 1u)];
+                            let _e3906 = phi_1_;
+                            rec_1_phi_ho = select((_e3718 + min(max(dot(vec2<f32>((((_e3725 - _e3732) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3747 - _e3754) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))), min((_e3778 - _e3785), 0f)), max((_e3796 - _e3803), 0f))), (_e3815 + min(max(dot(vec2<f32>((((_e3822 - _e3829) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3844 - _e3851) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))), min((_e3875 - _e3882), 0f)), max((_e3893 - _e3900), 0f))), (_e3906 > 0f));
+                        } else {
+                            let _e3912 = constants.scheme;
+                            if (_e3912 == 4u) {
+                                let _e3921 = state[((other_idx * 9u) + 1u)];
+                                let _e3928 = state[((other_idx * 9u) + 1u)];
+                                let _e3935 = state[((owner * 9u) + 1u)];
+                                let _e3950 = state[((other_idx * 9u) + 1u)];
+                                let _e3957 = state[((owner * 9u) + 1u)];
+                                let _e3981 = state[((owner * 9u) + 1u)];
+                                let _e3988 = state[((other_idx * 9u) + 1u)];
+                                let _e3998 = state[((owner * 9u) + 1u)];
+                                let _e4005 = state[((other_idx * 9u) + 1u)];
+                                let _e4014 = state[((other_idx * 9u) + 1u)];
+                                let _e4021 = state[((owner * 9u) + 1u)];
+                                let _e4036 = state[((other_idx * 9u) + 1u)];
+                                let _e4043 = state[((owner * 9u) + 1u)];
+                                let _e4072 = state[((owner * 9u) + 1u)];
+                                let _e4079 = state[((other_idx * 9u) + 1u)];
+                                let _e4087 = state[((other_idx * 9u) + 1u)];
+                                let _e4094 = state[((owner * 9u) + 1u)];
+                                let _e4109 = state[((other_idx * 9u) + 1u)];
+                                let _e4116 = state[((owner * 9u) + 1u)];
+                                let _e4144 = state[((owner * 9u) + 1u)];
+                                let _e4151 = state[((other_idx * 9u) + 1u)];
+                                let _e4159 = state[((other_idx * 9u) + 1u)];
+                                let _e4166 = state[((owner * 9u) + 1u)];
+                                let _e4181 = state[((other_idx * 9u) + 1u)];
+                                let _e4188 = state[((owner * 9u) + 1u)];
+                                let _e4218 = state[((owner * 9u) + 1u)];
+                                let _e4225 = state[((other_idx * 9u) + 1u)];
+                                let _e4232 = state[((owner * 9u) + 1u)];
+                                let _e4247 = state[((other_idx * 9u) + 1u)];
+                                let _e4254 = state[((owner * 9u) + 1u)];
+                                let _e4278 = state[((other_idx * 9u) + 1u)];
+                                let _e4285 = state[((owner * 9u) + 1u)];
+                                let _e4295 = state[((other_idx * 9u) + 1u)];
+                                let _e4302 = state[((owner * 9u) + 1u)];
+                                let _e4311 = state[((other_idx * 9u) + 1u)];
+                                let _e4318 = state[((owner * 9u) + 1u)];
+                                let _e4333 = state[((other_idx * 9u) + 1u)];
+                                let _e4340 = state[((owner * 9u) + 1u)];
+                                let _e4369 = state[((other_idx * 9u) + 1u)];
+                                let _e4376 = state[((owner * 9u) + 1u)];
+                                let _e4384 = state[((other_idx * 9u) + 1u)];
+                                let _e4391 = state[((owner * 9u) + 1u)];
+                                let _e4406 = state[((other_idx * 9u) + 1u)];
+                                let _e4413 = state[((owner * 9u) + 1u)];
+                                let _e4441 = state[((other_idx * 9u) + 1u)];
+                                let _e4448 = state[((owner * 9u) + 1u)];
+                                let _e4456 = state[((other_idx * 9u) + 1u)];
+                                let _e4463 = state[((owner * 9u) + 1u)];
+                                let _e4478 = state[((other_idx * 9u) + 1u)];
+                                let _e4485 = state[((owner * 9u) + 1u)];
+                                let _e4509 = phi_1_;
+                                rec_1_phi_ho = select((_e3921 + ((((dot(vec2<f32>((((_e3928 - _e3935) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3950 - _e3957) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))) * abs((_e3981 - _e3988))) / max(abs((_e3998 - _e4005)), (abs(dot(vec2<f32>((((_e4014 - _e4021) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4036 - _e4043) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))) + 0.00000001f))) * max(((_e4072 - _e4079) * dot(vec2<f32>((((_e4087 - _e4094) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4109 - _e4116) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))), 0f)) / max(abs(((_e4144 - _e4151) * dot(vec2<f32>((((_e4159 - _e4166) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4181 - _e4188) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))))), 0.00000001f))), (_e4218 + ((((dot(vec2<f32>((((_e4225 - _e4232) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4247 - _e4254) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))) * abs((_e4278 - _e4285))) / max(abs((_e4295 - _e4302)), (abs(dot(vec2<f32>((((_e4311 - _e4318) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4333 - _e4340) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))) + 0.00000001f))) * max(((_e4369 - _e4376) * dot(vec2<f32>((((_e4384 - _e4391) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4406 - _e4413) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), 0f)) / max(abs(((_e4441 - _e4448) * dot(vec2<f32>((((_e4456 - _e4463) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4478 - _e4485) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))))), 0.00000001f))), (_e4509 > 0f));
+                            } else {
+                                let _e4515 = constants.scheme;
+                                if (_e4515 == 5u) {
+                                    let _e4524 = state[((other_idx * 9u) + 1u)];
+                                    let _e4531 = state[((other_idx * 9u) + 1u)];
+                                    let _e4540 = state[((owner * 9u) + 1u)];
+                                    let _e4550 = state[((other_idx * 9u) + 1u)];
+                                    let _e4557 = state[((owner * 9u) + 1u)];
+                                    let _e4572 = state[((other_idx * 9u) + 1u)];
+                                    let _e4579 = state[((owner * 9u) + 1u)];
+                                    let _e4606 = state[((other_idx * 9u) + 1u)];
+                                    let _e4614 = state[((owner * 9u) + 1u)];
+                                    let _e4621 = state[((other_idx * 9u) + 1u)];
+                                    let _e4632 = state[((owner * 9u) + 1u)];
+                                    let _e4639 = state[((other_idx * 9u) + 1u)];
+                                    let _e4651 = state[((owner * 9u) + 1u)];
+                                    let _e4658 = state[((owner * 9u) + 1u)];
+                                    let _e4667 = state[((other_idx * 9u) + 1u)];
+                                    let _e4677 = state[((other_idx * 9u) + 1u)];
+                                    let _e4684 = state[((owner * 9u) + 1u)];
+                                    let _e4699 = state[((other_idx * 9u) + 1u)];
+                                    let _e4706 = state[((owner * 9u) + 1u)];
+                                    let _e4733 = state[((owner * 9u) + 1u)];
+                                    let _e4741 = state[((other_idx * 9u) + 1u)];
+                                    let _e4748 = state[((owner * 9u) + 1u)];
+                                    let _e4759 = state[((other_idx * 9u) + 1u)];
+                                    let _e4766 = state[((owner * 9u) + 1u)];
+                                    let _e4772 = phi_1_;
+                                    rec_1_phi_ho = select((_e4524 + min(max(((((_e4531 * 0.625f) + (_e4540 * 0.375f)) + (dot(vec2<f32>((((_e4550 - _e4557) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4572 - _e4579) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e4606), min((_e4614 - _e4621), 0f)), max((_e4632 - _e4639), 0f))), (_e4651 + min(max(((((_e4658 * 0.625f) + (_e4667 * 0.375f)) + (dot(vec2<f32>((((_e4677 - _e4684) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4699 - _e4706) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e4733), min((_e4741 - _e4748), 0f)), max((_e4759 - _e4766), 0f))), (_e4772 > 0f));
+                                } else {
+                                    let _e4778 = constants.scheme;
+                                    if (_e4778 == 6u) {
+                                        let _e4787 = state[((other_idx * 9u) + 1u)];
+                                        let _e4794 = state[((other_idx * 9u) + 1u)];
+                                        let _e4803 = state[((owner * 9u) + 1u)];
+                                        let _e4813 = state[((other_idx * 9u) + 1u)];
+                                        let _e4820 = state[((owner * 9u) + 1u)];
+                                        let _e4835 = state[((other_idx * 9u) + 1u)];
+                                        let _e4842 = state[((owner * 9u) + 1u)];
+                                        let _e4869 = state[((other_idx * 9u) + 1u)];
+                                        let _e4877 = state[((owner * 9u) + 1u)];
+                                        let _e4884 = state[((other_idx * 9u) + 1u)];
+                                        let _e4894 = state[((owner * 9u) + 1u)];
+                                        let _e4901 = state[((other_idx * 9u) + 1u)];
+                                        let _e4910 = state[((other_idx * 9u) + 1u)];
+                                        let _e4919 = state[((owner * 9u) + 1u)];
+                                        let _e4929 = state[((other_idx * 9u) + 1u)];
+                                        let _e4936 = state[((owner * 9u) + 1u)];
+                                        let _e4951 = state[((other_idx * 9u) + 1u)];
+                                        let _e4958 = state[((owner * 9u) + 1u)];
+                                        let _e4985 = state[((other_idx * 9u) + 1u)];
+                                        let _e4998 = state[((owner * 9u) + 1u)];
+                                        let _e5005 = state[((other_idx * 9u) + 1u)];
+                                        let _e5013 = state[((other_idx * 9u) + 1u)];
+                                        let _e5022 = state[((owner * 9u) + 1u)];
+                                        let _e5032 = state[((other_idx * 9u) + 1u)];
+                                        let _e5039 = state[((owner * 9u) + 1u)];
+                                        let _e5054 = state[((other_idx * 9u) + 1u)];
+                                        let _e5061 = state[((owner * 9u) + 1u)];
+                                        let _e5088 = state[((other_idx * 9u) + 1u)];
+                                        let _e5100 = state[((owner * 9u) + 1u)];
+                                        let _e5107 = state[((other_idx * 9u) + 1u)];
+                                        let _e5115 = state[((other_idx * 9u) + 1u)];
+                                        let _e5124 = state[((owner * 9u) + 1u)];
+                                        let _e5134 = state[((other_idx * 9u) + 1u)];
+                                        let _e5141 = state[((owner * 9u) + 1u)];
+                                        let _e5156 = state[((other_idx * 9u) + 1u)];
+                                        let _e5163 = state[((owner * 9u) + 1u)];
+                                        let _e5190 = state[((other_idx * 9u) + 1u)];
+                                        let _e5204 = state[((owner * 9u) + 1u)];
+                                        let _e5211 = state[((owner * 9u) + 1u)];
+                                        let _e5220 = state[((other_idx * 9u) + 1u)];
+                                        let _e5230 = state[((other_idx * 9u) + 1u)];
+                                        let _e5237 = state[((owner * 9u) + 1u)];
+                                        let _e5252 = state[((other_idx * 9u) + 1u)];
+                                        let _e5259 = state[((owner * 9u) + 1u)];
+                                        let _e5286 = state[((owner * 9u) + 1u)];
+                                        let _e5294 = state[((other_idx * 9u) + 1u)];
+                                        let _e5301 = state[((owner * 9u) + 1u)];
+                                        let _e5311 = state[((other_idx * 9u) + 1u)];
+                                        let _e5318 = state[((owner * 9u) + 1u)];
+                                        let _e5327 = state[((owner * 9u) + 1u)];
+                                        let _e5336 = state[((other_idx * 9u) + 1u)];
+                                        let _e5346 = state[((other_idx * 9u) + 1u)];
+                                        let _e5353 = state[((owner * 9u) + 1u)];
+                                        let _e5368 = state[((other_idx * 9u) + 1u)];
+                                        let _e5375 = state[((owner * 9u) + 1u)];
+                                        let _e5402 = state[((owner * 9u) + 1u)];
+                                        let _e5415 = state[((other_idx * 9u) + 1u)];
+                                        let _e5422 = state[((owner * 9u) + 1u)];
+                                        let _e5430 = state[((owner * 9u) + 1u)];
+                                        let _e5439 = state[((other_idx * 9u) + 1u)];
+                                        let _e5449 = state[((other_idx * 9u) + 1u)];
+                                        let _e5456 = state[((owner * 9u) + 1u)];
+                                        let _e5471 = state[((other_idx * 9u) + 1u)];
+                                        let _e5478 = state[((owner * 9u) + 1u)];
+                                        let _e5505 = state[((owner * 9u) + 1u)];
+                                        let _e5517 = state[((other_idx * 9u) + 1u)];
+                                        let _e5524 = state[((owner * 9u) + 1u)];
+                                        let _e5532 = state[((owner * 9u) + 1u)];
+                                        let _e5541 = state[((other_idx * 9u) + 1u)];
+                                        let _e5551 = state[((other_idx * 9u) + 1u)];
+                                        let _e5558 = state[((owner * 9u) + 1u)];
+                                        let _e5573 = state[((other_idx * 9u) + 1u)];
+                                        let _e5580 = state[((owner * 9u) + 1u)];
+                                        let _e5607 = state[((owner * 9u) + 1u)];
+                                        let _e5615 = phi_1_;
+                                        rec_1_phi_ho = select((_e4787 + ((((((((_e4794 * 0.625f) + (_e4803 * 0.375f)) + (dot(vec2<f32>((((_e4813 - _e4820) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4835 - _e4842) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e4869) * abs((_e4877 - _e4884))) / max(abs((_e4894 - _e4901)), (abs(((((_e4910 * 0.625f) + (_e4919 * 0.375f)) + (dot(vec2<f32>((((_e4929 - _e4936) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4951 - _e4958) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e4985)) + 0.00000001f))) * max(((_e4998 - _e5005) * ((((_e5013 * 0.625f) + (_e5022 * 0.375f)) + (dot(vec2<f32>((((_e5032 - _e5039) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e5054 - _e5061) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e5088)), 0f)) / max(abs(((_e5100 - _e5107) * ((((_e5115 * 0.625f) + (_e5124 * 0.375f)) + (dot(vec2<f32>((((_e5134 - _e5141) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e5156 - _e5163) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e5190))), 0.00000001f))), (_e5204 + ((((((((_e5211 * 0.625f) + (_e5220 * 0.375f)) + (dot(vec2<f32>((((_e5230 - _e5237) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e5252 - _e5259) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e5286) * abs((_e5294 - _e5301))) / max(abs((_e5311 - _e5318)), (abs(((((_e5327 * 0.625f) + (_e5336 * 0.375f)) + (dot(vec2<f32>((((_e5346 - _e5353) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e5368 - _e5375) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e5402)) + 0.00000001f))) * max(((_e5415 - _e5422) * ((((_e5430 * 0.625f) + (_e5439 * 0.375f)) + (dot(vec2<f32>((((_e5449 - _e5456) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e5471 - _e5478) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e5505)), 0f)) / max(abs(((_e5517 - _e5524) * ((((_e5532 * 0.625f) + (_e5541 * 0.375f)) + (dot(vec2<f32>((((_e5551 - _e5558) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e5573 - _e5580) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e5607))), 0.00000001f))), (_e5615 > 0f));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let _e5619 = phi_1_;
+                let _e5622 = diag_1_;
+                diag_1_ = (_e5622 + max(_e5619, 0f));
+                let _e5631 = phi_1_;
+                let _e5634 = matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)];
+                matrix_values[((start_row_1_ + (neighbor_rank * 3u)) + 1u)] = (_e5634 + min(_e5631, 0f));
+                let _e5636 = phi_1_;
+                let _e5637 = rec_1_phi_ho;
+                let _e5644 = state[((owner * 9u) + 1u)];
+                let _e5651 = state[((other_idx * 9u) + 1u)];
+                let _e5652 = phi_1_;
+                let _e5658 = rhs_1_;
+                rhs_1_ = (_e5658 - (_e5636 * (_e5637 - select(_e5644, _e5651, (_e5652 < 0f)))));
+            } else {
+                let _e5666 = bc_kind[((face_idx * 3u) + 1u)];
+                if (_e5666 == 1u) {
+                    let _e5669 = phi_1_;
+                    let _e5672 = diag_1_;
+                    diag_1_ = (_e5672 + max(_e5669, 0f));
+                    let _e5674 = phi_1_;
+                    let _e5683 = bc_value[((face_idx * 3u) + 1u)];
+                    let _e5685 = rhs_1_;
+                    rhs_1_ = (_e5685 - (min(_e5674, 0f) * _e5683));
+                } else {
+                    let _e5687 = phi_1_;
+                    let _e5688 = diag_1_;
+                    diag_1_ = (_e5688 + _e5687);
+                }
+            }
+            if !(is_boundary) {
+                let _e5701 = state[((owner * 9u) + 2u)];
+                let _e5708 = state[((other_idx * 9u) + 2u)];
+                let _e5711 = rhs_0_;
+                rhs_0_ = (_e5711 - (((0.5f * area) * normal.x) * (_e5701 + _e5708)));
+            } else {
+                let _e5723 = state[((owner * 9u) + 2u)];
+                let _e5730 = bc_value[((face_idx * 3u) + 2u)];
+                let _e5737 = bc_kind[((face_idx * 3u) + 2u)];
+                let _e5747 = state[((owner * 9u) + 2u)];
+                let _e5754 = bc_value[((face_idx * 3u) + 2u)];
+                let _e5755 = dist;
+                let _e5764 = bc_kind[((face_idx * 3u) + 2u)];
+                let _e5771 = rhs_0_;
+                rhs_0_ = (_e5771 - ((((0.5f * area) * normal.x) * select(select(_e5723, _e5730, (_e5737 == 1u)), (_e5747 + (_e5754 * _e5755)), (_e5764 == 2u))) * 2f));
+            }
+            if !(is_boundary) {
+                let _e5784 = state[((owner * 9u) + 2u)];
+                let _e5791 = state[((other_idx * 9u) + 2u)];
+                let _e5794 = rhs_1_;
+                rhs_1_ = (_e5794 - (((0.5f * area) * normal.y) * (_e5784 + _e5791)));
+            } else {
+                let _e5806 = state[((owner * 9u) + 2u)];
+                let _e5813 = bc_value[((face_idx * 3u) + 2u)];
+                let _e5820 = bc_kind[((face_idx * 3u) + 2u)];
+                let _e5830 = state[((owner * 9u) + 2u)];
+                let _e5837 = bc_value[((face_idx * 3u) + 2u)];
+                let _e5838 = dist;
+                let _e5847 = bc_kind[((face_idx * 3u) + 2u)];
+                let _e5854 = rhs_1_;
+                rhs_1_ = (_e5854 - ((((0.5f * area) * normal.y) * select(select(_e5806, _e5813, (_e5820 == 1u)), (_e5830 + (_e5837 * _e5838)), (_e5847 == 2u))) * 2f));
+            }
+            let _e5858 = constants.density;
+            let _e5865 = state[((owner * 9u) + 3u)];
+            let _e5869 = constants.density;
+            let _e5876 = state[((owner * 9u) + 3u)];
+            let _e5878 = lambda_f;
+            let _e5882 = constants.density;
+            let _e5889 = state[((other_idx * 9u) + 3u)];
+            let _e5891 = lambda_f;
+            let _e5899 = dist;
+            let diff_coeff_p = ((select((_e5858 * _e5865), (((_e5869 * _e5876) * _e5878) + ((_e5882 * _e5889) * (1f - _e5891))), !(is_boundary)) * area) / _e5899);
+            if !(is_boundary) {
+                let _e5903 = diag_2_;
+                diag_2_ = (_e5903 + diff_coeff_p);
+                let _e5912 = matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)];
+                matrix_values[((start_row_2_ + (neighbor_rank * 3u)) + 2u)] = (_e5912 - diff_coeff_p);
+            } else {
+                let _e5920 = bc_kind[((face_idx * 3u) + 2u)];
+                if (_e5920 == 1u) {
+                    let _e5923 = diag_2_;
+                    diag_2_ = (_e5923 + diff_coeff_p);
+                    let _e5932 = bc_value[((face_idx * 3u) + 2u)];
+                    let _e5934 = rhs_2_;
+                    rhs_2_ = (_e5934 + (diff_coeff_p * _e5932));
+                } else {
+                    let _e5942 = bc_kind[((face_idx * 3u) + 2u)];
+                    if (_e5942 == 2u) {
+                        let _e5947 = constants.density;
+                        let _e5954 = state[((owner * 9u) + 3u)];
+                        let _e5958 = constants.density;
+                        let _e5965 = state[((owner * 9u) + 3u)];
+                        let _e5967 = lambda_f;
+                        let _e5971 = constants.density;
+                        let _e5978 = state[((other_idx * 9u) + 3u)];
+                        let _e5980 = lambda_f;
+                        let _e5994 = bc_value[((face_idx * 3u) + 2u)];
+                        let _e5996 = rhs_2_;
+                        rhs_2_ = (_e5996 + ((select((_e5947 * _e5954), (((_e5958 * _e5965) * _e5967) + ((_e5971 * _e5978) * (1f - _e5980))), !(is_boundary)) * area) * _e5994));
+                    }
+                }
+            }
+            let _e6004 = fluxes[((face_idx * 3u) + 2u)];
+            phi_2_ = _e6004;
+            if (owner != owner) {
+                let _e6007 = phi_2_;
+                let _e6010 = phi_2_;
+                phi_2_ = (_e6010 - (_e6007 * 2f));
+            }
+            let _e6012 = phi_2_;
+            let _e6013 = rhs_2_;
+            rhs_2_ = (_e6013 - _e6012);
+        }
+        continuing {
+            let _e6016 = k;
+            k = (_e6016 + 1u);
+        }
+    }
+    let _e6018 = bounded_sum_phi_0_;
+    let _e6019 = diag_0_;
+    diag_0_ = (_e6019 - _e6018);
+    let _e6021 = bounded_sum_phi_1_;
+    let _e6022 = diag_1_;
+    diag_1_ = (_e6022 - _e6021);
+    let _e6032 = diag_0_;
+    let _e6033 = matrix_values[((start_row_0_ + (2u * 3u)) + 0u)];
+    matrix_values[((start_row_0_ + (2u * 3u)) + 0u)] = (_e6033 + _e6032);
+    let _e6041 = rhs_0_;
+    rhs[((owner * 3u) + 0u)] = _e6041;
+    let _e6049 = diag_1_;
+    let _e6050 = matrix_values[((start_row_1_ + (2u * 3u)) + 1u)];
+    matrix_values[((start_row_1_ + (2u * 3u)) + 1u)] = (_e6050 + _e6049);
+    let _e6058 = rhs_1_;
+    rhs[((owner * 3u) + 1u)] = _e6058;
+    let _e6066 = diag_2_;
+    let _e6067 = matrix_values[((start_row_2_ + (2u * 3u)) + 2u)];
+    matrix_values[((start_row_2_ + (2u * 3u)) + 2u)] = (_e6067 + _e6066);
+    let _e6075 = rhs_2_;
+    rhs[((owner * 3u) + 2u)] = _e6075;
     return;
 }
 "#;
@@ -250929,23 +257302,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var lambda_f: f32;
 
     let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
+    let owner = ((global_id.y * _e6) + global_id.x);
     let _e12 = grid.nx;
     let _e15 = grid.ny;
-    if (idx >= (_e12 * _e15)) {
+    if (owner >= (_e12 * _e15)) {
         return;
     }
     let _e20 = grid.nx;
-    let gi = (idx % _e20);
+    let gi = (owner % _e20);
     let _e24 = grid.nx;
-    let gj = (idx / _e24);
+    let gj = (owner / _e24);
     let _e31 = grid.dx;
     let _e38 = grid.dy;
     let center = Vector2_(((f32(gi) + 0.5f) * _e31), ((f32(gj) + 0.5f) * _e38));
     let _e43 = grid.dx;
     let _e46 = grid.dy;
     let vol = (_e43 * _e46);
-    let scalar_offset = (idx * 5u);
+    let scalar_offset = (owner * 5u);
     let start_row_0_ = (scalar_offset * 1u);
     loop {
         let _e54 = rank;
@@ -250970,7 +257343,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let face_metric_scale = max(1f, ((perimeter_sum * perimeter_sum) / max((16f * vol), 0.000000000001f)));
     let dual_time_scale = (global_dual_time_scale * face_metric_scale);
     let _e90 = constants.dt;
-    let _e99 = state_old[((idx * 1u) + 0u)];
+    let _e99 = state_old[((owner * 1u) + 0u)];
     let _e101 = rhs_0_;
     rhs_0_ = (_e101 + ((vol / _e90) * _e99));
     let _e105 = constants.time_scheme;
@@ -250984,15 +257357,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let factor_nm1_ = ((r * r) / (r + 1f));
         let _e133 = rhs_0_;
         let _e136 = constants.dt;
-        let _e144 = state_old[((idx * 1u) + 0u)];
+        let _e144 = state_old[((owner * 1u) + 0u)];
         let _e149 = constants.dt;
-        let _e157 = state_old[((idx * 1u) + 0u)];
-        let _e165 = state_old_old[((idx * 1u) + 0u)];
+        let _e157 = state_old[((owner * 1u) + 0u)];
+        let _e165 = state_old_old[((owner * 1u) + 0u)];
         rhs_0_ = ((_e133 - ((vol / _e136) * _e144)) + ((vol / _e149) * ((factor_n * _e157) - (factor_nm1_ * _e165))));
     }
     let _e172 = constants.dtau;
     if (_e172 > 0f) {
-        let _e181 = state_iter[((idx * 1u) + 0u)];
+        let _e181 = state_iter[((owner * 1u) + 0u)];
         let _e183 = rhs_0_;
         rhs_0_ = (_e183 + (dual_time_scale * _e181));
     }
@@ -251025,13 +257398,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e242 = grid.nx;
             let off_u = select(_e242, 1u, axis_is_x);
             let _e247 = k;
-            let neighbor = select((idx - off_u), (idx + off_u), (_e247 >= 2u));
-            let other_idx = select(neighbor, idx, is_boundary);
+            let neighbor = select((owner - off_u), (owner + off_u), (_e247 >= 2u));
+            let other_idx = select(neighbor, owner, is_boundary);
             let f_center = Vector2_((center.x + (half * normal.x)), (center.y + (half * normal.y)));
             let mult = select(spacing, half, is_boundary);
             let other_center = Vector2_((center.x + (mult * normal.x)), (center.y + (mult * normal.y)));
             let _e273 = k;
-            let face_idx = ((idx * 4u) + _e273);
+            let face_idx = ((owner * 4u) + _e273);
             let dx = (other_center.x - center.x);
             let dy = (other_center.y - center.y);
             let dist_proj = abs(((dx * normal.x) + (dy * normal.y)));
@@ -251081,7 +257454,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     let _e389 = rhs_0_;
-    rhs[((idx * 1u) + 0u)] = _e389;
+    rhs[((owner * 1u) + 0u)] = _e389;
     return;
 }
 "#;
@@ -251520,23 +257893,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var lambda_f: f32;
 
     let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
+    let owner = ((global_id.y * _e6) + global_id.x);
     let _e12 = grid.nx;
     let _e15 = grid.ny;
-    if (idx >= (_e12 * _e15)) {
+    if (owner >= (_e12 * _e15)) {
         return;
     }
     let _e20 = grid.nx;
-    let gi = (idx % _e20);
+    let gi = (owner % _e20);
     let _e24 = grid.nx;
-    let gj = (idx / _e24);
+    let gj = (owner / _e24);
     let _e31 = grid.dx;
     let _e38 = grid.dy;
     let center = Vector2_(((f32(gi) + 0.5f) * _e31), ((f32(gj) + 0.5f) * _e38));
     let _e43 = grid.dx;
     let _e46 = grid.dy;
     let vol = (_e43 * _e46);
-    let scalar_offset = (idx * 5u);
+    let scalar_offset = (owner * 5u);
     let start_row_0_ = (scalar_offset * 1u);
     loop {
         let _e54 = rank;
@@ -251561,7 +257934,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let face_metric_scale = max(1f, ((perimeter_sum * perimeter_sum) / max((16f * vol), 0.000000000001f)));
     let dual_time_scale = (global_dual_time_scale * face_metric_scale);
     let _e90 = constants.dt;
-    let _e99 = state_old[((idx * 2u) + 0u)];
+    let _e99 = state_old[((owner * 2u) + 0u)];
     let _e101 = rhs_0_;
     rhs_0_ = (_e101 + ((vol / _e90) * _e99));
     let _e105 = constants.time_scheme;
@@ -251575,15 +257948,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let factor_nm1_ = ((r * r) / (r + 1f));
         let _e133 = rhs_0_;
         let _e136 = constants.dt;
-        let _e144 = state_old[((idx * 2u) + 0u)];
+        let _e144 = state_old[((owner * 2u) + 0u)];
         let _e149 = constants.dt;
-        let _e157 = state_old[((idx * 2u) + 0u)];
-        let _e165 = state_old_old[((idx * 2u) + 0u)];
+        let _e157 = state_old[((owner * 2u) + 0u)];
+        let _e165 = state_old_old[((owner * 2u) + 0u)];
         rhs_0_ = ((_e133 - ((vol / _e136) * _e144)) + ((vol / _e149) * ((factor_n * _e157) - (factor_nm1_ * _e165))));
     }
     let _e172 = constants.dtau;
     if (_e172 > 0f) {
-        let _e181 = state_iter[((idx * 2u) + 0u)];
+        let _e181 = state_iter[((owner * 2u) + 0u)];
         let _e183 = rhs_0_;
         rhs_0_ = (_e183 + (dual_time_scale * _e181));
     }
@@ -251616,13 +257989,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e242 = grid.nx;
             let off_u = select(_e242, 1u, axis_is_x);
             let _e247 = k;
-            let neighbor = select((idx - off_u), (idx + off_u), (_e247 >= 2u));
-            let other_idx = select(neighbor, idx, is_boundary);
+            let neighbor = select((owner - off_u), (owner + off_u), (_e247 >= 2u));
+            let other_idx = select(neighbor, owner, is_boundary);
             let f_center = Vector2_((center.x + (half * normal.x)), (center.y + (half * normal.y)));
             let mult = select(spacing, half, is_boundary);
             let other_center = Vector2_((center.x + (mult * normal.x)), (center.y + (mult * normal.y)));
             let _e273 = k;
-            let face_idx = ((idx * 4u) + _e273);
+            let face_idx = ((owner * 4u) + _e273);
             let dx = (other_center.x - center.x);
             let dy = (other_center.y - center.y);
             let dist_proj = abs(((dx * normal.x) + (dy * normal.y)));
@@ -251672,7 +258045,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     let _e389 = rhs_0_;
-    rhs[((idx * 1u) + 0u)] = _e389;
+    rhs[((owner * 1u) + 0u)] = _e389;
     return;
 }
 "#;
@@ -252111,23 +258484,23 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var lambda_f: f32;
 
     let _e6 = constants.stride_x;
-    let idx = ((global_id.y * _e6) + global_id.x);
+    let owner = ((global_id.y * _e6) + global_id.x);
     let _e12 = grid.nx;
     let _e15 = grid.ny;
-    if (idx >= (_e12 * _e15)) {
+    if (owner >= (_e12 * _e15)) {
         return;
     }
     let _e20 = grid.nx;
-    let gi = (idx % _e20);
+    let gi = (owner % _e20);
     let _e24 = grid.nx;
-    let gj = (idx / _e24);
+    let gj = (owner / _e24);
     let _e31 = grid.dx;
     let _e38 = grid.dy;
     let center = Vector2_(((f32(gi) + 0.5f) * _e31), ((f32(gj) + 0.5f) * _e38));
     let _e43 = grid.dx;
     let _e46 = grid.dy;
     let vol = (_e43 * _e46);
-    let scalar_offset = (idx * 5u);
+    let scalar_offset = (owner * 5u);
     let start_row_0_ = (scalar_offset * 1u);
     loop {
         let _e54 = rank;
@@ -252152,7 +258525,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let face_metric_scale = max(1f, ((perimeter_sum * perimeter_sum) / max((16f * vol), 0.000000000001f)));
     let dual_time_scale = (global_dual_time_scale * face_metric_scale);
     let _e90 = constants.dt;
-    let _e99 = state_old[((idx * 2u) + 0u)];
+    let _e99 = state_old[((owner * 2u) + 0u)];
     let _e101 = rhs_0_;
     rhs_0_ = (_e101 + ((vol / _e90) * _e99));
     let _e105 = constants.time_scheme;
@@ -252166,19 +258539,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let factor_nm1_ = ((r * r) / (r + 1f));
         let _e133 = rhs_0_;
         let _e136 = constants.dt;
-        let _e144 = state_old[((idx * 2u) + 0u)];
+        let _e144 = state_old[((owner * 2u) + 0u)];
         let _e149 = constants.dt;
-        let _e157 = state_old[((idx * 2u) + 0u)];
-        let _e165 = state_old_old[((idx * 2u) + 0u)];
+        let _e157 = state_old[((owner * 2u) + 0u)];
+        let _e165 = state_old_old[((owner * 2u) + 0u)];
         rhs_0_ = ((_e133 - ((vol / _e136) * _e144)) + ((vol / _e149) * ((factor_n * _e157) - (factor_nm1_ * _e165))));
     }
     let _e172 = constants.dtau;
     if (_e172 > 0f) {
-        let _e181 = state_iter[((idx * 2u) + 0u)];
+        let _e181 = state_iter[((owner * 2u) + 0u)];
         let _e183 = rhs_0_;
         rhs_0_ = (_e183 + (dual_time_scale * _e181));
     }
-    let _e191 = state[((idx * 2u) + 1u)];
+    let _e191 = state[((owner * 2u) + 1u)];
     let _e193 = rhs_0_;
     rhs_0_ = (_e193 + (_e191 * vol));
     loop {
@@ -252210,13 +258583,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             let _e252 = grid.nx;
             let off_u = select(_e252, 1u, axis_is_x);
             let _e257 = k;
-            let neighbor = select((idx - off_u), (idx + off_u), (_e257 >= 2u));
-            let other_idx = select(neighbor, idx, is_boundary);
+            let neighbor = select((owner - off_u), (owner + off_u), (_e257 >= 2u));
+            let other_idx = select(neighbor, owner, is_boundary);
             let f_center = Vector2_((center.x + (half * normal.x)), (center.y + (half * normal.y)));
             let mult = select(spacing, half, is_boundary);
             let other_center = Vector2_((center.x + (mult * normal.x)), (center.y + (mult * normal.y)));
             let _e283 = k;
-            let face_idx = ((idx * 4u) + _e283);
+            let face_idx = ((owner * 4u) + _e283);
             let dx = (other_center.x - center.x);
             let dy = (other_center.y - center.y);
             let dist_proj = abs(((dx * normal.x) + (dy * normal.y)));
@@ -252266,7 +258639,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
     }
     let _e399 = rhs_0_;
-    rhs[((idx * 1u) + 0u)] = _e399;
+    rhs[((owner * 1u) + 0u)] = _e399;
     return;
 }
 "#;
@@ -259392,6 +265765,1316 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     rhs[((idx * 3u) + 1u)] = _e6063;
     let _e6070 = rhs_2_;
     rhs[((idx * 3u) + 2u)] = _e6070;
+    return;
+}
+"#;
+    }
+    pub mod generic_coupled_assembly_rhs_only_incompressible_momentum_structured {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct StructuredGrid {
+            #[doc = "offset: 0, size: 4, type: `u32`"]
+            pub nx: u32,
+            #[doc = "offset: 4, size: 4, type: `u32`"]
+            pub ny: u32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dx: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub dy: f32,
+        }
+        impl StructuredGrid {
+            pub const fn new(nx: u32, ny: u32, dx: f32, dy: f32) -> Self {
+                Self { nx, ny, dx, dy }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+            #[doc = "offset: 48, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 52, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub grid: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub grid: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    grid: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.grid),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 1] {
+                [self.grid]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"grid\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: StructuredGrid > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumStructured::BindGroup0") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub state_old: wgpu::BufferBinding<'a>,
+            pub state_old_old: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+            pub state_iter: wgpu::BufferBinding<'a>,
+            pub fluxes: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup1Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub state_old: wgpu::BindGroupEntry<'a>,
+            pub state_old_old: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+            pub state_iter: wgpu::BindGroupEntry<'a>,
+            pub fluxes: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    state_old: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.state_old),
+                    },
+                    state_old_old: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.state_old_old),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                    state_iter: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.state_iter),
+                    },
+                    fluxes: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.fluxes),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 6] {
+                [
+                    self.state,
+                    self.state_old,
+                    self.state_old_old,
+                    self.constants,
+                    self.state_iter,
+                    self.fluxes,
+                ]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1(wgpu::BindGroup);
+        impl WgpuBindGroup1 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumStructured::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"state_old\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"state_old_old\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants > () as _) , } , count : None , } , # [doc = " @binding(4): \"state_iter\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"fluxes\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumStructured::BindGroup1") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(1, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2EntriesParams<'a> {
+            pub matrix_values: wgpu::BufferBinding<'a>,
+            pub rhs: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup2Entries<'a> {
+            pub matrix_values: wgpu::BindGroupEntry<'a>,
+            pub rhs: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup2Entries<'a> {
+            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
+                Self {
+                    matrix_values: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.matrix_values),
+                    },
+                    rhs: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.rhs),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.matrix_values, self.rhs]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2(wgpu::BindGroup);
+        impl WgpuBindGroup2 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumStructured::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"matrix_values\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"rhs\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumStructured::BindGroup2") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(2, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup3EntriesParams<'a> {
+            pub bc_kind: wgpu::BufferBinding<'a>,
+            pub bc_value: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup3Entries<'a> {
+            pub bc_kind: wgpu::BindGroupEntry<'a>,
+            pub bc_value: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup3Entries<'a> {
+            pub fn new(params: WgpuBindGroup3EntriesParams<'a>) -> Self {
+                Self {
+                    bc_kind: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
+                    },
+                    bc_value: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.bc_value),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.bc_kind, self.bc_value]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup3(wgpu::BindGroup);
+        impl WgpuBindGroup3 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumStructured::BindGroup3::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup3Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumStructured::BindGroup3") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(3, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+            pub bind_group1: &'a WgpuBindGroup1,
+            pub bind_group2: &'a WgpuBindGroup2,
+            pub bind_group3: &'a WgpuBindGroup3,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+                self.bind_group1.set(pass);
+                self.bind_group2.set(pass);
+                self.bind_group3.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 4],
+            ) -> [wgpu::BindGroupLayout; 4] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device . create_pipeline_layout (& wgpu :: PipelineLayoutDescriptor { label : Some ("GeneratedGenericCoupledAssemblyRhsOnlyIncompressibleMomentumStructured::PipelineLayout") , bind_group_layouts : & [& WgpuBindGroup0 :: get_bind_group_layout (device) , & WgpuBindGroup1 :: get_bind_group_layout (device) , & WgpuBindGroup2 :: get_bind_group_layout (device) , & WgpuBindGroup3 :: get_bind_group_layout (device)] , push_constant_ranges : & [] , })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(
+                    "generic_coupled_assembly_rhs_only_incompressible_momentum_structured.wgsl",
+                ),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Vector2_ {
+    x: f32,
+    y: f32,
+}
+
+struct StructuredGrid {
+    nx: u32,
+    ny: u32,
+    dx: f32,
+    dy: f32,
+}
+
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
+}
+
+@group(0) @binding(0) 
+var<uniform> grid: StructuredGrid;
+@group(1) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(1) @binding(1) 
+var<storage> state_old: array<f32>;
+@group(1) @binding(2) 
+var<storage> state_old_old: array<f32>;
+@group(1) @binding(3) 
+var<uniform> constants: Constants;
+@group(1) @binding(4) 
+var<storage> state_iter: array<f32>;
+@group(1) @binding(6) 
+var<storage, read_write> fluxes: array<f32>;
+@group(2) @binding(0) 
+var<storage, read_write> matrix_values: array<f32>;
+@group(2) @binding(1) 
+var<storage, read_write> rhs: array<f32>;
+@group(3) @binding(0) 
+var<storage> bc_kind: array<u32>;
+@group(3) @binding(1) 
+var<storage> bc_value: array<f32>;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var rank: u32 = 0u;
+    var diag_0_: f32 = 0f;
+    var rhs_0_: f32 = 0f;
+    var diag_1_: f32 = 0f;
+    var rhs_1_: f32 = 0f;
+    var diag_2_: f32 = 0f;
+    var rhs_2_: f32 = 0f;
+    var bounded_sum_phi_0_: f32 = 0f;
+    var bounded_sum_phi_1_: f32 = 0f;
+    var k: u32 = 0u;
+    var dist: f32;
+    var lambda_f: f32;
+    var phi_0_: f32;
+    var rec_0_phi_ho: f32;
+    var phi_1_: f32;
+    var rec_1_phi_ho: f32;
+    var phi_2_: f32;
+
+    let _e6 = constants.stride_x;
+    let owner = ((global_id.y * _e6) + global_id.x);
+    let _e12 = grid.nx;
+    let _e15 = grid.ny;
+    if (owner >= (_e12 * _e15)) {
+        return;
+    }
+    let _e20 = grid.nx;
+    let gi = (owner % _e20);
+    let _e24 = grid.nx;
+    let gj = (owner / _e24);
+    let _e31 = grid.dx;
+    let _e38 = grid.dy;
+    let center = Vector2_(((f32(gi) + 0.5f) * _e31), ((f32(gj) + 0.5f) * _e38));
+    let _e43 = grid.dx;
+    let _e46 = grid.dy;
+    let vol = (_e43 * _e46);
+    let scalar_offset = (owner * 5u);
+    let start_row_0_ = (scalar_offset * 9u);
+    let start_row_1_ = (start_row_0_ + ((5u * 3u) * 1u));
+    let start_row_2_ = (start_row_0_ + ((5u * 3u) * 2u));
+    loop {
+        let _e64 = rank;
+        if (_e64 < 5u) {
+        } else {
+            break;
+        }
+        {
+        }
+        continuing {
+            let _e67 = rank;
+            rank = (_e67 + 1u);
+        }
+    }
+    let _e71 = constants.dtau;
+    let dtau_safe = max(_e71, 0.000000000001f);
+    let _e76 = constants.dtau;
+    let global_dual_time_scale = (vol / max(_e76, 0.000000000001f));
+    let _e82 = grid.dx;
+    let _e85 = grid.dy;
+    let perimeter_sum = (2f * (_e82 + _e85));
+    let face_metric_scale = max(1f, ((perimeter_sum * perimeter_sum) / max((16f * vol), 0.000000000001f)));
+    let dual_time_scale = (global_dual_time_scale * face_metric_scale);
+    let _e100 = constants.density;
+    let _e104 = constants.dt;
+    let _e113 = state_old[((owner * 9u) + 0u)];
+    let _e115 = rhs_0_;
+    rhs_0_ = (_e115 + (((vol * _e100) / _e104) * _e113));
+    let _e119 = constants.time_scheme;
+    if (_e119 == 1u) {
+        let _e124 = constants.dt;
+        let _e127 = constants.dt_old;
+        let r = (_e124 / _e127);
+        let _e131 = constants.density;
+        let _e135 = constants.dt;
+        let diag_bdf2_ = ((((vol * _e131) / _e135) * ((r * 2f) + 1f)) / (r + 1f));
+        let factor_n = (r + 1f);
+        let factor_nm1_ = ((r * r) / (r + 1f));
+        let _e151 = rhs_0_;
+        let _e154 = constants.density;
+        let _e158 = constants.dt;
+        let _e166 = state_old[((owner * 9u) + 0u)];
+        let _e171 = constants.density;
+        let _e175 = constants.dt;
+        let _e183 = state_old[((owner * 9u) + 0u)];
+        let _e191 = state_old_old[((owner * 9u) + 0u)];
+        rhs_0_ = ((_e151 - (((vol * _e154) / _e158) * _e166)) + (((vol * _e171) / _e175) * ((factor_n * _e183) - (factor_nm1_ * _e191))));
+    }
+    let _e198 = constants.dtau;
+    if (_e198 > 0f) {
+        let _e203 = constants.density;
+        let _e211 = state_iter[((owner * 9u) + 0u)];
+        let _e213 = rhs_0_;
+        rhs_0_ = (_e213 + ((_e203 * dual_time_scale) * _e211));
+    }
+    let _e217 = constants.density;
+    let _e221 = constants.dt;
+    let _e230 = state_old[((owner * 9u) + 1u)];
+    let _e232 = rhs_1_;
+    rhs_1_ = (_e232 + (((vol * _e217) / _e221) * _e230));
+    let _e236 = constants.time_scheme;
+    if (_e236 == 1u) {
+        let _e241 = constants.dt;
+        let _e244 = constants.dt_old;
+        let r_1 = (_e241 / _e244);
+        let _e248 = constants.density;
+        let _e252 = constants.dt;
+        let diag_bdf2_1 = ((((vol * _e248) / _e252) * ((r_1 * 2f) + 1f)) / (r_1 + 1f));
+        let factor_n_1 = (r_1 + 1f);
+        let factor_nm1_1 = ((r_1 * r_1) / (r_1 + 1f));
+        let _e268 = rhs_1_;
+        let _e271 = constants.density;
+        let _e275 = constants.dt;
+        let _e283 = state_old[((owner * 9u) + 1u)];
+        let _e288 = constants.density;
+        let _e292 = constants.dt;
+        let _e300 = state_old[((owner * 9u) + 1u)];
+        let _e308 = state_old_old[((owner * 9u) + 1u)];
+        rhs_1_ = ((_e268 - (((vol * _e271) / _e275) * _e283)) + (((vol * _e288) / _e292) * ((factor_n_1 * _e300) - (factor_nm1_1 * _e308))));
+    }
+    let _e315 = constants.dtau;
+    if (_e315 > 0f) {
+        let _e320 = constants.density;
+        let _e328 = state_iter[((owner * 9u) + 1u)];
+        let _e330 = rhs_1_;
+        rhs_1_ = (_e330 + ((_e320 * dual_time_scale) * _e328));
+    }
+    loop {
+        let _e333 = k;
+        if (_e333 < 4u) {
+        } else {
+            break;
+        }
+        {
+            let _e336 = k;
+            let _e339 = k;
+            let axis_is_x = ((_e336 >= 1u) && (_e339 <= 2u));
+            let _e343 = k;
+            let sign_f = select(-1f, 1f, (_e343 >= 2u));
+            let normal = Vector2_(select(0f, sign_f, axis_is_x), select(sign_f, 0f, axis_is_x));
+            let _e356 = grid.dx;
+            let _e359 = grid.dy;
+            let area = select(_e356, _e359, axis_is_x);
+            let _e363 = grid.dy;
+            let _e366 = grid.dx;
+            let spacing = select(_e363, _e366, axis_is_x);
+            let half = (0.5f * spacing);
+            let coord = select(gj, gi, axis_is_x);
+            let _e373 = grid.ny;
+            let _e376 = grid.nx;
+            let ext = select(_e373, _e376, axis_is_x);
+            let _e383 = k;
+            let is_boundary = select((coord == (ext - 1u)), (coord == 0u), (_e383 < 2u));
+            let _e389 = grid.nx;
+            let off_u = select(_e389, 1u, axis_is_x);
+            let _e394 = k;
+            let neighbor = select((owner - off_u), (owner + off_u), (_e394 >= 2u));
+            let other_idx = select(neighbor, owner, is_boundary);
+            let f_center = Vector2_((center.x + (half * normal.x)), (center.y + (half * normal.y)));
+            let mult = select(spacing, half, is_boundary);
+            let other_center = Vector2_((center.x + (mult * normal.x)), (center.y + (mult * normal.y)));
+            let _e420 = k;
+            let face_idx = ((owner * 4u) + _e420);
+            let dx = (other_center.x - center.x);
+            let dy = (other_center.y - center.y);
+            let dist_proj = abs(((dx * normal.x) + (dy * normal.y)));
+            let dist_euc = sqrt(((dx * dx) + (dy * dy)));
+            dist = max(dist_euc, 0.000001f);
+            if (dist_proj > 0.000001f) {
+                dist = dist_proj;
+            }
+            let lam_f_center_v = vec2<f32>(f_center.x, f_center.y);
+            let lam_d_own = distance(vec2<f32>(center.x, center.y), lam_f_center_v);
+            let lam_d_neigh = distance(vec2<f32>(other_center.x, other_center.y), lam_f_center_v);
+            let lam_total = (lam_d_own + lam_d_neigh);
+            lambda_f = 0.5f;
+            if (lam_total > 0.000001f) {
+                lambda_f = (lam_d_neigh / lam_total);
+            }
+            let _e460 = k;
+            let _e463 = k;
+            let _e464 = k;
+            let neighbor_rank = select((_e460 + 1u), _e463, (_e464 < 2u));
+            let _e470 = constants.viscosity;
+            let _e473 = constants.viscosity;
+            let _e474 = lambda_f;
+            let _e478 = constants.viscosity;
+            let _e479 = lambda_f;
+            let _e487 = dist;
+            let diff_coeff_U = ((select(_e470, ((_e473 * _e474) + (_e478 * (1f - _e479))), !(is_boundary)) * area) / _e487);
+            if !(is_boundary) {
+            } else {
+                if (0u == 4u) {
+                    let _e499 = state[((owner * 9u) + 0u)];
+                    let _e506 = state[((owner * 9u) + 0u)];
+                    let _e515 = state[((owner * 9u) + 1u)];
+                    let _e523 = rhs_0_;
+                    rhs_0_ = (_e523 + (diff_coeff_U * (_e499 - (((_e506 * normal.x) + (_e515 * normal.y)) * normal.x))));
+                } else {
+                    let _e531 = bc_kind[((face_idx * 3u) + 0u)];
+                    if (_e531 == 1u) {
+                        let _e540 = bc_value[((face_idx * 3u) + 0u)];
+                        let _e542 = rhs_0_;
+                        rhs_0_ = (_e542 + (diff_coeff_U * _e540));
+                    } else {
+                        let _e550 = bc_kind[((face_idx * 3u) + 0u)];
+                        if (_e550 == 2u) {
+                            let _e555 = constants.viscosity;
+                            let _e558 = constants.viscosity;
+                            let _e559 = lambda_f;
+                            let _e563 = constants.viscosity;
+                            let _e564 = lambda_f;
+                            let _e578 = bc_value[((face_idx * 3u) + 0u)];
+                            let _e580 = rhs_0_;
+                            rhs_0_ = (_e580 + ((select(_e555, ((_e558 * _e559) + (_e563 * (1f - _e564))), !(is_boundary)) * area) * _e578));
+                        }
+                    }
+                }
+            }
+            if !(is_boundary) {
+            } else {
+                if (0u == 4u) {
+                    let _e591 = state[((owner * 9u) + 1u)];
+                    let _e598 = state[((owner * 9u) + 0u)];
+                    let _e607 = state[((owner * 9u) + 1u)];
+                    let _e615 = rhs_1_;
+                    rhs_1_ = (_e615 + (diff_coeff_U * (_e591 - (((_e598 * normal.x) + (_e607 * normal.y)) * normal.y))));
+                } else {
+                    let _e623 = bc_kind[((face_idx * 3u) + 1u)];
+                    if (_e623 == 1u) {
+                        let _e632 = bc_value[((face_idx * 3u) + 1u)];
+                        let _e634 = rhs_1_;
+                        rhs_1_ = (_e634 + (diff_coeff_U * _e632));
+                    } else {
+                        let _e642 = bc_kind[((face_idx * 3u) + 1u)];
+                        if (_e642 == 2u) {
+                            let _e647 = constants.viscosity;
+                            let _e650 = constants.viscosity;
+                            let _e651 = lambda_f;
+                            let _e655 = constants.viscosity;
+                            let _e656 = lambda_f;
+                            let _e670 = bc_value[((face_idx * 3u) + 1u)];
+                            let _e672 = rhs_1_;
+                            rhs_1_ = (_e672 + ((select(_e647, ((_e650 * _e651) + (_e655 * (1f - _e656))), !(is_boundary)) * area) * _e670));
+                        }
+                    }
+                }
+            }
+            let _e680 = state[((other_idx * 9u) + 0u)];
+            let _e687 = state[((owner * 9u) + 0u)];
+            let _e702 = state[((other_idx * 9u) + 0u)];
+            let _e709 = state[((owner * 9u) + 0u)];
+            let dev2_U_U_gx = vec2<f32>((((_e680 - _e687) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e702 - _e709) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f)));
+            let _e725 = state[((other_idx * 9u) + 1u)];
+            let _e732 = state[((owner * 9u) + 1u)];
+            let _e747 = state[((other_idx * 9u) + 1u)];
+            let _e754 = state[((owner * 9u) + 1u)];
+            let dev2_U_U_gy = vec2<f32>((((_e725 - _e732) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e747 - _e754) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f)));
+            let dev2_U_U_div = (dev2_U_U_gx.x + dev2_U_U_gy.y);
+            let _e769 = constants.viscosity;
+            let _e772 = constants.viscosity;
+            let _e773 = lambda_f;
+            let _e777 = constants.viscosity;
+            let _e778 = lambda_f;
+            let dev2_U_U_mu = select(_e769, ((_e772 * _e773) + (_e777 * (1f - _e778))), !(is_boundary));
+            let _e799 = rhs_0_;
+            rhs_0_ = (_e799 + ((dev2_U_U_mu * area) * (((normal.x * dev2_U_U_gx.x) + (normal.y * dev2_U_U_gy.x)) - ((0.6666667f * dev2_U_U_div) * normal.x))));
+            let _e815 = rhs_1_;
+            rhs_1_ = (_e815 + ((dev2_U_U_mu * area) * (((normal.x * dev2_U_U_gx.y) + (normal.y * dev2_U_U_gy.y)) - ((0.6666667f * dev2_U_U_div) * normal.y))));
+            let _e823 = fluxes[((face_idx * 3u) + 0u)];
+            phi_0_ = _e823;
+            if (owner != owner) {
+                let _e826 = phi_0_;
+                let _e829 = phi_0_;
+                phi_0_ = (_e829 - (_e826 * 2f));
+            }
+            let _e832 = phi_0_;
+            let _e833 = bounded_sum_phi_0_;
+            bounded_sum_phi_0_ = (_e833 + _e832);
+            if !(is_boundary) {
+                let _e842 = state[((owner * 9u) + 0u)];
+                let _e849 = state[((other_idx * 9u) + 0u)];
+                let _e850 = phi_0_;
+                rec_0_phi_ho = select(_e842, _e849, (_e850 < 0f));
+                let _e857 = constants.scheme;
+                if (_e857 == 1u) {
+                    let _e866 = state[((other_idx * 9u) + 0u)];
+                    let _e873 = state[((other_idx * 9u) + 0u)];
+                    let _e880 = state[((owner * 9u) + 0u)];
+                    let _e895 = state[((other_idx * 9u) + 0u)];
+                    let _e902 = state[((owner * 9u) + 0u)];
+                    let _e927 = state[((owner * 9u) + 0u)];
+                    let _e934 = state[((other_idx * 9u) + 0u)];
+                    let _e941 = state[((owner * 9u) + 0u)];
+                    let _e956 = state[((other_idx * 9u) + 0u)];
+                    let _e963 = state[((owner * 9u) + 0u)];
+                    let _e982 = phi_0_;
+                    rec_0_phi_ho = select((_e866 + dot(vec2<f32>((((_e873 - _e880) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e895 - _e902) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))), (_e927 + dot(vec2<f32>((((_e934 - _e941) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e956 - _e963) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e982 > 0f));
+                } else {
+                    let _e988 = constants.scheme;
+                    if (_e988 == 2u) {
+                        let _e997 = state[((other_idx * 9u) + 0u)];
+                        let _e1004 = state[((other_idx * 9u) + 0u)];
+                        let _e1014 = state[((owner * 9u) + 0u)];
+                        let _e1024 = state[((other_idx * 9u) + 0u)];
+                        let _e1031 = state[((owner * 9u) + 0u)];
+                        let _e1046 = state[((other_idx * 9u) + 0u)];
+                        let _e1053 = state[((owner * 9u) + 0u)];
+                        let _e1080 = state[((other_idx * 9u) + 0u)];
+                        let _e1088 = state[((owner * 9u) + 0u)];
+                        let _e1095 = state[((owner * 9u) + 0u)];
+                        let _e1105 = state[((other_idx * 9u) + 0u)];
+                        let _e1115 = state[((other_idx * 9u) + 0u)];
+                        let _e1122 = state[((owner * 9u) + 0u)];
+                        let _e1137 = state[((other_idx * 9u) + 0u)];
+                        let _e1144 = state[((owner * 9u) + 0u)];
+                        let _e1171 = state[((owner * 9u) + 0u)];
+                        let _e1173 = phi_0_;
+                        rec_0_phi_ho = select(((((_e997 + (_e1004 * 0.625f)) + (_e1014 * 0.375f)) + (dot(vec2<f32>((((_e1024 - _e1031) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1046 - _e1053) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e1080), ((((_e1088 + (_e1095 * 0.625f)) + (_e1105 * 0.375f)) + (dot(vec2<f32>((((_e1115 - _e1122) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1137 - _e1144) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e1171), (_e1173 > 0f));
+                    } else {
+                        let _e1179 = constants.scheme;
+                        if (_e1179 == 3u) {
+                            let _e1188 = state[((other_idx * 9u) + 0u)];
+                            let _e1195 = state[((other_idx * 9u) + 0u)];
+                            let _e1202 = state[((owner * 9u) + 0u)];
+                            let _e1217 = state[((other_idx * 9u) + 0u)];
+                            let _e1224 = state[((owner * 9u) + 0u)];
+                            let _e1248 = state[((owner * 9u) + 0u)];
+                            let _e1255 = state[((other_idx * 9u) + 0u)];
+                            let _e1266 = state[((owner * 9u) + 0u)];
+                            let _e1273 = state[((other_idx * 9u) + 0u)];
+                            let _e1285 = state[((owner * 9u) + 0u)];
+                            let _e1292 = state[((other_idx * 9u) + 0u)];
+                            let _e1299 = state[((owner * 9u) + 0u)];
+                            let _e1314 = state[((other_idx * 9u) + 0u)];
+                            let _e1321 = state[((owner * 9u) + 0u)];
+                            let _e1345 = state[((other_idx * 9u) + 0u)];
+                            let _e1352 = state[((owner * 9u) + 0u)];
+                            let _e1363 = state[((other_idx * 9u) + 0u)];
+                            let _e1370 = state[((owner * 9u) + 0u)];
+                            let _e1376 = phi_0_;
+                            rec_0_phi_ho = select((_e1188 + min(max(dot(vec2<f32>((((_e1195 - _e1202) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1217 - _e1224) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))), min((_e1248 - _e1255), 0f)), max((_e1266 - _e1273), 0f))), (_e1285 + min(max(dot(vec2<f32>((((_e1292 - _e1299) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1314 - _e1321) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))), min((_e1345 - _e1352), 0f)), max((_e1363 - _e1370), 0f))), (_e1376 > 0f));
+                        } else {
+                            let _e1382 = constants.scheme;
+                            if (_e1382 == 4u) {
+                                let _e1391 = state[((other_idx * 9u) + 0u)];
+                                let _e1398 = state[((other_idx * 9u) + 0u)];
+                                let _e1405 = state[((owner * 9u) + 0u)];
+                                let _e1420 = state[((other_idx * 9u) + 0u)];
+                                let _e1427 = state[((owner * 9u) + 0u)];
+                                let _e1451 = state[((owner * 9u) + 0u)];
+                                let _e1458 = state[((other_idx * 9u) + 0u)];
+                                let _e1468 = state[((owner * 9u) + 0u)];
+                                let _e1475 = state[((other_idx * 9u) + 0u)];
+                                let _e1484 = state[((other_idx * 9u) + 0u)];
+                                let _e1491 = state[((owner * 9u) + 0u)];
+                                let _e1506 = state[((other_idx * 9u) + 0u)];
+                                let _e1513 = state[((owner * 9u) + 0u)];
+                                let _e1542 = state[((owner * 9u) + 0u)];
+                                let _e1549 = state[((other_idx * 9u) + 0u)];
+                                let _e1557 = state[((other_idx * 9u) + 0u)];
+                                let _e1564 = state[((owner * 9u) + 0u)];
+                                let _e1579 = state[((other_idx * 9u) + 0u)];
+                                let _e1586 = state[((owner * 9u) + 0u)];
+                                let _e1614 = state[((owner * 9u) + 0u)];
+                                let _e1621 = state[((other_idx * 9u) + 0u)];
+                                let _e1629 = state[((other_idx * 9u) + 0u)];
+                                let _e1636 = state[((owner * 9u) + 0u)];
+                                let _e1651 = state[((other_idx * 9u) + 0u)];
+                                let _e1658 = state[((owner * 9u) + 0u)];
+                                let _e1688 = state[((owner * 9u) + 0u)];
+                                let _e1695 = state[((other_idx * 9u) + 0u)];
+                                let _e1702 = state[((owner * 9u) + 0u)];
+                                let _e1717 = state[((other_idx * 9u) + 0u)];
+                                let _e1724 = state[((owner * 9u) + 0u)];
+                                let _e1748 = state[((other_idx * 9u) + 0u)];
+                                let _e1755 = state[((owner * 9u) + 0u)];
+                                let _e1765 = state[((other_idx * 9u) + 0u)];
+                                let _e1772 = state[((owner * 9u) + 0u)];
+                                let _e1781 = state[((other_idx * 9u) + 0u)];
+                                let _e1788 = state[((owner * 9u) + 0u)];
+                                let _e1803 = state[((other_idx * 9u) + 0u)];
+                                let _e1810 = state[((owner * 9u) + 0u)];
+                                let _e1839 = state[((other_idx * 9u) + 0u)];
+                                let _e1846 = state[((owner * 9u) + 0u)];
+                                let _e1854 = state[((other_idx * 9u) + 0u)];
+                                let _e1861 = state[((owner * 9u) + 0u)];
+                                let _e1876 = state[((other_idx * 9u) + 0u)];
+                                let _e1883 = state[((owner * 9u) + 0u)];
+                                let _e1911 = state[((other_idx * 9u) + 0u)];
+                                let _e1918 = state[((owner * 9u) + 0u)];
+                                let _e1926 = state[((other_idx * 9u) + 0u)];
+                                let _e1933 = state[((owner * 9u) + 0u)];
+                                let _e1948 = state[((other_idx * 9u) + 0u)];
+                                let _e1955 = state[((owner * 9u) + 0u)];
+                                let _e1979 = phi_0_;
+                                rec_0_phi_ho = select((_e1391 + ((((dot(vec2<f32>((((_e1398 - _e1405) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1420 - _e1427) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))) * abs((_e1451 - _e1458))) / max(abs((_e1468 - _e1475)), (abs(dot(vec2<f32>((((_e1484 - _e1491) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1506 - _e1513) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))) + 0.00000001f))) * max(((_e1542 - _e1549) * dot(vec2<f32>((((_e1557 - _e1564) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1579 - _e1586) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))), 0f)) / max(abs(((_e1614 - _e1621) * dot(vec2<f32>((((_e1629 - _e1636) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1651 - _e1658) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))))), 0.00000001f))), (_e1688 + ((((dot(vec2<f32>((((_e1695 - _e1702) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1717 - _e1724) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))) * abs((_e1748 - _e1755))) / max(abs((_e1765 - _e1772)), (abs(dot(vec2<f32>((((_e1781 - _e1788) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1803 - _e1810) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))) + 0.00000001f))) * max(((_e1839 - _e1846) * dot(vec2<f32>((((_e1854 - _e1861) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1876 - _e1883) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), 0f)) / max(abs(((_e1911 - _e1918) * dot(vec2<f32>((((_e1926 - _e1933) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e1948 - _e1955) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))))), 0.00000001f))), (_e1979 > 0f));
+                            } else {
+                                let _e1985 = constants.scheme;
+                                if (_e1985 == 5u) {
+                                    let _e1994 = state[((other_idx * 9u) + 0u)];
+                                    let _e2001 = state[((other_idx * 9u) + 0u)];
+                                    let _e2010 = state[((owner * 9u) + 0u)];
+                                    let _e2020 = state[((other_idx * 9u) + 0u)];
+                                    let _e2027 = state[((owner * 9u) + 0u)];
+                                    let _e2042 = state[((other_idx * 9u) + 0u)];
+                                    let _e2049 = state[((owner * 9u) + 0u)];
+                                    let _e2076 = state[((other_idx * 9u) + 0u)];
+                                    let _e2084 = state[((owner * 9u) + 0u)];
+                                    let _e2091 = state[((other_idx * 9u) + 0u)];
+                                    let _e2102 = state[((owner * 9u) + 0u)];
+                                    let _e2109 = state[((other_idx * 9u) + 0u)];
+                                    let _e2121 = state[((owner * 9u) + 0u)];
+                                    let _e2128 = state[((owner * 9u) + 0u)];
+                                    let _e2137 = state[((other_idx * 9u) + 0u)];
+                                    let _e2147 = state[((other_idx * 9u) + 0u)];
+                                    let _e2154 = state[((owner * 9u) + 0u)];
+                                    let _e2169 = state[((other_idx * 9u) + 0u)];
+                                    let _e2176 = state[((owner * 9u) + 0u)];
+                                    let _e2203 = state[((owner * 9u) + 0u)];
+                                    let _e2211 = state[((other_idx * 9u) + 0u)];
+                                    let _e2218 = state[((owner * 9u) + 0u)];
+                                    let _e2229 = state[((other_idx * 9u) + 0u)];
+                                    let _e2236 = state[((owner * 9u) + 0u)];
+                                    let _e2242 = phi_0_;
+                                    rec_0_phi_ho = select((_e1994 + min(max(((((_e2001 * 0.625f) + (_e2010 * 0.375f)) + (dot(vec2<f32>((((_e2020 - _e2027) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2042 - _e2049) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2076), min((_e2084 - _e2091), 0f)), max((_e2102 - _e2109), 0f))), (_e2121 + min(max(((((_e2128 * 0.625f) + (_e2137 * 0.375f)) + (dot(vec2<f32>((((_e2147 - _e2154) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2169 - _e2176) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2203), min((_e2211 - _e2218), 0f)), max((_e2229 - _e2236), 0f))), (_e2242 > 0f));
+                                } else {
+                                    let _e2248 = constants.scheme;
+                                    if (_e2248 == 6u) {
+                                        let _e2257 = state[((other_idx * 9u) + 0u)];
+                                        let _e2264 = state[((other_idx * 9u) + 0u)];
+                                        let _e2273 = state[((owner * 9u) + 0u)];
+                                        let _e2283 = state[((other_idx * 9u) + 0u)];
+                                        let _e2290 = state[((owner * 9u) + 0u)];
+                                        let _e2305 = state[((other_idx * 9u) + 0u)];
+                                        let _e2312 = state[((owner * 9u) + 0u)];
+                                        let _e2339 = state[((other_idx * 9u) + 0u)];
+                                        let _e2347 = state[((owner * 9u) + 0u)];
+                                        let _e2354 = state[((other_idx * 9u) + 0u)];
+                                        let _e2364 = state[((owner * 9u) + 0u)];
+                                        let _e2371 = state[((other_idx * 9u) + 0u)];
+                                        let _e2380 = state[((other_idx * 9u) + 0u)];
+                                        let _e2389 = state[((owner * 9u) + 0u)];
+                                        let _e2399 = state[((other_idx * 9u) + 0u)];
+                                        let _e2406 = state[((owner * 9u) + 0u)];
+                                        let _e2421 = state[((other_idx * 9u) + 0u)];
+                                        let _e2428 = state[((owner * 9u) + 0u)];
+                                        let _e2455 = state[((other_idx * 9u) + 0u)];
+                                        let _e2468 = state[((owner * 9u) + 0u)];
+                                        let _e2475 = state[((other_idx * 9u) + 0u)];
+                                        let _e2483 = state[((other_idx * 9u) + 0u)];
+                                        let _e2492 = state[((owner * 9u) + 0u)];
+                                        let _e2502 = state[((other_idx * 9u) + 0u)];
+                                        let _e2509 = state[((owner * 9u) + 0u)];
+                                        let _e2524 = state[((other_idx * 9u) + 0u)];
+                                        let _e2531 = state[((owner * 9u) + 0u)];
+                                        let _e2558 = state[((other_idx * 9u) + 0u)];
+                                        let _e2570 = state[((owner * 9u) + 0u)];
+                                        let _e2577 = state[((other_idx * 9u) + 0u)];
+                                        let _e2585 = state[((other_idx * 9u) + 0u)];
+                                        let _e2594 = state[((owner * 9u) + 0u)];
+                                        let _e2604 = state[((other_idx * 9u) + 0u)];
+                                        let _e2611 = state[((owner * 9u) + 0u)];
+                                        let _e2626 = state[((other_idx * 9u) + 0u)];
+                                        let _e2633 = state[((owner * 9u) + 0u)];
+                                        let _e2660 = state[((other_idx * 9u) + 0u)];
+                                        let _e2674 = state[((owner * 9u) + 0u)];
+                                        let _e2681 = state[((owner * 9u) + 0u)];
+                                        let _e2690 = state[((other_idx * 9u) + 0u)];
+                                        let _e2700 = state[((other_idx * 9u) + 0u)];
+                                        let _e2707 = state[((owner * 9u) + 0u)];
+                                        let _e2722 = state[((other_idx * 9u) + 0u)];
+                                        let _e2729 = state[((owner * 9u) + 0u)];
+                                        let _e2756 = state[((owner * 9u) + 0u)];
+                                        let _e2764 = state[((other_idx * 9u) + 0u)];
+                                        let _e2771 = state[((owner * 9u) + 0u)];
+                                        let _e2781 = state[((other_idx * 9u) + 0u)];
+                                        let _e2788 = state[((owner * 9u) + 0u)];
+                                        let _e2797 = state[((owner * 9u) + 0u)];
+                                        let _e2806 = state[((other_idx * 9u) + 0u)];
+                                        let _e2816 = state[((other_idx * 9u) + 0u)];
+                                        let _e2823 = state[((owner * 9u) + 0u)];
+                                        let _e2838 = state[((other_idx * 9u) + 0u)];
+                                        let _e2845 = state[((owner * 9u) + 0u)];
+                                        let _e2872 = state[((owner * 9u) + 0u)];
+                                        let _e2885 = state[((other_idx * 9u) + 0u)];
+                                        let _e2892 = state[((owner * 9u) + 0u)];
+                                        let _e2900 = state[((owner * 9u) + 0u)];
+                                        let _e2909 = state[((other_idx * 9u) + 0u)];
+                                        let _e2919 = state[((other_idx * 9u) + 0u)];
+                                        let _e2926 = state[((owner * 9u) + 0u)];
+                                        let _e2941 = state[((other_idx * 9u) + 0u)];
+                                        let _e2948 = state[((owner * 9u) + 0u)];
+                                        let _e2975 = state[((owner * 9u) + 0u)];
+                                        let _e2987 = state[((other_idx * 9u) + 0u)];
+                                        let _e2994 = state[((owner * 9u) + 0u)];
+                                        let _e3002 = state[((owner * 9u) + 0u)];
+                                        let _e3011 = state[((other_idx * 9u) + 0u)];
+                                        let _e3021 = state[((other_idx * 9u) + 0u)];
+                                        let _e3028 = state[((owner * 9u) + 0u)];
+                                        let _e3043 = state[((other_idx * 9u) + 0u)];
+                                        let _e3050 = state[((owner * 9u) + 0u)];
+                                        let _e3077 = state[((owner * 9u) + 0u)];
+                                        let _e3085 = phi_0_;
+                                        rec_0_phi_ho = select((_e2257 + ((((((((_e2264 * 0.625f) + (_e2273 * 0.375f)) + (dot(vec2<f32>((((_e2283 - _e2290) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2305 - _e2312) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2339) * abs((_e2347 - _e2354))) / max(abs((_e2364 - _e2371)), (abs(((((_e2380 * 0.625f) + (_e2389 * 0.375f)) + (dot(vec2<f32>((((_e2399 - _e2406) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2421 - _e2428) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2455)) + 0.00000001f))) * max(((_e2468 - _e2475) * ((((_e2483 * 0.625f) + (_e2492 * 0.375f)) + (dot(vec2<f32>((((_e2502 - _e2509) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2524 - _e2531) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2558)), 0f)) / max(abs(((_e2570 - _e2577) * ((((_e2585 * 0.625f) + (_e2594 * 0.375f)) + (dot(vec2<f32>((((_e2604 - _e2611) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2626 - _e2633) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e2660))), 0.00000001f))), (_e2674 + ((((((((_e2681 * 0.625f) + (_e2690 * 0.375f)) + (dot(vec2<f32>((((_e2700 - _e2707) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2722 - _e2729) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2756) * abs((_e2764 - _e2771))) / max(abs((_e2781 - _e2788)), (abs(((((_e2797 * 0.625f) + (_e2806 * 0.375f)) + (dot(vec2<f32>((((_e2816 - _e2823) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2838 - _e2845) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2872)) + 0.00000001f))) * max(((_e2885 - _e2892) * ((((_e2900 * 0.625f) + (_e2909 * 0.375f)) + (dot(vec2<f32>((((_e2919 - _e2926) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e2941 - _e2948) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e2975)), 0f)) / max(abs(((_e2987 - _e2994) * ((((_e3002 * 0.625f) + (_e3011 * 0.375f)) + (dot(vec2<f32>((((_e3021 - _e3028) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3043 - _e3050) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e3077))), 0.00000001f))), (_e3085 > 0f));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let _e3089 = phi_0_;
+                let _e3090 = rec_0_phi_ho;
+                let _e3097 = state[((owner * 9u) + 0u)];
+                let _e3104 = state[((other_idx * 9u) + 0u)];
+                let _e3105 = phi_0_;
+                let _e3111 = rhs_0_;
+                rhs_0_ = (_e3111 - (_e3089 * (_e3090 - select(_e3097, _e3104, (_e3105 < 0f)))));
+            } else {
+                let _e3119 = bc_kind[((face_idx * 3u) + 0u)];
+                if (_e3119 == 1u) {
+                    let _e3122 = phi_0_;
+                    let _e3131 = bc_value[((face_idx * 3u) + 0u)];
+                    let _e3133 = rhs_0_;
+                    rhs_0_ = (_e3133 - (min(_e3122, 0f) * _e3131));
+                }
+            }
+            let _e3141 = fluxes[((face_idx * 3u) + 1u)];
+            phi_1_ = _e3141;
+            if (owner != owner) {
+                let _e3144 = phi_1_;
+                let _e3147 = phi_1_;
+                phi_1_ = (_e3147 - (_e3144 * 2f));
+            }
+            let _e3150 = phi_1_;
+            let _e3151 = bounded_sum_phi_1_;
+            bounded_sum_phi_1_ = (_e3151 + _e3150);
+            if !(is_boundary) {
+                let _e3160 = state[((owner * 9u) + 1u)];
+                let _e3167 = state[((other_idx * 9u) + 1u)];
+                let _e3168 = phi_1_;
+                rec_1_phi_ho = select(_e3160, _e3167, (_e3168 < 0f));
+                let _e3175 = constants.scheme;
+                if (_e3175 == 1u) {
+                    let _e3184 = state[((other_idx * 9u) + 1u)];
+                    let _e3191 = state[((other_idx * 9u) + 1u)];
+                    let _e3198 = state[((owner * 9u) + 1u)];
+                    let _e3213 = state[((other_idx * 9u) + 1u)];
+                    let _e3220 = state[((owner * 9u) + 1u)];
+                    let _e3245 = state[((owner * 9u) + 1u)];
+                    let _e3252 = state[((other_idx * 9u) + 1u)];
+                    let _e3259 = state[((owner * 9u) + 1u)];
+                    let _e3274 = state[((other_idx * 9u) + 1u)];
+                    let _e3281 = state[((owner * 9u) + 1u)];
+                    let _e3300 = phi_1_;
+                    rec_1_phi_ho = select((_e3184 + dot(vec2<f32>((((_e3191 - _e3198) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3213 - _e3220) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))), (_e3245 + dot(vec2<f32>((((_e3252 - _e3259) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3274 - _e3281) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), (_e3300 > 0f));
+                } else {
+                    let _e3306 = constants.scheme;
+                    if (_e3306 == 2u) {
+                        let _e3315 = state[((other_idx * 9u) + 1u)];
+                        let _e3322 = state[((other_idx * 9u) + 1u)];
+                        let _e3332 = state[((owner * 9u) + 1u)];
+                        let _e3342 = state[((other_idx * 9u) + 1u)];
+                        let _e3349 = state[((owner * 9u) + 1u)];
+                        let _e3364 = state[((other_idx * 9u) + 1u)];
+                        let _e3371 = state[((owner * 9u) + 1u)];
+                        let _e3398 = state[((other_idx * 9u) + 1u)];
+                        let _e3406 = state[((owner * 9u) + 1u)];
+                        let _e3413 = state[((owner * 9u) + 1u)];
+                        let _e3423 = state[((other_idx * 9u) + 1u)];
+                        let _e3433 = state[((other_idx * 9u) + 1u)];
+                        let _e3440 = state[((owner * 9u) + 1u)];
+                        let _e3455 = state[((other_idx * 9u) + 1u)];
+                        let _e3462 = state[((owner * 9u) + 1u)];
+                        let _e3489 = state[((owner * 9u) + 1u)];
+                        let _e3491 = phi_1_;
+                        rec_1_phi_ho = select(((((_e3315 + (_e3322 * 0.625f)) + (_e3332 * 0.375f)) + (dot(vec2<f32>((((_e3342 - _e3349) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3364 - _e3371) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e3398), ((((_e3406 + (_e3413 * 0.625f)) + (_e3423 * 0.375f)) + (dot(vec2<f32>((((_e3433 - _e3440) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3455 - _e3462) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e3489), (_e3491 > 0f));
+                    } else {
+                        let _e3497 = constants.scheme;
+                        if (_e3497 == 3u) {
+                            let _e3506 = state[((other_idx * 9u) + 1u)];
+                            let _e3513 = state[((other_idx * 9u) + 1u)];
+                            let _e3520 = state[((owner * 9u) + 1u)];
+                            let _e3535 = state[((other_idx * 9u) + 1u)];
+                            let _e3542 = state[((owner * 9u) + 1u)];
+                            let _e3566 = state[((owner * 9u) + 1u)];
+                            let _e3573 = state[((other_idx * 9u) + 1u)];
+                            let _e3584 = state[((owner * 9u) + 1u)];
+                            let _e3591 = state[((other_idx * 9u) + 1u)];
+                            let _e3603 = state[((owner * 9u) + 1u)];
+                            let _e3610 = state[((other_idx * 9u) + 1u)];
+                            let _e3617 = state[((owner * 9u) + 1u)];
+                            let _e3632 = state[((other_idx * 9u) + 1u)];
+                            let _e3639 = state[((owner * 9u) + 1u)];
+                            let _e3663 = state[((other_idx * 9u) + 1u)];
+                            let _e3670 = state[((owner * 9u) + 1u)];
+                            let _e3681 = state[((other_idx * 9u) + 1u)];
+                            let _e3688 = state[((owner * 9u) + 1u)];
+                            let _e3694 = phi_1_;
+                            rec_1_phi_ho = select((_e3506 + min(max(dot(vec2<f32>((((_e3513 - _e3520) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3535 - _e3542) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))), min((_e3566 - _e3573), 0f)), max((_e3584 - _e3591), 0f))), (_e3603 + min(max(dot(vec2<f32>((((_e3610 - _e3617) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3632 - _e3639) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))), min((_e3663 - _e3670), 0f)), max((_e3681 - _e3688), 0f))), (_e3694 > 0f));
+                        } else {
+                            let _e3700 = constants.scheme;
+                            if (_e3700 == 4u) {
+                                let _e3709 = state[((other_idx * 9u) + 1u)];
+                                let _e3716 = state[((other_idx * 9u) + 1u)];
+                                let _e3723 = state[((owner * 9u) + 1u)];
+                                let _e3738 = state[((other_idx * 9u) + 1u)];
+                                let _e3745 = state[((owner * 9u) + 1u)];
+                                let _e3769 = state[((owner * 9u) + 1u)];
+                                let _e3776 = state[((other_idx * 9u) + 1u)];
+                                let _e3786 = state[((owner * 9u) + 1u)];
+                                let _e3793 = state[((other_idx * 9u) + 1u)];
+                                let _e3802 = state[((other_idx * 9u) + 1u)];
+                                let _e3809 = state[((owner * 9u) + 1u)];
+                                let _e3824 = state[((other_idx * 9u) + 1u)];
+                                let _e3831 = state[((owner * 9u) + 1u)];
+                                let _e3860 = state[((owner * 9u) + 1u)];
+                                let _e3867 = state[((other_idx * 9u) + 1u)];
+                                let _e3875 = state[((other_idx * 9u) + 1u)];
+                                let _e3882 = state[((owner * 9u) + 1u)];
+                                let _e3897 = state[((other_idx * 9u) + 1u)];
+                                let _e3904 = state[((owner * 9u) + 1u)];
+                                let _e3932 = state[((owner * 9u) + 1u)];
+                                let _e3939 = state[((other_idx * 9u) + 1u)];
+                                let _e3947 = state[((other_idx * 9u) + 1u)];
+                                let _e3954 = state[((owner * 9u) + 1u)];
+                                let _e3969 = state[((other_idx * 9u) + 1u)];
+                                let _e3976 = state[((owner * 9u) + 1u)];
+                                let _e4006 = state[((owner * 9u) + 1u)];
+                                let _e4013 = state[((other_idx * 9u) + 1u)];
+                                let _e4020 = state[((owner * 9u) + 1u)];
+                                let _e4035 = state[((other_idx * 9u) + 1u)];
+                                let _e4042 = state[((owner * 9u) + 1u)];
+                                let _e4066 = state[((other_idx * 9u) + 1u)];
+                                let _e4073 = state[((owner * 9u) + 1u)];
+                                let _e4083 = state[((other_idx * 9u) + 1u)];
+                                let _e4090 = state[((owner * 9u) + 1u)];
+                                let _e4099 = state[((other_idx * 9u) + 1u)];
+                                let _e4106 = state[((owner * 9u) + 1u)];
+                                let _e4121 = state[((other_idx * 9u) + 1u)];
+                                let _e4128 = state[((owner * 9u) + 1u)];
+                                let _e4157 = state[((other_idx * 9u) + 1u)];
+                                let _e4164 = state[((owner * 9u) + 1u)];
+                                let _e4172 = state[((other_idx * 9u) + 1u)];
+                                let _e4179 = state[((owner * 9u) + 1u)];
+                                let _e4194 = state[((other_idx * 9u) + 1u)];
+                                let _e4201 = state[((owner * 9u) + 1u)];
+                                let _e4229 = state[((other_idx * 9u) + 1u)];
+                                let _e4236 = state[((owner * 9u) + 1u)];
+                                let _e4244 = state[((other_idx * 9u) + 1u)];
+                                let _e4251 = state[((owner * 9u) + 1u)];
+                                let _e4266 = state[((other_idx * 9u) + 1u)];
+                                let _e4273 = state[((owner * 9u) + 1u)];
+                                let _e4297 = phi_1_;
+                                rec_1_phi_ho = select((_e3709 + ((((dot(vec2<f32>((((_e3716 - _e3723) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3738 - _e3745) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))) * abs((_e3769 - _e3776))) / max(abs((_e3786 - _e3793)), (abs(dot(vec2<f32>((((_e3802 - _e3809) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3824 - _e3831) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))) + 0.00000001f))) * max(((_e3860 - _e3867) * dot(vec2<f32>((((_e3875 - _e3882) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3897 - _e3904) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)))), 0f)) / max(abs(((_e3932 - _e3939) * dot(vec2<f32>((((_e3947 - _e3954) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e3969 - _e3976) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))))), 0.00000001f))), (_e4006 + ((((dot(vec2<f32>((((_e4013 - _e4020) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4035 - _e4042) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))) * abs((_e4066 - _e4073))) / max(abs((_e4083 - _e4090)), (abs(dot(vec2<f32>((((_e4099 - _e4106) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4121 - _e4128) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))) + 0.00000001f))) * max(((_e4157 - _e4164) * dot(vec2<f32>((((_e4172 - _e4179) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4194 - _e4201) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)))), 0f)) / max(abs(((_e4229 - _e4236) * dot(vec2<f32>((((_e4244 - _e4251) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4266 - _e4273) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))))), 0.00000001f))), (_e4297 > 0f));
+                            } else {
+                                let _e4303 = constants.scheme;
+                                if (_e4303 == 5u) {
+                                    let _e4312 = state[((other_idx * 9u) + 1u)];
+                                    let _e4319 = state[((other_idx * 9u) + 1u)];
+                                    let _e4328 = state[((owner * 9u) + 1u)];
+                                    let _e4338 = state[((other_idx * 9u) + 1u)];
+                                    let _e4345 = state[((owner * 9u) + 1u)];
+                                    let _e4360 = state[((other_idx * 9u) + 1u)];
+                                    let _e4367 = state[((owner * 9u) + 1u)];
+                                    let _e4394 = state[((other_idx * 9u) + 1u)];
+                                    let _e4402 = state[((owner * 9u) + 1u)];
+                                    let _e4409 = state[((other_idx * 9u) + 1u)];
+                                    let _e4420 = state[((owner * 9u) + 1u)];
+                                    let _e4427 = state[((other_idx * 9u) + 1u)];
+                                    let _e4439 = state[((owner * 9u) + 1u)];
+                                    let _e4446 = state[((owner * 9u) + 1u)];
+                                    let _e4455 = state[((other_idx * 9u) + 1u)];
+                                    let _e4465 = state[((other_idx * 9u) + 1u)];
+                                    let _e4472 = state[((owner * 9u) + 1u)];
+                                    let _e4487 = state[((other_idx * 9u) + 1u)];
+                                    let _e4494 = state[((owner * 9u) + 1u)];
+                                    let _e4521 = state[((owner * 9u) + 1u)];
+                                    let _e4529 = state[((other_idx * 9u) + 1u)];
+                                    let _e4536 = state[((owner * 9u) + 1u)];
+                                    let _e4547 = state[((other_idx * 9u) + 1u)];
+                                    let _e4554 = state[((owner * 9u) + 1u)];
+                                    let _e4560 = phi_1_;
+                                    rec_1_phi_ho = select((_e4312 + min(max(((((_e4319 * 0.625f) + (_e4328 * 0.375f)) + (dot(vec2<f32>((((_e4338 - _e4345) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4360 - _e4367) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e4394), min((_e4402 - _e4409), 0f)), max((_e4420 - _e4427), 0f))), (_e4439 + min(max(((((_e4446 * 0.625f) + (_e4455 * 0.375f)) + (dot(vec2<f32>((((_e4465 - _e4472) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4487 - _e4494) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e4521), min((_e4529 - _e4536), 0f)), max((_e4547 - _e4554), 0f))), (_e4560 > 0f));
+                                } else {
+                                    let _e4566 = constants.scheme;
+                                    if (_e4566 == 6u) {
+                                        let _e4575 = state[((other_idx * 9u) + 1u)];
+                                        let _e4582 = state[((other_idx * 9u) + 1u)];
+                                        let _e4591 = state[((owner * 9u) + 1u)];
+                                        let _e4601 = state[((other_idx * 9u) + 1u)];
+                                        let _e4608 = state[((owner * 9u) + 1u)];
+                                        let _e4623 = state[((other_idx * 9u) + 1u)];
+                                        let _e4630 = state[((owner * 9u) + 1u)];
+                                        let _e4657 = state[((other_idx * 9u) + 1u)];
+                                        let _e4665 = state[((owner * 9u) + 1u)];
+                                        let _e4672 = state[((other_idx * 9u) + 1u)];
+                                        let _e4682 = state[((owner * 9u) + 1u)];
+                                        let _e4689 = state[((other_idx * 9u) + 1u)];
+                                        let _e4698 = state[((other_idx * 9u) + 1u)];
+                                        let _e4707 = state[((owner * 9u) + 1u)];
+                                        let _e4717 = state[((other_idx * 9u) + 1u)];
+                                        let _e4724 = state[((owner * 9u) + 1u)];
+                                        let _e4739 = state[((other_idx * 9u) + 1u)];
+                                        let _e4746 = state[((owner * 9u) + 1u)];
+                                        let _e4773 = state[((other_idx * 9u) + 1u)];
+                                        let _e4786 = state[((owner * 9u) + 1u)];
+                                        let _e4793 = state[((other_idx * 9u) + 1u)];
+                                        let _e4801 = state[((other_idx * 9u) + 1u)];
+                                        let _e4810 = state[((owner * 9u) + 1u)];
+                                        let _e4820 = state[((other_idx * 9u) + 1u)];
+                                        let _e4827 = state[((owner * 9u) + 1u)];
+                                        let _e4842 = state[((other_idx * 9u) + 1u)];
+                                        let _e4849 = state[((owner * 9u) + 1u)];
+                                        let _e4876 = state[((other_idx * 9u) + 1u)];
+                                        let _e4888 = state[((owner * 9u) + 1u)];
+                                        let _e4895 = state[((other_idx * 9u) + 1u)];
+                                        let _e4903 = state[((other_idx * 9u) + 1u)];
+                                        let _e4912 = state[((owner * 9u) + 1u)];
+                                        let _e4922 = state[((other_idx * 9u) + 1u)];
+                                        let _e4929 = state[((owner * 9u) + 1u)];
+                                        let _e4944 = state[((other_idx * 9u) + 1u)];
+                                        let _e4951 = state[((owner * 9u) + 1u)];
+                                        let _e4978 = state[((other_idx * 9u) + 1u)];
+                                        let _e4992 = state[((owner * 9u) + 1u)];
+                                        let _e4999 = state[((owner * 9u) + 1u)];
+                                        let _e5008 = state[((other_idx * 9u) + 1u)];
+                                        let _e5018 = state[((other_idx * 9u) + 1u)];
+                                        let _e5025 = state[((owner * 9u) + 1u)];
+                                        let _e5040 = state[((other_idx * 9u) + 1u)];
+                                        let _e5047 = state[((owner * 9u) + 1u)];
+                                        let _e5074 = state[((owner * 9u) + 1u)];
+                                        let _e5082 = state[((other_idx * 9u) + 1u)];
+                                        let _e5089 = state[((owner * 9u) + 1u)];
+                                        let _e5099 = state[((other_idx * 9u) + 1u)];
+                                        let _e5106 = state[((owner * 9u) + 1u)];
+                                        let _e5115 = state[((owner * 9u) + 1u)];
+                                        let _e5124 = state[((other_idx * 9u) + 1u)];
+                                        let _e5134 = state[((other_idx * 9u) + 1u)];
+                                        let _e5141 = state[((owner * 9u) + 1u)];
+                                        let _e5156 = state[((other_idx * 9u) + 1u)];
+                                        let _e5163 = state[((owner * 9u) + 1u)];
+                                        let _e5190 = state[((owner * 9u) + 1u)];
+                                        let _e5203 = state[((other_idx * 9u) + 1u)];
+                                        let _e5210 = state[((owner * 9u) + 1u)];
+                                        let _e5218 = state[((owner * 9u) + 1u)];
+                                        let _e5227 = state[((other_idx * 9u) + 1u)];
+                                        let _e5237 = state[((other_idx * 9u) + 1u)];
+                                        let _e5244 = state[((owner * 9u) + 1u)];
+                                        let _e5259 = state[((other_idx * 9u) + 1u)];
+                                        let _e5266 = state[((owner * 9u) + 1u)];
+                                        let _e5293 = state[((owner * 9u) + 1u)];
+                                        let _e5305 = state[((other_idx * 9u) + 1u)];
+                                        let _e5312 = state[((owner * 9u) + 1u)];
+                                        let _e5320 = state[((owner * 9u) + 1u)];
+                                        let _e5329 = state[((other_idx * 9u) + 1u)];
+                                        let _e5339 = state[((other_idx * 9u) + 1u)];
+                                        let _e5346 = state[((owner * 9u) + 1u)];
+                                        let _e5361 = state[((other_idx * 9u) + 1u)];
+                                        let _e5368 = state[((owner * 9u) + 1u)];
+                                        let _e5395 = state[((owner * 9u) + 1u)];
+                                        let _e5403 = phi_1_;
+                                        rec_1_phi_ho = select((_e4575 + ((((((((_e4582 * 0.625f) + (_e4591 * 0.375f)) + (dot(vec2<f32>((((_e4601 - _e4608) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4623 - _e4630) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e4657) * abs((_e4665 - _e4672))) / max(abs((_e4682 - _e4689)), (abs(((((_e4698 * 0.625f) + (_e4707 * 0.375f)) + (dot(vec2<f32>((((_e4717 - _e4724) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4739 - _e4746) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e4773)) + 0.00000001f))) * max(((_e4786 - _e4793) * ((((_e4801 * 0.625f) + (_e4810 * 0.375f)) + (dot(vec2<f32>((((_e4820 - _e4827) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4842 - _e4849) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e4876)), 0f)) / max(abs(((_e4888 - _e4895) * ((((_e4903 * 0.625f) + (_e4912 * 0.375f)) + (dot(vec2<f32>((((_e4922 - _e4929) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e4944 - _e4951) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y))) * 0.125f)) - _e4978))), 0.00000001f))), (_e4992 + ((((((((_e4999 * 0.625f) + (_e5008 * 0.375f)) + (dot(vec2<f32>((((_e5018 - _e5025) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e5040 - _e5047) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e5074) * abs((_e5082 - _e5089))) / max(abs((_e5099 - _e5106)), (abs(((((_e5115 * 0.625f) + (_e5124 * 0.375f)) + (dot(vec2<f32>((((_e5134 - _e5141) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e5156 - _e5163) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e5190)) + 0.00000001f))) * max(((_e5203 - _e5210) * ((((_e5218 * 0.625f) + (_e5227 * 0.375f)) + (dot(vec2<f32>((((_e5237 - _e5244) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e5259 - _e5266) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e5293)), 0f)) / max(abs(((_e5305 - _e5312) * ((((_e5320 * 0.625f) + (_e5329 * 0.375f)) + (dot(vec2<f32>((((_e5339 - _e5346) * dx) / max(((dx * dx) + (dy * dy)), 0.000000000001f)), (((_e5361 - _e5368) * dy) / max(((dx * dx) + (dy * dy)), 0.000000000001f))), (vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y))) * 0.125f)) - _e5395))), 0.00000001f))), (_e5403 > 0f));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                let _e5407 = phi_1_;
+                let _e5408 = rec_1_phi_ho;
+                let _e5415 = state[((owner * 9u) + 1u)];
+                let _e5422 = state[((other_idx * 9u) + 1u)];
+                let _e5423 = phi_1_;
+                let _e5429 = rhs_1_;
+                rhs_1_ = (_e5429 - (_e5407 * (_e5408 - select(_e5415, _e5422, (_e5423 < 0f)))));
+            } else {
+                let _e5437 = bc_kind[((face_idx * 3u) + 1u)];
+                if (_e5437 == 1u) {
+                    let _e5440 = phi_1_;
+                    let _e5449 = bc_value[((face_idx * 3u) + 1u)];
+                    let _e5451 = rhs_1_;
+                    rhs_1_ = (_e5451 - (min(_e5440, 0f) * _e5449));
+                }
+            }
+            if !(is_boundary) {
+                let _e5464 = state[((owner * 9u) + 2u)];
+                let _e5471 = state[((other_idx * 9u) + 2u)];
+                let _e5474 = rhs_0_;
+                rhs_0_ = (_e5474 - (((0.5f * area) * normal.x) * (_e5464 + _e5471)));
+            } else {
+                let _e5486 = state[((owner * 9u) + 2u)];
+                let _e5493 = bc_value[((face_idx * 3u) + 2u)];
+                let _e5500 = bc_kind[((face_idx * 3u) + 2u)];
+                let _e5510 = state[((owner * 9u) + 2u)];
+                let _e5517 = bc_value[((face_idx * 3u) + 2u)];
+                let _e5518 = dist;
+                let _e5527 = bc_kind[((face_idx * 3u) + 2u)];
+                let _e5534 = rhs_0_;
+                rhs_0_ = (_e5534 - ((((0.5f * area) * normal.x) * select(select(_e5486, _e5493, (_e5500 == 1u)), (_e5510 + (_e5517 * _e5518)), (_e5527 == 2u))) * 2f));
+            }
+            if !(is_boundary) {
+                let _e5547 = state[((owner * 9u) + 2u)];
+                let _e5554 = state[((other_idx * 9u) + 2u)];
+                let _e5557 = rhs_1_;
+                rhs_1_ = (_e5557 - (((0.5f * area) * normal.y) * (_e5547 + _e5554)));
+            } else {
+                let _e5569 = state[((owner * 9u) + 2u)];
+                let _e5576 = bc_value[((face_idx * 3u) + 2u)];
+                let _e5583 = bc_kind[((face_idx * 3u) + 2u)];
+                let _e5593 = state[((owner * 9u) + 2u)];
+                let _e5600 = bc_value[((face_idx * 3u) + 2u)];
+                let _e5601 = dist;
+                let _e5610 = bc_kind[((face_idx * 3u) + 2u)];
+                let _e5617 = rhs_1_;
+                rhs_1_ = (_e5617 - ((((0.5f * area) * normal.y) * select(select(_e5569, _e5576, (_e5583 == 1u)), (_e5593 + (_e5600 * _e5601)), (_e5610 == 2u))) * 2f));
+            }
+            let _e5621 = constants.density;
+            let _e5628 = state[((owner * 9u) + 3u)];
+            let _e5632 = constants.density;
+            let _e5639 = state[((owner * 9u) + 3u)];
+            let _e5641 = lambda_f;
+            let _e5645 = constants.density;
+            let _e5652 = state[((other_idx * 9u) + 3u)];
+            let _e5654 = lambda_f;
+            let _e5662 = dist;
+            let diff_coeff_p = ((select((_e5621 * _e5628), (((_e5632 * _e5639) * _e5641) + ((_e5645 * _e5652) * (1f - _e5654))), !(is_boundary)) * area) / _e5662);
+            if !(is_boundary) {
+            } else {
+                let _e5671 = bc_kind[((face_idx * 3u) + 2u)];
+                if (_e5671 == 1u) {
+                    let _e5681 = bc_value[((face_idx * 3u) + 2u)];
+                    let _e5683 = rhs_2_;
+                    rhs_2_ = (_e5683 + (diff_coeff_p * _e5681));
+                } else {
+                    let _e5691 = bc_kind[((face_idx * 3u) + 2u)];
+                    if (_e5691 == 2u) {
+                        let _e5696 = constants.density;
+                        let _e5703 = state[((owner * 9u) + 3u)];
+                        let _e5707 = constants.density;
+                        let _e5714 = state[((owner * 9u) + 3u)];
+                        let _e5716 = lambda_f;
+                        let _e5720 = constants.density;
+                        let _e5727 = state[((other_idx * 9u) + 3u)];
+                        let _e5729 = lambda_f;
+                        let _e5743 = bc_value[((face_idx * 3u) + 2u)];
+                        let _e5745 = rhs_2_;
+                        rhs_2_ = (_e5745 + ((select((_e5696 * _e5703), (((_e5707 * _e5714) * _e5716) + ((_e5720 * _e5727) * (1f - _e5729))), !(is_boundary)) * area) * _e5743));
+                    }
+                }
+            }
+            let _e5753 = fluxes[((face_idx * 3u) + 2u)];
+            phi_2_ = _e5753;
+            if (owner != owner) {
+                let _e5756 = phi_2_;
+                let _e5759 = phi_2_;
+                phi_2_ = (_e5759 - (_e5756 * 2f));
+            }
+            let _e5761 = phi_2_;
+            let _e5762 = rhs_2_;
+            rhs_2_ = (_e5762 - _e5761);
+        }
+        continuing {
+            let _e5765 = k;
+            k = (_e5765 + 1u);
+        }
+    }
+    let _e5773 = rhs_0_;
+    rhs[((owner * 3u) + 0u)] = _e5773;
+    let _e5780 = rhs_1_;
+    rhs[((owner * 3u) + 1u)] = _e5780;
+    let _e5787 = rhs_2_;
+    rhs[((owner * 3u) + 2u)] = _e5787;
     return;
 }
 "#;
@@ -278253,6 +285936,368 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let _e519 = state[((idx * 10u) + 2u)];
     let _e526 = state[((idx * 10u) + 2u)];
     let _e534 = state[((idx * 10u) + 2u)];
+    let _e546 = x[((idx * 3u) + 2u)];
+    let _e553 = x[((idx * 3u) + 2u)];
+    let _e561 = x[((idx * 3u) + 2u)];
+    x[((idx * 3u) + 2u)] = select(_e487, select(_e494, mix(_e501, _e508, _e511), ((_e519 == _e526) && (abs(_e534) < 340000000000000000000000000000000000000f))), ((_e546 == _e553) && (abs(_e561) < 340000000000000000000000000000000000000f)));
+    return;
+}
+"#;
+    }
+    pub mod generic_coupled_update_incompressible_momentum_structured {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+            #[doc = "offset: 48, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 52, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.state, self.constants]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledUpdateIncompressibleMomentumStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: generic_coupled_update_incompressible_momentum_structured :: Constants > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(
+                        "GeneratedGenericCoupledUpdateIncompressibleMomentumStructured::BindGroup0",
+                    ),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
+            pub x: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup1Entries<'a> {
+            pub x: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+                Self {
+                    x: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.x),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 1] {
+                [self.x]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1(wgpu::BindGroup);
+        impl WgpuBindGroup1 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedGenericCoupledUpdateIncompressibleMomentumStructured::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"x\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(
+                        "GeneratedGenericCoupledUpdateIncompressibleMomentumStructured::BindGroup1",
+                    ),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(1, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+            pub bind_group1: &'a WgpuBindGroup1,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+                self.bind_group1.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 2],
+            ) -> [wgpu::BindGroupLayout; 2] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(
+                    "GeneratedGenericCoupledUpdateIncompressibleMomentumStructured::PipelineLayout",
+                ),
+                bind_group_layouts: &[
+                    &WgpuBindGroup0::get_bind_group_layout(device),
+                    &WgpuBindGroup1::get_bind_group_layout(device),
+                ],
+                push_constant_ranges: &[],
+            })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("generic_coupled_update_incompressible_momentum_structured.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
+}
+
+@group(0) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(0) @binding(1) 
+var<uniform> constants: Constants;
+@group(1) @binding(0) 
+var<storage, read_write> x: array<f32>;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let _e4 = constants.stride_x;
+    let idx = ((global_id.y * _e4) + global_id.x);
+    if (idx >= (arrayLength((&state)) / 9u)) {
+        return;
+    }
+    let base = (idx * 9u);
+    let _e27 = state[((idx * 9u) + 0u)];
+    let _e34 = x[((idx * 3u) + 0u)];
+    let _e41 = state[((idx * 9u) + 0u)];
+    let _e48 = x[((idx * 3u) + 0u)];
+    let _e51 = constants.alpha_u;
+    let _e59 = state[((idx * 9u) + 0u)];
+    let _e66 = state[((idx * 9u) + 0u)];
+    let _e74 = state[((idx * 9u) + 0u)];
+    let _e86 = x[((idx * 3u) + 0u)];
+    let _e93 = x[((idx * 3u) + 0u)];
+    let _e101 = x[((idx * 3u) + 0u)];
+    state[((idx * 9u) + 0u)] = select(_e27, select(_e34, mix(_e41, _e48, _e51), ((_e59 == _e66) && (abs(_e74) < 340000000000000000000000000000000000000f))), ((_e86 == _e93) && (abs(_e101) < 340000000000000000000000000000000000000f)));
+    let _e119 = state[((idx * 9u) + 0u)];
+    let _e126 = x[((idx * 3u) + 0u)];
+    let _e133 = state[((idx * 9u) + 0u)];
+    let _e140 = x[((idx * 3u) + 0u)];
+    let _e143 = constants.alpha_u;
+    let _e151 = state[((idx * 9u) + 0u)];
+    let _e158 = state[((idx * 9u) + 0u)];
+    let _e166 = state[((idx * 9u) + 0u)];
+    let _e178 = x[((idx * 3u) + 0u)];
+    let _e185 = x[((idx * 3u) + 0u)];
+    let _e193 = x[((idx * 3u) + 0u)];
+    x[((idx * 3u) + 0u)] = select(_e119, select(_e126, mix(_e133, _e140, _e143), ((_e151 == _e158) && (abs(_e166) < 340000000000000000000000000000000000000f))), ((_e178 == _e185) && (abs(_e193) < 340000000000000000000000000000000000000f)));
+    let _e211 = state[((idx * 9u) + 1u)];
+    let _e218 = x[((idx * 3u) + 1u)];
+    let _e225 = state[((idx * 9u) + 1u)];
+    let _e232 = x[((idx * 3u) + 1u)];
+    let _e235 = constants.alpha_u;
+    let _e243 = state[((idx * 9u) + 1u)];
+    let _e250 = state[((idx * 9u) + 1u)];
+    let _e258 = state[((idx * 9u) + 1u)];
+    let _e270 = x[((idx * 3u) + 1u)];
+    let _e277 = x[((idx * 3u) + 1u)];
+    let _e285 = x[((idx * 3u) + 1u)];
+    state[((idx * 9u) + 1u)] = select(_e211, select(_e218, mix(_e225, _e232, _e235), ((_e243 == _e250) && (abs(_e258) < 340000000000000000000000000000000000000f))), ((_e270 == _e277) && (abs(_e285) < 340000000000000000000000000000000000000f)));
+    let _e303 = state[((idx * 9u) + 1u)];
+    let _e310 = x[((idx * 3u) + 1u)];
+    let _e317 = state[((idx * 9u) + 1u)];
+    let _e324 = x[((idx * 3u) + 1u)];
+    let _e327 = constants.alpha_u;
+    let _e335 = state[((idx * 9u) + 1u)];
+    let _e342 = state[((idx * 9u) + 1u)];
+    let _e350 = state[((idx * 9u) + 1u)];
+    let _e362 = x[((idx * 3u) + 1u)];
+    let _e369 = x[((idx * 3u) + 1u)];
+    let _e377 = x[((idx * 3u) + 1u)];
+    x[((idx * 3u) + 1u)] = select(_e303, select(_e310, mix(_e317, _e324, _e327), ((_e335 == _e342) && (abs(_e350) < 340000000000000000000000000000000000000f))), ((_e362 == _e369) && (abs(_e377) < 340000000000000000000000000000000000000f)));
+    let _e395 = state[((idx * 9u) + 2u)];
+    let _e402 = x[((idx * 3u) + 2u)];
+    let _e409 = state[((idx * 9u) + 2u)];
+    let _e416 = x[((idx * 3u) + 2u)];
+    let _e419 = constants.alpha_p;
+    let _e427 = state[((idx * 9u) + 2u)];
+    let _e434 = state[((idx * 9u) + 2u)];
+    let _e442 = state[((idx * 9u) + 2u)];
+    let _e454 = x[((idx * 3u) + 2u)];
+    let _e461 = x[((idx * 3u) + 2u)];
+    let _e469 = x[((idx * 3u) + 2u)];
+    state[((idx * 9u) + 2u)] = select(_e395, select(_e402, mix(_e409, _e416, _e419), ((_e427 == _e434) && (abs(_e442) < 340000000000000000000000000000000000000f))), ((_e454 == _e461) && (abs(_e469) < 340000000000000000000000000000000000000f)));
+    let _e487 = state[((idx * 9u) + 2u)];
+    let _e494 = x[((idx * 3u) + 2u)];
+    let _e501 = state[((idx * 9u) + 2u)];
+    let _e508 = x[((idx * 3u) + 2u)];
+    let _e511 = constants.alpha_p;
+    let _e519 = state[((idx * 9u) + 2u)];
+    let _e526 = state[((idx * 9u) + 2u)];
+    let _e534 = state[((idx * 9u) + 2u)];
     let _e546 = x[((idx * 3u) + 2u)];
     let _e553 = x[((idx * 3u) + 2u)];
     let _e561 = x[((idx * 3u) + 2u)];
@@ -299212,6 +307257,596 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 "#;
     }
+    pub mod packed_state_gradients_incompressible_momentum_structured {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Vector2 {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub x: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub y: f32,
+        }
+        impl Vector2 {
+            pub const fn new(x: f32, y: f32) -> Self {
+                Self { x, y }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+            #[doc = "offset: 48, size: 4, type: `f32`"]
+            pub eos_gamma: f32,
+            #[doc = "offset: 52, size: 4, type: `f32`"]
+            pub eos_gm1: f32,
+            #[doc = "offset: 56, size: 4, type: `f32`"]
+            pub eos_r: f32,
+            #[doc = "offset: 60, size: 4, type: `f32`"]
+            pub eos_dp_drho: f32,
+            #[doc = "offset: 64, size: 4, type: `f32`"]
+            pub eos_p_offset: f32,
+            #[doc = "offset: 68, size: 4, type: `f32`"]
+            pub eos_theta_ref: f32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+                eos_gamma: f32,
+                eos_gm1: f32,
+                eos_r: f32,
+                eos_dp_drho: f32,
+                eos_p_offset: f32,
+                eos_theta_ref: f32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                    eos_gamma,
+                    eos_gm1,
+                    eos_r,
+                    eos_dp_drho,
+                    eos_p_offset,
+                    eos_theta_ref,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub face_owner: wgpu::BufferBinding<'a>,
+            pub face_neighbor: wgpu::BufferBinding<'a>,
+            pub face_areas: wgpu::BufferBinding<'a>,
+            pub face_normals: wgpu::BufferBinding<'a>,
+            pub cell_centers: wgpu::BufferBinding<'a>,
+            pub cell_vols: wgpu::BufferBinding<'a>,
+            pub cell_face_offsets: wgpu::BufferBinding<'a>,
+            pub cell_faces: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
+            pub face_wrap_shift: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub face_owner: wgpu::BindGroupEntry<'a>,
+            pub face_neighbor: wgpu::BindGroupEntry<'a>,
+            pub face_areas: wgpu::BindGroupEntry<'a>,
+            pub face_normals: wgpu::BindGroupEntry<'a>,
+            pub cell_centers: wgpu::BindGroupEntry<'a>,
+            pub cell_vols: wgpu::BindGroupEntry<'a>,
+            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
+            pub cell_faces: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
+            pub face_wrap_shift: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    face_owner: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.face_owner),
+                    },
+                    face_neighbor: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
+                    },
+                    face_areas: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.face_areas),
+                    },
+                    face_normals: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.face_normals),
+                    },
+                    cell_centers: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
+                    },
+                    cell_vols: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
+                    },
+                    cell_face_offsets: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
+                    },
+                    cell_faces: wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
+                    },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
+                    face_wrap_shift: wgpu::BindGroupEntry {
+                        binding: 14,
+                        resource: wgpu::BindingResource::Buffer(params.face_wrap_shift),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
+                [
+                    self.face_owner,
+                    self.face_neighbor,
+                    self.face_areas,
+                    self.face_normals,
+                    self.cell_centers,
+                    self.cell_vols,
+                    self.cell_face_offsets,
+                    self.cell_faces,
+                    self.face_centers,
+                    self.face_wrap_shift,
+                ]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedPackedStateGradientsIncompressibleMomentumStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(14): \"face_wrap_shift\""] wgpu :: BindGroupLayoutEntry { binding : 14 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(
+                        "GeneratedPackedStateGradientsIncompressibleMomentumStructured::BindGroup0",
+                    ),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+            pub grad_state: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup1Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+            pub grad_state: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                    grad_state: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.grad_state),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 3] {
+                [self.state, self.constants, self.grad_state]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1(wgpu::BindGroup);
+        impl WgpuBindGroup1 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedPackedStateGradientsIncompressibleMomentumStructured::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: packed_state_gradients_incompressible_momentum_structured :: Constants > () as _) , } , count : None , } , # [doc = " @binding(4): \"grad_state\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(
+                        "GeneratedPackedStateGradientsIncompressibleMomentumStructured::BindGroup1",
+                    ),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(1, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2EntriesParams<'a> {
+            pub bc_kind: wgpu::BufferBinding<'a>,
+            pub bc_value: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup2Entries<'a> {
+            pub bc_kind: wgpu::BindGroupEntry<'a>,
+            pub bc_value: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup2Entries<'a> {
+            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
+                Self {
+                    bc_kind: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
+                    },
+                    bc_value: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.bc_value),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.bc_kind, self.bc_value]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2(wgpu::BindGroup);
+        impl WgpuBindGroup2 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedPackedStateGradientsIncompressibleMomentumStructured::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(
+                        "GeneratedPackedStateGradientsIncompressibleMomentumStructured::BindGroup2",
+                    ),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(2, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+            pub bind_group1: &'a WgpuBindGroup1,
+            pub bind_group2: &'a WgpuBindGroup2,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+                self.bind_group1.set(pass);
+                self.bind_group2.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 3],
+            ) -> [wgpu::BindGroupLayout; 3] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(
+                    "GeneratedPackedStateGradientsIncompressibleMomentumStructured::PipelineLayout",
+                ),
+                bind_group_layouts: &[
+                    &WgpuBindGroup0::get_bind_group_layout(device),
+                    &WgpuBindGroup1::get_bind_group_layout(device),
+                    &WgpuBindGroup2::get_bind_group_layout(device),
+                ],
+                push_constant_ranges: &[],
+            })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("packed_state_gradients_incompressible_momentum_structured.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Vector2_ {
+    x: f32,
+    y: f32,
+}
+
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+    eos_gamma: f32,
+    eos_gm1_: f32,
+    eos_r: f32,
+    eos_dp_drho: f32,
+    eos_p_offset: f32,
+    eos_theta_ref: f32,
+}
+
+@group(0) @binding(0) 
+var<storage> face_owner: array<u32>;
+@group(0) @binding(1) 
+var<storage> face_neighbor: array<i32>;
+@group(0) @binding(2) 
+var<storage> face_areas: array<f32>;
+@group(0) @binding(3) 
+var<storage> face_normals: array<Vector2_>;
+@group(0) @binding(4) 
+var<storage> cell_centers: array<Vector2_>;
+@group(0) @binding(5) 
+var<storage> cell_vols: array<f32>;
+@group(0) @binding(6) 
+var<storage> cell_face_offsets: array<u32>;
+@group(0) @binding(7) 
+var<storage> cell_faces: array<u32>;
+@group(0) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
+@group(0) @binding(14) 
+var<storage> face_wrap_shift: array<Vector2_>;
+@group(1) @binding(0) 
+var<storage> state: array<f32>;
+@group(1) @binding(3) 
+var<uniform> constants: Constants;
+@group(1) @binding(4) 
+var<storage, read_write> grad_state: array<Vector2_>;
+@group(2) @binding(0) 
+var<storage> bc_kind: array<u32>;
+@group(2) @binding(1) 
+var<storage> bc_value: array<f32>;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var grad_acc_0_: vec2<f32> = vec2<f32>(0f, 0f);
+    var grad_acc_1_: vec2<f32> = vec2<f32>(0f, 0f);
+    var grad_acc_2_: vec2<f32> = vec2<f32>(0f, 0f);
+    var k: u32;
+    var normal_vec: vec2<f32>;
+    var own_center_vec: vec2<f32>;
+    var other_idx: u32;
+    var other_center_vec: vec2<f32>;
+    var lambda: f32;
+
+    let _e6 = constants.stride_x;
+    let idx = ((global_id.y * _e6) + global_id.x);
+    if (idx >= arrayLength((&cell_vols))) {
+        return;
+    }
+    let cell_center = cell_centers[idx];
+    let cell_center_vec = vec2<f32>(cell_center.x, cell_center.y);
+    let vol = cell_vols[idx];
+    let start = cell_face_offsets[idx];
+    let end = cell_face_offsets[(idx + 1u)];
+    k = start;
+    loop {
+        let _e31 = k;
+        if (_e31 < end) {
+        } else {
+            break;
+        }
+        {
+            let _e34 = k;
+            let face_idx = cell_faces[_e34];
+            let owner = face_owner[face_idx];
+            let neighbor_raw = face_neighbor[face_idx];
+            let is_boundary = (neighbor_raw == -1i);
+            let area = face_areas[face_idx];
+            let face_center = face_centers[face_idx];
+            let face_center_vec = vec2<f32>(face_center.x, face_center.y);
+            let _e57 = face_normals[face_idx].x;
+            let _e61 = face_normals[face_idx].y;
+            normal_vec = vec2<f32>(_e57, _e61);
+            let _e67 = face_wrap_shift[face_idx].x;
+            let _e71 = face_wrap_shift[face_idx].y;
+            let wrap_shift = vec2<f32>(_e67, _e71);
+            own_center_vec = cell_center_vec;
+            if (owner != idx) {
+                let _e75 = own_center_vec;
+                own_center_vec = (_e75 + wrap_shift);
+            }
+            let _e77 = own_center_vec;
+            let _e79 = normal_vec;
+            if (dot((face_center_vec - _e77), _e79) < 0f) {
+                let _e83 = normal_vec;
+                normal_vec = -(_e83);
+            }
+            other_idx = idx;
+            other_center_vec = face_center_vec;
+            if (neighbor_raw != -1i) {
+                let neighbor = u32(neighbor_raw);
+                other_idx = neighbor;
+                if (owner != idx) {
+                    other_idx = owner;
+                }
+                let _e92 = other_idx;
+                let other_center = cell_centers[_e92];
+                other_center_vec = vec2<f32>(other_center.x, other_center.y);
+                if (owner == idx) {
+                    let _e99 = other_center_vec;
+                    other_center_vec = (_e99 + wrap_shift);
+                }
+            }
+            let _e101 = own_center_vec;
+            let d_own = distance(_e101, face_center_vec);
+            let _e103 = other_center_vec;
+            let d_neigh = distance(_e103, face_center_vec);
+            let total_dist = (d_own + d_neigh);
+            lambda = 0.5f;
+            if (total_dist > 0.000001f) {
+                lambda = (d_neigh / total_dist);
+            }
+            let _e111 = lambda;
+            let lambda_other = (1f - _e111);
+            let _e114 = normal_vec;
+            let _e121 = state[((idx * 9u) + 0u)];
+            let _e122 = lambda;
+            let _e124 = other_idx;
+            let _e131 = state[((_e124 * 9u) + 0u)];
+            let _e138 = state[((idx * 9u) + 0u)];
+            let _e145 = bc_value[((face_idx * 3u) + 0u)];
+            let _e152 = bc_kind[((face_idx * 3u) + 0u)];
+            let _e162 = state[((idx * 9u) + 0u)];
+            let _e169 = bc_value[((face_idx * 3u) + 0u)];
+            let _e178 = bc_kind[((face_idx * 3u) + 0u)];
+            let _e188 = grad_acc_0_;
+            grad_acc_0_ = (_e188 + ((_e114 * ((_e121 * _e122) + (select(_e131, select(select(_e138, _e145, (_e152 == 1u)), (_e162 + (_e169 * d_own)), (_e178 == 2u)), is_boundary) * lambda_other))) * area));
+            let _e190 = normal_vec;
+            let _e197 = state[((idx * 9u) + 1u)];
+            let _e198 = lambda;
+            let _e200 = other_idx;
+            let _e207 = state[((_e200 * 9u) + 1u)];
+            let _e214 = state[((idx * 9u) + 1u)];
+            let _e221 = bc_value[((face_idx * 3u) + 1u)];
+            let _e228 = bc_kind[((face_idx * 3u) + 1u)];
+            let _e238 = state[((idx * 9u) + 1u)];
+            let _e245 = bc_value[((face_idx * 3u) + 1u)];
+            let _e254 = bc_kind[((face_idx * 3u) + 1u)];
+            let _e264 = grad_acc_1_;
+            grad_acc_1_ = (_e264 + ((_e190 * ((_e197 * _e198) + (select(_e207, select(select(_e214, _e221, (_e228 == 1u)), (_e238 + (_e245 * d_own)), (_e254 == 2u)), is_boundary) * lambda_other))) * area));
+            let _e266 = normal_vec;
+            let _e273 = state[((idx * 9u) + 2u)];
+            let _e274 = lambda;
+            let _e276 = other_idx;
+            let _e283 = state[((_e276 * 9u) + 2u)];
+            let _e290 = state[((idx * 9u) + 2u)];
+            let _e297 = bc_value[((face_idx * 3u) + 2u)];
+            let _e304 = bc_kind[((face_idx * 3u) + 2u)];
+            let _e314 = state[((idx * 9u) + 2u)];
+            let _e321 = bc_value[((face_idx * 3u) + 2u)];
+            let _e330 = bc_kind[((face_idx * 3u) + 2u)];
+            let _e340 = grad_acc_2_;
+            grad_acc_2_ = (_e340 + ((_e266 * ((_e273 * _e274) + (select(_e283, select(select(_e290, _e297, (_e304 == 1u)), (_e314 + (_e321 * d_own)), (_e330 == 2u)), is_boundary) * lambda_other))) * area));
+        }
+        continuing {
+            let _e343 = k;
+            k = (_e343 + 1u);
+        }
+    }
+    let _e345 = grad_acc_0_;
+    let grad_out_0_ = ((_e345 * 1f) / vec2(max(vol, 0.000000000001f)));
+    grad_state[((idx * 9u) + 0u)].x = grad_out_0_.x;
+    grad_state[((idx * 9u) + 0u)].y = grad_out_0_.y;
+    let _e368 = grad_acc_1_;
+    let grad_out_1_ = ((_e368 * 1f) / vec2(max(vol, 0.000000000001f)));
+    grad_state[((idx * 9u) + 1u)].x = grad_out_1_.x;
+    grad_state[((idx * 9u) + 1u)].y = grad_out_1_.y;
+    let _e391 = grad_acc_2_;
+    let grad_out_2_ = ((_e391 * 1f) / vec2(max(vol, 0.000000000001f)));
+    grad_state[((idx * 9u) + 2u)].x = grad_out_2_.x;
+    grad_state[((idx * 9u) + 2u)].y = grad_out_2_.y;
+    return;
+}
+"#;
+    }
     pub mod packed_state_gradients_scalar_transport {
         use super::{_root, _root::*};
         #[repr(C, align(4))]
@@ -303290,6 +311925,213 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         return;
     }
     let base = (idx * 10u);
+    let d_p = state[(base + 3u)];
+    let grad_px = state[(base + 4u)];
+    let grad_py = state[(base + 5u)];
+    let grad_old_x = state[(base + 6u)];
+    let grad_old_y = state[(base + 7u)];
+    let corr_x = (d_p * (grad_px - grad_old_x));
+    let corr_y = (d_p * (grad_py - grad_old_y));
+    let _e52 = state[(base + 0u)];
+    state[(base + 0u)] = (_e52 - corr_x);
+    let _e62 = state[(base + 1u)];
+    state[(base + 1u)] = (_e62 - corr_y);
+    return;
+}
+"#;
+    }
+    pub mod rhie_chow_correct_velocity_delta_incompressible_momentum_structured {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.state, self.constants]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: Constants > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device . create_bind_group (& wgpu :: BindGroupDescriptor { label : Some ("GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumStructured::BindGroup0") , layout : & bind_group_layout , entries : & entries , }) ;
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 1],
+            ) -> [wgpu::BindGroupLayout; 1] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device . create_pipeline_layout (& wgpu :: PipelineLayoutDescriptor { label : Some ("GeneratedRhieChowCorrectVelocityDeltaIncompressibleMomentumStructured::PipelineLayout") , bind_group_layouts : & [& WgpuBindGroup0 :: get_bind_group_layout (device)] , push_constant_ranges : & [] , })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some(
+                    "rhie_chow_correct_velocity_delta_incompressible_momentum_structured.wgsl",
+                ),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+}
+
+@group(0) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(0) @binding(1) 
+var<uniform> constants: Constants;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let _e4 = constants.stride_x;
+    let idx = ((global_id.y * _e4) + global_id.x);
+    if (idx >= (arrayLength((&state)) / 9u)) {
+        return;
+    }
+    let base = (idx * 9u);
     let d_p = state[(base + 3u)];
     let grad_px = state[(base + 4u)];
     let grad_py = state[(base + 5u)];
@@ -341087,6 +349929,511 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 "#;
     }
+    pub mod rhie_chow_grad_p_update_incompressible_momentum_structured {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Vector2 {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub x: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub y: f32,
+        }
+        impl Vector2 {
+            pub const fn new(x: f32, y: f32) -> Self {
+                Self { x, y }
+            }
+        }
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.state, self.constants]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowGradPUpdateIncompressibleMomentumStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: rhie_chow_grad_p_update_incompressible_momentum_structured :: Constants > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(
+                        "GeneratedRhieChowGradPUpdateIncompressibleMomentumStructured::BindGroup0",
+                    ),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1EntriesParams<'a> {
+            pub face_owner: wgpu::BufferBinding<'a>,
+            pub face_neighbor: wgpu::BufferBinding<'a>,
+            pub face_areas: wgpu::BufferBinding<'a>,
+            pub face_normals: wgpu::BufferBinding<'a>,
+            pub cell_centers: wgpu::BufferBinding<'a>,
+            pub cell_vols: wgpu::BufferBinding<'a>,
+            pub cell_face_offsets: wgpu::BufferBinding<'a>,
+            pub cell_faces: wgpu::BufferBinding<'a>,
+            pub face_boundary: wgpu::BufferBinding<'a>,
+            pub face_centers: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup1Entries<'a> {
+            pub face_owner: wgpu::BindGroupEntry<'a>,
+            pub face_neighbor: wgpu::BindGroupEntry<'a>,
+            pub face_areas: wgpu::BindGroupEntry<'a>,
+            pub face_normals: wgpu::BindGroupEntry<'a>,
+            pub cell_centers: wgpu::BindGroupEntry<'a>,
+            pub cell_vols: wgpu::BindGroupEntry<'a>,
+            pub cell_face_offsets: wgpu::BindGroupEntry<'a>,
+            pub cell_faces: wgpu::BindGroupEntry<'a>,
+            pub face_boundary: wgpu::BindGroupEntry<'a>,
+            pub face_centers: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup1Entries<'a> {
+            pub fn new(params: WgpuBindGroup1EntriesParams<'a>) -> Self {
+                Self {
+                    face_owner: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.face_owner),
+                    },
+                    face_neighbor: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.face_neighbor),
+                    },
+                    face_areas: wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Buffer(params.face_areas),
+                    },
+                    face_normals: wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::Buffer(params.face_normals),
+                    },
+                    cell_centers: wgpu::BindGroupEntry {
+                        binding: 4,
+                        resource: wgpu::BindingResource::Buffer(params.cell_centers),
+                    },
+                    cell_vols: wgpu::BindGroupEntry {
+                        binding: 5,
+                        resource: wgpu::BindingResource::Buffer(params.cell_vols),
+                    },
+                    cell_face_offsets: wgpu::BindGroupEntry {
+                        binding: 6,
+                        resource: wgpu::BindingResource::Buffer(params.cell_face_offsets),
+                    },
+                    cell_faces: wgpu::BindGroupEntry {
+                        binding: 7,
+                        resource: wgpu::BindingResource::Buffer(params.cell_faces),
+                    },
+                    face_boundary: wgpu::BindGroupEntry {
+                        binding: 12,
+                        resource: wgpu::BindingResource::Buffer(params.face_boundary),
+                    },
+                    face_centers: wgpu::BindGroupEntry {
+                        binding: 13,
+                        resource: wgpu::BindingResource::Buffer(params.face_centers),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 10] {
+                [
+                    self.face_owner,
+                    self.face_neighbor,
+                    self.face_areas,
+                    self.face_normals,
+                    self.cell_centers,
+                    self.cell_vols,
+                    self.cell_face_offsets,
+                    self.cell_faces,
+                    self.face_boundary,
+                    self.face_centers,
+                ]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup1(wgpu::BindGroup);
+        impl WgpuBindGroup1 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowGradPUpdateIncompressibleMomentumStructured::BindGroup1::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"face_owner\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"face_neighbor\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(2): \"face_areas\""] wgpu :: BindGroupLayoutEntry { binding : 2 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(3): \"face_normals\""] wgpu :: BindGroupLayoutEntry { binding : 3 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(4): \"cell_centers\""] wgpu :: BindGroupLayoutEntry { binding : 4 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(5): \"cell_vols\""] wgpu :: BindGroupLayoutEntry { binding : 5 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(6): \"cell_face_offsets\""] wgpu :: BindGroupLayoutEntry { binding : 6 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(7): \"cell_faces\""] wgpu :: BindGroupLayoutEntry { binding : 7 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(12): \"face_boundary\""] wgpu :: BindGroupLayoutEntry { binding : 12 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(13): \"face_centers\""] wgpu :: BindGroupLayoutEntry { binding : 13 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup1Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(
+                        "GeneratedRhieChowGradPUpdateIncompressibleMomentumStructured::BindGroup1",
+                    ),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(1, &self.0, &[]);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2EntriesParams<'a> {
+            pub bc_kind: wgpu::BufferBinding<'a>,
+            pub bc_value: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup2Entries<'a> {
+            pub bc_kind: wgpu::BindGroupEntry<'a>,
+            pub bc_value: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup2Entries<'a> {
+            pub fn new(params: WgpuBindGroup2EntriesParams<'a>) -> Self {
+                Self {
+                    bc_kind: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.bc_kind),
+                    },
+                    bc_value: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.bc_value),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.bc_kind, self.bc_value]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup2(wgpu::BindGroup);
+        impl WgpuBindGroup2 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowGradPUpdateIncompressibleMomentumStructured::BindGroup2::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"bc_kind\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"bc_value\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : true } , has_dynamic_offset : false , min_binding_size : None , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup2Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(
+                        "GeneratedRhieChowGradPUpdateIncompressibleMomentumStructured::BindGroup2",
+                    ),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(2, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+            pub bind_group1: &'a WgpuBindGroup1,
+            pub bind_group2: &'a WgpuBindGroup2,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+                self.bind_group1.set(pass);
+                self.bind_group2.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 3],
+            ) -> [wgpu::BindGroupLayout; 3] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(
+                    "GeneratedRhieChowGradPUpdateIncompressibleMomentumStructured::PipelineLayout",
+                ),
+                bind_group_layouts: &[
+                    &WgpuBindGroup0::get_bind_group_layout(device),
+                    &WgpuBindGroup1::get_bind_group_layout(device),
+                    &WgpuBindGroup2::get_bind_group_layout(device),
+                ],
+                push_constant_ranges: &[],
+            })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("rhie_chow_grad_p_update_incompressible_momentum_structured.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Vector2_ {
+    x: f32,
+    y: f32,
+}
+
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+}
+
+@group(0) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(0) @binding(1) 
+var<uniform> constants: Constants;
+@group(1) @binding(0) 
+var<storage> face_owner: array<u32>;
+@group(1) @binding(1) 
+var<storage> face_neighbor: array<i32>;
+@group(1) @binding(2) 
+var<storage> face_areas: array<f32>;
+@group(1) @binding(3) 
+var<storage> face_normals: array<Vector2_>;
+@group(1) @binding(4) 
+var<storage> cell_centers: array<Vector2_>;
+@group(1) @binding(5) 
+var<storage> cell_vols: array<f32>;
+@group(1) @binding(6) 
+var<storage> cell_face_offsets: array<u32>;
+@group(1) @binding(7) 
+var<storage> cell_faces: array<u32>;
+@group(1) @binding(12) 
+var<storage> face_boundary: array<u32>;
+@group(1) @binding(13) 
+var<storage> face_centers: array<Vector2_>;
+@group(2) @binding(0) 
+var<storage> bc_kind: array<u32>;
+@group(2) @binding(1) 
+var<storage> bc_value: array<f32>;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    var grad_acc_p: vec2<f32> = vec2<f32>(0f, 0f);
+    var k: u32;
+    var normal_vec: vec2<f32>;
+    var other_idx: u32;
+    var other_center_vec: vec2<f32>;
+    var lambda: f32;
+
+    let _e6 = constants.stride_x;
+    let idx = ((global_id.y * _e6) + global_id.x);
+    if (idx >= (arrayLength((&state)) / 9u)) {
+        return;
+    }
+    let base = (idx * 9u);
+    let cell_center = cell_centers[idx];
+    let cell_center_vec = vec2<f32>(cell_center.x, cell_center.y);
+    let vol = cell_vols[idx];
+    let start = cell_face_offsets[idx];
+    let end = cell_face_offsets[(idx + 1u)];
+    k = start;
+    loop {
+        let _e35 = k;
+        if (_e35 < end) {
+        } else {
+            break;
+        }
+        {
+            let _e38 = k;
+            let face_idx = cell_faces[_e38];
+            let owner = face_owner[face_idx];
+            let neighbor_raw = face_neighbor[face_idx];
+            let is_boundary = (neighbor_raw == -1i);
+            let _unused_boundary_type = face_boundary[face_idx];
+            let area = face_areas[face_idx];
+            let face_center = face_centers[face_idx];
+            let face_center_vec = vec2<f32>(face_center.x, face_center.y);
+            let _e64 = face_normals[face_idx].x;
+            let _e68 = face_normals[face_idx].y;
+            normal_vec = vec2<f32>(_e64, _e68);
+            let _e72 = normal_vec;
+            if (dot((face_center_vec - cell_center_vec), _e72) < 0f) {
+                let _e76 = normal_vec;
+                normal_vec = -(_e76);
+            }
+            other_idx = idx;
+            other_center_vec = face_center_vec;
+            if (neighbor_raw != -1i) {
+                let neighbor = u32(neighbor_raw);
+                other_idx = neighbor;
+                if (owner != idx) {
+                    other_idx = owner;
+                }
+                let _e85 = other_idx;
+                let other_center = cell_centers[_e85];
+                other_center_vec = vec2<f32>(other_center.x, other_center.y);
+            }
+            let _e92 = normal_vec;
+            let d_own = abs(dot((face_center_vec - cell_center_vec), _e92));
+            let _e95 = other_center_vec;
+            let _e97 = normal_vec;
+            let d_neigh = abs(dot((_e95 - face_center_vec), _e97));
+            let total_dist = (d_own + d_neigh);
+            lambda = 0.5f;
+            if (total_dist > 0.000001f) {
+                lambda = (d_neigh / total_dist);
+            }
+            let _e106 = lambda;
+            let lambda_other = (1f - _e106);
+            let _e109 = normal_vec;
+            let _e114 = state[(base + 2u)];
+            let _e115 = lambda;
+            let _e117 = other_idx;
+            let _e124 = state[((_e117 * 9u) + 2u)];
+            let _e129 = state[(base + 2u)];
+            let _e136 = bc_value[((face_idx * 3u) + 2u)];
+            let _e143 = bc_kind[((face_idx * 3u) + 2u)];
+            let _e151 = state[(base + 2u)];
+            let _e158 = bc_value[((face_idx * 3u) + 2u)];
+            let _e167 = bc_kind[((face_idx * 3u) + 2u)];
+            let _e177 = grad_acc_p;
+            grad_acc_p = (_e177 + ((_e109 * ((_e114 * _e115) + (select(_e124, select(select(_e129, _e136, (_e143 == 1u)), (_e151 + (_e158 * d_own)), (_e167 == 2u)), is_boundary) * lambda_other))) * area));
+        }
+        continuing {
+            let _e180 = k;
+            k = (_e180 + 1u);
+        }
+    }
+    let _e182 = grad_acc_p;
+    let grad_out_p = (_e182 / vec2(max(vol, 0.000000000001f)));
+    state[(base + 4u)] = grad_out_p.x;
+    state[(base + 5u)] = grad_out_p.y;
+    return;
+}
+"#;
+    }
     pub mod rhie_chow_store_grad_p_allmach_pressure {
         use super::{_root, _root::*};
         #[repr(C, align(4))]
@@ -350888,6 +360235,216 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
 }
 "#;
     }
+    pub mod rhie_chow_store_grad_p_incompressible_momentum_structured {
+        use super::{_root, _root::*};
+        #[repr(C, align(4))]
+        #[derive(Debug, PartialEq, Clone, Copy)]
+        pub struct Constants {
+            #[doc = "offset: 0, size: 4, type: `f32`"]
+            pub dt: f32,
+            #[doc = "offset: 4, size: 4, type: `f32`"]
+            pub dt_old: f32,
+            #[doc = "offset: 8, size: 4, type: `f32`"]
+            pub dtau: f32,
+            #[doc = "offset: 12, size: 4, type: `f32`"]
+            pub time: f32,
+            #[doc = "offset: 16, size: 4, type: `f32`"]
+            pub viscosity: f32,
+            #[doc = "offset: 20, size: 4, type: `f32`"]
+            pub density: f32,
+            #[doc = "offset: 24, size: 4, type: `u32`"]
+            pub component: u32,
+            #[doc = "offset: 28, size: 4, type: `f32`"]
+            pub alpha_p: f32,
+            #[doc = "offset: 32, size: 4, type: `u32`"]
+            pub scheme: u32,
+            #[doc = "offset: 36, size: 4, type: `f32`"]
+            pub alpha_u: f32,
+            #[doc = "offset: 40, size: 4, type: `u32`"]
+            pub stride_x: u32,
+            #[doc = "offset: 44, size: 4, type: `u32`"]
+            pub time_scheme: u32,
+        }
+        impl Constants {
+            pub const fn new(
+                dt: f32,
+                dt_old: f32,
+                dtau: f32,
+                time: f32,
+                viscosity: f32,
+                density: f32,
+                component: u32,
+                alpha_p: f32,
+                scheme: u32,
+                alpha_u: f32,
+                stride_x: u32,
+                time_scheme: u32,
+            ) -> Self {
+                Self {
+                    dt,
+                    dt_old,
+                    dtau,
+                    time,
+                    viscosity,
+                    density,
+                    component,
+                    alpha_p,
+                    scheme,
+                    alpha_u,
+                    stride_x,
+                    time_scheme,
+                }
+            }
+        }
+        pub mod compute {
+            use super::{_root, _root::*};
+            pub const MAIN_WORKGROUP_SIZE: [u32; 3] = [64, 1, 1];
+            pub fn create_main_pipeline_embed_source(
+                device: &wgpu::Device,
+            ) -> wgpu::ComputePipeline {
+                let module = super::create_shader_module_embed_source(device);
+                let layout = super::create_pipeline_layout(device);
+                device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                    label: Some("Compute Pipeline main"),
+                    layout: Some(&layout),
+                    module: &module,
+                    entry_point: Some("main"),
+                    compilation_options: Default::default(),
+                    cache: None,
+                })
+            }
+        }
+        pub const ENTRY_MAIN: &str = "main";
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0EntriesParams<'a> {
+            pub state: wgpu::BufferBinding<'a>,
+            pub constants: wgpu::BufferBinding<'a>,
+        }
+        #[derive(Clone, Debug)]
+        pub struct WgpuBindGroup0Entries<'a> {
+            pub state: wgpu::BindGroupEntry<'a>,
+            pub constants: wgpu::BindGroupEntry<'a>,
+        }
+        impl<'a> WgpuBindGroup0Entries<'a> {
+            pub fn new(params: WgpuBindGroup0EntriesParams<'a>) -> Self {
+                Self {
+                    state: wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(params.state),
+                    },
+                    constants: wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(params.constants),
+                    },
+                }
+            }
+            pub fn into_array(self) -> [wgpu::BindGroupEntry<'a>; 2] {
+                [self.state, self.constants]
+            }
+            pub fn collect<B: FromIterator<wgpu::BindGroupEntry<'a>>>(self) -> B {
+                self.into_array().into_iter().collect()
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuBindGroup0(wgpu::BindGroup);
+        impl WgpuBindGroup0 {
+            pub const LAYOUT_DESCRIPTOR : wgpu :: BindGroupLayoutDescriptor < 'static > = wgpu :: BindGroupLayoutDescriptor { label : Some ("GeneratedRhieChowStoreGradPIncompressibleMomentumStructured::BindGroup0::LayoutDescriptor") , entries : & [# [doc = " @binding(0): \"state\""] wgpu :: BindGroupLayoutEntry { binding : 0 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Storage { read_only : false } , has_dynamic_offset : false , min_binding_size : None , } , count : None , } , # [doc = " @binding(1): \"constants\""] wgpu :: BindGroupLayoutEntry { binding : 1 , visibility : wgpu :: ShaderStages :: COMPUTE , ty : wgpu :: BindingType :: Buffer { ty : wgpu :: BufferBindingType :: Uniform , has_dynamic_offset : false , min_binding_size : std :: num :: NonZeroU64 :: new (std :: mem :: size_of :: < _root :: generated :: rhie_chow_store_grad_p_incompressible_momentum_structured :: Constants > () as _) , } , count : None , }] , } ;
+            pub fn get_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+                device.create_bind_group_layout(&Self::LAYOUT_DESCRIPTOR)
+            }
+            pub fn from_bindings(device: &wgpu::Device, bindings: WgpuBindGroup0Entries) -> Self {
+                let bind_group_layout = Self::get_bind_group_layout(device);
+                let entries = bindings.into_array();
+                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some(
+                        "GeneratedRhieChowStoreGradPIncompressibleMomentumStructured::BindGroup0",
+                    ),
+                    layout: &bind_group_layout,
+                    entries: &entries,
+                });
+                Self(bind_group)
+            }
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                pass.set_bind_group(0, &self.0, &[]);
+            }
+        }
+        #[doc = " Bind groups can be set individually using their set(render_pass) method, or all at once using `WgpuBindGroups::set`."]
+        #[doc = " For optimal performance with many draw calls, it's recommended to organize bindings into bind groups based on update frequency:"]
+        #[doc = "   - Bind group 0: Least frequent updates (e.g. per frame resources)"]
+        #[doc = "   - Bind group 1: More frequent updates"]
+        #[doc = "   - Bind group 2: More frequent updates"]
+        #[doc = "   - Bind group 3: Most frequent updates (e.g. per draw resources)"]
+        #[derive(Debug, Copy, Clone)]
+        pub struct WgpuBindGroups<'a> {
+            pub bind_group0: &'a WgpuBindGroup0,
+        }
+        impl<'a> WgpuBindGroups<'a> {
+            pub fn set(&self, pass: &mut impl SetBindGroup) {
+                self.bind_group0.set(pass);
+            }
+        }
+        #[derive(Debug)]
+        pub struct WgpuPipelineLayout;
+        impl WgpuPipelineLayout {
+            pub fn bind_group_layout_entries(
+                entries: [wgpu::BindGroupLayout; 1],
+            ) -> [wgpu::BindGroupLayout; 1] {
+                entries
+            }
+        }
+        pub fn create_pipeline_layout(device: &wgpu::Device) -> wgpu::PipelineLayout {
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some(
+                    "GeneratedRhieChowStoreGradPIncompressibleMomentumStructured::PipelineLayout",
+                ),
+                bind_group_layouts: &[&WgpuBindGroup0::get_bind_group_layout(device)],
+                push_constant_ranges: &[],
+            })
+        }
+        pub fn create_shader_module_embed_source(device: &wgpu::Device) -> wgpu::ShaderModule {
+            let source = std::borrow::Cow::Borrowed(SHADER_STRING);
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("rhie_chow_store_grad_p_incompressible_momentum_structured.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source),
+            })
+        }
+        pub const SHADER_STRING: &str = r#"
+struct Constants {
+    dt: f32,
+    dt_old: f32,
+    dtau: f32,
+    time: f32,
+    viscosity: f32,
+    density: f32,
+    component: u32,
+    alpha_p: f32,
+    scheme: u32,
+    alpha_u: f32,
+    stride_x: u32,
+    time_scheme: u32,
+}
+
+@group(0) @binding(0) 
+var<storage, read_write> state: array<f32>;
+@group(0) @binding(1) 
+var<uniform> constants: Constants;
+
+@compute @workgroup_size(64, 1, 1) 
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let _e4 = constants.stride_x;
+    let idx = ((global_id.y * _e4) + global_id.x);
+    if (idx >= (arrayLength((&state)) / 9u)) {
+        return;
+    }
+    let base = (idx * 9u);
+    let _e23 = state[(base + 4u)];
+    state[(base + 6u)] = _e23;
+    let _e32 = state[(base + 5u)];
+    state[(base + 7u)] = _e32;
+    return;
+}
+"#;
+    }
     pub mod scalars {
         use super::{_root, _root::*};
         #[repr(C, align(4))]
@@ -352314,6 +361871,11 @@ pub mod bytemuck_impls {
     unsafe impl bytemuck::Pod for generated::dp_init_incompressible_momentum_ale_mms::Constants {}
     unsafe impl bytemuck::Zeroable for generated::dp_init_incompressible_momentum_mms::Constants {}
     unsafe impl bytemuck::Pod for generated::dp_init_incompressible_momentum_mms::Constants {}
+    unsafe impl bytemuck::Zeroable
+        for generated::dp_init_incompressible_momentum_structured::Constants
+    {
+    }
+    unsafe impl bytemuck::Pod for generated::dp_init_incompressible_momentum_structured::Constants {}
     unsafe impl bytemuck::Zeroable for generated::dp_update_from_diag_allmach_pressure::Constants {}
     unsafe impl bytemuck::Pod for generated::dp_update_from_diag_allmach_pressure::Constants {}
     unsafe impl bytemuck::Zeroable for generated::dp_update_from_diag_allmach_pressure_ale::Constants {}
@@ -352373,6 +361935,14 @@ pub mod bytemuck_impls {
     }
     unsafe impl bytemuck::Pod
         for generated::dp_update_from_diag_incompressible_momentum_mms::Constants
+    {
+    }
+    unsafe impl bytemuck::Zeroable
+        for generated::dp_update_from_diag_incompressible_momentum_structured::Constants
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::dp_update_from_diag_incompressible_momentum_structured::Constants
     {
     }
     unsafe impl bytemuck::Zeroable for generated::flux_module_allmach_pressure::Vector2 {}
@@ -352591,6 +362161,22 @@ pub mod bytemuck_impls {
         for generated::flux_module_gradients_incompressible_momentum_mms::Constants
     {
     }
+    unsafe impl bytemuck::Zeroable
+        for generated::flux_module_gradients_incompressible_momentum_structured::Vector2
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::flux_module_gradients_incompressible_momentum_structured::Vector2
+    {
+    }
+    unsafe impl bytemuck::Zeroable
+        for generated::flux_module_gradients_incompressible_momentum_structured::Constants
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::flux_module_gradients_incompressible_momentum_structured::Constants
+    {
+    }
     unsafe impl bytemuck::Zeroable for generated::flux_module_incompressible_momentum::Vector2 {}
     unsafe impl bytemuck::Pod for generated::flux_module_incompressible_momentum::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::flux_module_incompressible_momentum::Constants {}
@@ -352610,6 +362196,16 @@ pub mod bytemuck_impls {
     unsafe impl bytemuck::Pod for generated::flux_module_incompressible_momentum_mms::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::flux_module_incompressible_momentum_mms::Constants {}
     unsafe impl bytemuck::Pod for generated::flux_module_incompressible_momentum_mms::Constants {}
+    unsafe impl bytemuck::Zeroable
+        for generated::flux_module_incompressible_momentum_structured::Vector2
+    {
+    }
+    unsafe impl bytemuck::Pod for generated::flux_module_incompressible_momentum_structured::Vector2 {}
+    unsafe impl bytemuck::Zeroable
+        for generated::flux_module_incompressible_momentum_structured::Constants
+    {
+    }
+    unsafe impl bytemuck::Pod for generated::flux_module_incompressible_momentum_structured::Constants {}
     unsafe impl bytemuck::Zeroable for generated::flux_module_scalar_transport::Vector2 {}
     unsafe impl bytemuck::Pod for generated::flux_module_scalar_transport::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::flux_module_scalar_transport::Constants {}
@@ -353356,6 +362952,12 @@ pub mod bytemuck_impls {
         for generated::generic_coupled_assembly_grad_state_incompressible_momentum_mms::Constants
     {
     }
+    unsafe impl bytemuck :: Zeroable for generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Vector2 { }
+    unsafe impl bytemuck :: Pod for generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Vector2 { }
+    unsafe impl bytemuck :: Zeroable for generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: StructuredGrid { }
+    unsafe impl bytemuck :: Pod for generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: StructuredGrid { }
+    unsafe impl bytemuck :: Zeroable for generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants { }
+    unsafe impl bytemuck :: Pod for generated :: generic_coupled_assembly_grad_state_incompressible_momentum_structured :: Constants { }
     unsafe impl bytemuck::Zeroable
         for generated::generic_coupled_assembly_grad_state_rhs_only_allmach_pressure::Vector2
     {
@@ -353582,6 +363184,12 @@ pub mod bytemuck_impls {
     unsafe impl bytemuck :: Pod for generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Vector2 { }
     unsafe impl bytemuck :: Zeroable for generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants { }
     unsafe impl bytemuck :: Pod for generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_mms :: Constants { }
+    unsafe impl bytemuck :: Zeroable for generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Vector2 { }
+    unsafe impl bytemuck :: Pod for generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Vector2 { }
+    unsafe impl bytemuck :: Zeroable for generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: StructuredGrid { }
+    unsafe impl bytemuck :: Pod for generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: StructuredGrid { }
+    unsafe impl bytemuck :: Zeroable for generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants { }
+    unsafe impl bytemuck :: Pod for generated :: generic_coupled_assembly_grad_state_rhs_only_incompressible_momentum_structured :: Constants { }
     unsafe impl bytemuck::Zeroable
         for generated::generic_coupled_assembly_grad_state_rhs_only_scalar_transport::Vector2
     {
@@ -353705,6 +363313,22 @@ pub mod bytemuck_impls {
     }
     unsafe impl bytemuck::Pod
         for generated::generic_coupled_assembly_incompressible_momentum_mms::Constants
+    {
+    }
+    unsafe impl bytemuck::Zeroable
+        for generated::generic_coupled_assembly_incompressible_momentum_structured::StructuredGrid
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::generic_coupled_assembly_incompressible_momentum_structured::StructuredGrid
+    {
+    }
+    unsafe impl bytemuck::Zeroable
+        for generated::generic_coupled_assembly_incompressible_momentum_structured::Constants
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::generic_coupled_assembly_incompressible_momentum_structured::Constants
     {
     }
     unsafe impl bytemuck::Zeroable
@@ -354047,6 +363671,10 @@ pub mod bytemuck_impls {
         for generated::generic_coupled_assembly_rhs_only_incompressible_momentum_mms::Constants
     {
     }
+    unsafe impl bytemuck :: Zeroable for generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: StructuredGrid { }
+    unsafe impl bytemuck :: Pod for generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: StructuredGrid { }
+    unsafe impl bytemuck :: Zeroable for generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants { }
+    unsafe impl bytemuck :: Pod for generated :: generic_coupled_assembly_rhs_only_incompressible_momentum_structured :: Constants { }
     unsafe impl bytemuck::Zeroable
         for generated::generic_coupled_assembly_rhs_only_scalar_transport::Vector2
     {
@@ -354351,6 +363979,14 @@ pub mod bytemuck_impls {
     }
     unsafe impl bytemuck::Pod
         for generated::generic_coupled_update_incompressible_momentum_mms::Constants
+    {
+    }
+    unsafe impl bytemuck::Zeroable
+        for generated::generic_coupled_update_incompressible_momentum_structured::Constants
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::generic_coupled_update_incompressible_momentum_structured::Constants
     {
     }
     unsafe impl bytemuck::Zeroable for generated::generic_coupled_update_scalar_transport::Constants {}
@@ -354671,6 +364307,22 @@ pub mod bytemuck_impls {
         for generated::packed_state_gradients_incompressible_momentum_mms::Constants
     {
     }
+    unsafe impl bytemuck::Zeroable
+        for generated::packed_state_gradients_incompressible_momentum_structured::Vector2
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::packed_state_gradients_incompressible_momentum_structured::Vector2
+    {
+    }
+    unsafe impl bytemuck::Zeroable
+        for generated::packed_state_gradients_incompressible_momentum_structured::Constants
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::packed_state_gradients_incompressible_momentum_structured::Constants
+    {
+    }
     unsafe impl bytemuck::Zeroable for generated::packed_state_gradients_scalar_transport::Vector2 {}
     unsafe impl bytemuck::Pod for generated::packed_state_gradients_scalar_transport::Vector2 {}
     unsafe impl bytemuck::Zeroable for generated::packed_state_gradients_scalar_transport::Constants {}
@@ -354794,6 +364446,8 @@ pub mod bytemuck_impls {
         for generated::rhie_chow_correct_velocity_delta_incompressible_momentum_mms::Constants
     {
     }
+    unsafe impl bytemuck :: Zeroable for generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: Constants { }
+    unsafe impl bytemuck :: Pod for generated :: rhie_chow_correct_velocity_delta_incompressible_momentum_structured :: Constants { }
     unsafe impl bytemuck :: Zeroable for generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Vector2 { }
     unsafe impl bytemuck :: Pod for generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Vector2 { }
     unsafe impl bytemuck :: Zeroable for generated :: rhie_chow_dp_init_dp_update_store_grad_p_grad_p_update_correct_velocity_delta_fused_allmach_pressure :: Constants { }
@@ -355291,6 +364945,22 @@ pub mod bytemuck_impls {
         for generated::rhie_chow_grad_p_update_incompressible_momentum_mms::Constants
     {
     }
+    unsafe impl bytemuck::Zeroable
+        for generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Vector2
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Vector2
+    {
+    }
+    unsafe impl bytemuck::Zeroable
+        for generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Constants
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::rhie_chow_grad_p_update_incompressible_momentum_structured::Constants
+    {
+    }
     unsafe impl bytemuck::Zeroable for generated::rhie_chow_store_grad_p_allmach_pressure::Constants {}
     unsafe impl bytemuck::Pod for generated::rhie_chow_store_grad_p_allmach_pressure::Constants {}
     unsafe impl bytemuck::Zeroable
@@ -355538,6 +365208,14 @@ pub mod bytemuck_impls {
     }
     unsafe impl bytemuck::Pod
         for generated::rhie_chow_store_grad_p_incompressible_momentum_mms::Constants
+    {
+    }
+    unsafe impl bytemuck::Zeroable
+        for generated::rhie_chow_store_grad_p_incompressible_momentum_structured::Constants
+    {
+    }
+    unsafe impl bytemuck::Pod
+        for generated::rhie_chow_store_grad_p_incompressible_momentum_structured::Constants
     {
     }
     unsafe impl bytemuck::Zeroable for generated::scalars::GpuScalars {}

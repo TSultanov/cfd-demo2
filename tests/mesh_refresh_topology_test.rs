@@ -301,9 +301,16 @@ fn noop_topology_refresh_byte_identical_gpu() {
 /// genuinely-different-topology mesh B leaves it in a
 /// state that steps IDENTICALLY to a solver freshly built on B and loaded with
 /// the same cell-state. Both legs are seeded from ONE snapshot (identical input
-/// state — full history on CPU, IC-history on GPU), so the ONLY difference is
+/// state — full history on BOTH backends), so the ONLY difference is
 /// "reached B via refresh" vs "built fresh on B": any stale mesh-derived cache
 /// the refresh missed shows up as a step divergence.
+///
+/// Cross-mesh restore caveat: the snapshot was captured on mesh A, and a
+/// full-history restore writes A's CELL VOLUMES (stepping state for the
+/// implicit-motion rewind, where the caller restores the mesh alongside).
+/// Here the fresh-build leg keeps mesh B, so it must re-assert B's geometry
+/// after the restore — otherwise the legs differ by A-vs-B volumes in the
+/// assembly, which is a harness artifact, not a refresh bug.
 #[test]
 #[cfg(feature = "cpu")]
 fn topology_refresh_matches_fresh_build_cpu() {
@@ -341,9 +348,12 @@ fn topology_refresh_matches_fresh_build_cpu() {
         run_steps(&mut leg1, 1, "cpu-mfb-leg1");
         let bits1 = state_bits(&leg1);
 
-        // Leg 2: fresh-on-B, restore, one step.
+        // Leg 2: fresh-on-B, restore, re-assert B's geometry (the A-captured
+        // snapshot carried A's volumes — see the header comment), one step.
         let mut leg2 = build_driver_ic(&mesh_b, None, None, (1.0, 0.0));
         leg2.restore(&snap).expect("restore");
+        leg2.refresh_mesh(&mesh_b, MeshRefreshLevel::Geometry)
+            .expect("re-assert B geometry after cross-mesh restore");
         run_steps(&mut leg2, 1, "cpu-mfb-leg2");
         let bits2 = state_bits(&leg2);
 
@@ -360,10 +370,13 @@ fn topology_refresh_matches_fresh_build_cpu() {
     });
 }
 
-/// GPU leg of the refresh-vs-fresh equivalence. The GPU snapshot is
-/// current-state-only, so both legs restore to the same current state with IC
-/// history (identical inputs on B); a fresh AMG hierarchy is built on both legs
-/// (refresh reconstructs the LA stack). f32-exact per device (waiver hatch).
+/// GPU leg of the refresh-vs-fresh equivalence. The GPU snapshot now carries
+/// FULL history (state × time levels, warm start, volume history, counters),
+/// so both legs restore identical stepping state on B; the fresh-build leg
+/// re-asserts B's geometry after the cross-mesh restore (the A-captured
+/// snapshot carried A's volumes — same caveat as the CPU leg). A fresh AMG
+/// hierarchy is built on both legs (refresh reconstructs the LA stack).
+/// f32-exact per device (waiver hatch).
 #[test]
 fn topology_refresh_matches_fresh_build_gpu() {
     let _guard = lock_env();
@@ -394,6 +407,8 @@ fn topology_refresh_matches_fresh_build_gpu() {
 
     let mut leg2 = build_driver_ic(&mesh_b, Some(ctx.device.clone()), Some(ctx.queue.clone()), (1.0, 0.0));
     leg2.restore(&snap).expect("restore");
+    leg2.refresh_mesh(&mesh_b, MeshRefreshLevel::Geometry)
+        .expect("re-assert B geometry after cross-mesh restore");
     run_steps(&mut leg2, 1, "gpu-mfb-leg2");
     let bits2 = state_bits(&leg2);
 

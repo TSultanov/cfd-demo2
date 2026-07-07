@@ -542,6 +542,7 @@ fn generate_flux_module_kernel_program_for_model(
                 &prims,
                 &variants,
                 &eos_params,
+                structured,
             )
         }
     }

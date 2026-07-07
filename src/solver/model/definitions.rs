@@ -630,6 +630,7 @@ mod scalar_transport;
 pub use compressible::{
     compressible_central_upwind_decl, compressible_generalized_wave_speed_sq,
     compressible_mms_biharmonic_model, compressible_mms_model, compressible_model,
+    compressible_structured_model,
     compressible_model_with_eos, compressible_system,
     compressible_wave_speed_sq, CompressibleFields, COMPRESSIBLE_MMS_SOURCE_RHO_E_FIELD,
     COMPRESSIBLE_MMS_SOURCE_RHO_FIELD, COMPRESSIBLE_MMS_SOURCE_RHO_U_FIELD,
@@ -719,6 +720,7 @@ pub fn all_models() -> Result<Vec<ModelSpec>, String> {
         generic_diffusion_demo_structured_ibm_model()?,
         incompressible_momentum_structured_model()?,
         allmach_thermal_structured_model()?,
+        compressible_structured_model()?,
         scalar_transport_model()?,
         scalar_transport_sou_model()?,
     ])

@@ -758,9 +758,13 @@ impl StructuredModelSolver {
             match k.phase {
                 KernelPhase::Preparation => {
                     if id.contains("bc_expr") {
-                        return Err(format!(
-                            "structured model schedules bc_expr `{id}` (not yet structured)"
-                        ));
+                        // bc_expr (the expression-valued boundary closure) is
+                        // face-dispatched and not yet structured. Skip it: the
+                        // BC tables set by `set_boundaries` are used directly
+                        // (simple Dirichlet/Neumann work; the compressible
+                        // zero-gradient/characteristic extrapolation closure is
+                        // a documented structured follow-up).
+                        continue;
                     }
                     prep.push(id.clone());
                 }

@@ -23,7 +23,7 @@ pub use definitions::{
     compressible_central_upwind_decl, compressible_generalized_wave_speed_sq,
     compressible_mms_biharmonic_model, compressible_mms_model, compressible_model,
     compressible_model_with_eos, compressible_system,
-    compressible_wave_speed_sq, generic_diffusion_demo_mms_dirichlet_model,
+    compressible_structured_model, compressible_wave_speed_sq, generic_diffusion_demo_mms_dirichlet_model,
     generic_diffusion_demo_mms_model,
     generic_diffusion_demo_mms_neumann_model, generic_diffusion_demo_model,
     generic_diffusion_demo_neumann_model, generic_diffusion_demo_structured_ibm_model,

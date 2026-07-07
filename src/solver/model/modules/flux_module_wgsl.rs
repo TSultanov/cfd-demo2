@@ -185,6 +185,7 @@ pub fn generate_flux_module_kernel_program(
 }
 
 /// Build a KernelProgram from a runtime-scheme flux module spec.
+#[allow(clippy::too_many_arguments)]
 pub fn generate_flux_module_kernel_program_runtime_scheme(
     id: &str,
     resolved_slots: &ResolvedStateSlotsSpec,
@@ -193,6 +194,7 @@ pub fn generate_flux_module_kernel_program_runtime_scheme(
     primitives: &[(String, Expr)],
     variants: &[(Scheme, FluxModuleKernelSpec)],
     eos_params: &[ParamSpec],
+    structured: bool,
 ) -> Result<KernelProgram, String> {
     assert!(flux_stride > 0, "flux_module requires flux_stride > 0");
     assert_eq!(
@@ -203,7 +205,7 @@ pub fn generate_flux_module_kernel_program_runtime_scheme(
     let uses_low_mach = variants
         .iter()
         .any(|(_, spec)| flux_spec_uses_low_mach(spec));
-    let items = base_items(uses_low_mach, eos_params, false);
+    let items = base_items(uses_low_mach, eos_params, structured);
     let bindings =
         cfd2_codegen::solver::codegen::coupled_common::kernel_bindings_from_items(&items)?;
 
@@ -219,6 +221,7 @@ pub fn generate_flux_module_kernel_program_runtime_scheme(
         flux_stride,
         &primitive_map,
         variants,
+        structured,
     );
     let (launch, skip) = extract_launch_pattern_b(&main)?;
 
@@ -226,7 +229,13 @@ pub fn generate_flux_module_kernel_program_runtime_scheme(
 
     let helper = render_bc_neighbor_scalar_helper();
 
-    let mut program = KernelProgram::new(id, DispatchDomain::Faces, launch, bindings);
+    let dispatch = if structured {
+        DispatchDomain::Cells
+    } else {
+        DispatchDomain::Faces
+    };
+
+    let mut program = KernelProgram::new(id, dispatch, launch, bindings);
     program.helper_functions = vec![helper];
     program.body = kernel_stmts.to_vec();
     program.eos_params = eos_params.to_vec();
@@ -645,6 +654,7 @@ fn main_fn_runtime_scheme(
     flux_stride: u32,
     primitives: &HashMap<&str, &Expr>,
     variants: &[(Scheme, FluxModuleKernelSpec)],
+    structured: bool,
 ) -> Function {
     let params = vec![Param::new(
         "global_id",
@@ -657,7 +667,7 @@ fn main_fn_runtime_scheme(
         params,
         None,
         vec![Attribute::Compute, Attribute::WorkgroupSize(64)],
-        main_body_runtime_scheme(resolver, flux_layout, flux_stride, primitives, variants),
+        main_body_runtime_scheme(resolver, flux_layout, flux_stride, primitives, variants, structured),
     )
 }
 
@@ -838,13 +848,82 @@ fn structured_main_body(
     Block::new(stmts)
 }
 
-fn main_body_runtime_scheme(
+/// Structured runtime-scheme flux body (compressible central-upwind + scheme
+/// switch): same dense cell-dispatch + 4-direction loop as `structured_main_body`,
+/// feeding the shared `face_stmts_runtime_scheme`.
+fn structured_main_body_runtime_scheme(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
     flux_stride: u32,
     primitives: &HashMap<&str, &Expr>,
     variants: &[(Scheme, FluxModuleKernelSpec)],
 ) -> Block {
+    let mut stmts = vec![
+        dsl::let_expr(
+            "idx",
+            Expr::ident("global_id").field("y") * Expr::ident("constants").field("stride_x")
+                + Expr::ident("global_id").field("x"),
+        ),
+        sg::structured_bound_guard(),
+    ];
+    stmts.extend(sg::structured_cell_geom());
+
+    let mut face_body = sg::structured_face_locals();
+    face_body.push(dsl::let_expr("owner", Expr::ident("idx")));
+    face_body.push(dsl::let_expr("neigh_idx", Expr::ident("sfd_other_idx")));
+    face_body.push(dsl::let_expr("is_boundary", Expr::ident("sfd_is_boundary")));
+    face_body.push(dsl::let_expr("area", Expr::ident("sfd_area")));
+    face_body.push(dsl::let_expr("boundary_type", Expr::from(0u32)));
+    face_body.push(dsl::let_expr(
+        "face_center",
+        sg::sfd_vector2("sfd_face_cx", "sfd_face_cy"),
+    ));
+    face_body.push(dsl::let_typed_expr(
+        "normal_vec",
+        Type::vec2_f32(),
+        sg::sfd_vec2("sfd_normal_x", "sfd_normal_y"),
+    ));
+    face_body.push(dsl::let_expr("c_owner", sg::sfd_vector2("sfd_cx", "sfd_cy")));
+    face_body.push(dsl::let_typed_expr(
+        "c_owner_vec",
+        Type::vec2_f32(),
+        sg::sfd_vec2("sfd_cx", "sfd_cy"),
+    ));
+    face_body.push(dsl::let_typed_expr(
+        "face_center_vec",
+        Type::vec2_f32(),
+        sg::sfd_vec2("sfd_face_cx", "sfd_face_cy"),
+    ));
+    face_body.extend(face_stmts_runtime_scheme(
+        resolver, flux_layout, flux_stride, primitives, variants, true,
+    ));
+
+    stmts.push(dsl::for_loop_expr(
+        dsl::for_init_var_expr("k", Expr::from(0u32)),
+        Expr::ident("k").lt(Expr::from(4u32)),
+        dsl::for_step_increment_expr(Expr::ident("k")),
+        dsl::block(face_body),
+    ));
+    Block::new(stmts)
+}
+
+fn main_body_runtime_scheme(
+    resolver: &dyn OffsetResolver,
+    flux_layout: &FluxLayout,
+    flux_stride: u32,
+    primitives: &HashMap<&str, &Expr>,
+    variants: &[(Scheme, FluxModuleKernelSpec)],
+    structured: bool,
+) -> Block {
+    if structured {
+        return structured_main_body_runtime_scheme(
+            resolver,
+            flux_layout,
+            flux_stride,
+            primitives,
+            variants,
+        );
+    }
     let mut stmts = vec![
         dsl::let_expr(
             "idx",
@@ -935,6 +1014,7 @@ fn main_body_runtime_scheme(
         flux_stride,
         primitives,
         variants,
+        false,
     ));
 
     Block::new(stmts)
@@ -1157,6 +1237,7 @@ fn face_stmts_runtime_scheme(
     flux_stride: u32,
     primitives: &HashMap<&str, &Expr>,
     variants: &[(Scheme, FluxModuleKernelSpec)],
+    structured: bool,
 ) -> Vec<Stmt> {
     #[derive(Clone, Copy)]
     struct CentralUpwindVariant<'a> {
@@ -1168,42 +1249,68 @@ fn face_stmts_runtime_scheme(
         a_plus: &'a FaceScalarExpr,
         a_minus: &'a FaceScalarExpr,
     }
+    let flux_face = |off: u32| {
+        if structured {
+            dsl::array_access_linear("fluxes", Expr::ident("sfd_face_id"), flux_stride, off)
+        } else {
+            dsl::array_access_linear("fluxes", Expr::ident("idx"), flux_stride, off)
+        }
+    };
 
     // --- Geometry preamble (kept in sync with `face_stmts`) ---
-    let mut body = vec![
-        dsl::let_expr(
-            "c_neigh",
-            dsl::array_access("cell_centers", Expr::ident("neigh_idx")),
-        ),
-        dsl::var_typed_expr(
+    let mut body: Vec<Stmt> = Vec::new();
+    if structured {
+        body.push(dsl::var_typed_expr(
             "c_neigh_vec",
             Type::vec2_f32(),
-            Some(typed::VecExpr::<2>::from_xy_fields(Expr::ident("c_neigh")).expr()),
-        ),
-        // Periodic wrap: lift the neighbor center into the owner's frame across a seam face.
-        // `face_wrap_shift` is zero on every non-periodic mesh, so this is a no-op there.
-        dsl::assign_expr(
-            Expr::ident("c_neigh_vec"),
-            typed::VecExpr::<2>::from_expr(Expr::ident("c_neigh_vec"))
-                .add(&typed::VecExpr::<2>::from_xy_fields(
-                    Expr::ident("face_wrap_shift").index(Expr::ident("idx")),
-                ))
-                .expr(),
-        ),
-        dsl::let_typed_expr(
+            Some(sg::sfd_vec2("sfd_other_cx", "sfd_other_cy")),
+        ));
+        body.push(dsl::let_typed_expr(
             "c_neigh_cell_vec",
             Type::vec2_f32(),
             Expr::ident("c_neigh_vec"),
-        ),
-        dsl::if_block_expr(
+        ));
+        body.push(dsl::if_block_expr(
             Expr::ident("is_boundary"),
             dsl::block(vec![dsl::assign_expr(
                 Expr::ident("c_neigh_vec"),
                 Expr::ident("face_center_vec"),
             )]),
             None,
-        ),
-    ];
+        ));
+    } else {
+        body.push(dsl::let_expr(
+            "c_neigh",
+            dsl::array_access("cell_centers", Expr::ident("neigh_idx")),
+        ));
+        body.push(dsl::var_typed_expr(
+            "c_neigh_vec",
+            Type::vec2_f32(),
+            Some(typed::VecExpr::<2>::from_xy_fields(Expr::ident("c_neigh")).expr()),
+        ));
+        // Periodic wrap: lift the neighbor center into the owner's frame across a seam face.
+        body.push(dsl::assign_expr(
+            Expr::ident("c_neigh_vec"),
+            typed::VecExpr::<2>::from_expr(Expr::ident("c_neigh_vec"))
+                .add(&typed::VecExpr::<2>::from_xy_fields(
+                    Expr::ident("face_wrap_shift").index(Expr::ident("idx")),
+                ))
+                .expr(),
+        ));
+        body.push(dsl::let_typed_expr(
+            "c_neigh_cell_vec",
+            Type::vec2_f32(),
+            Expr::ident("c_neigh_vec"),
+        ));
+        body.push(dsl::if_block_expr(
+            Expr::ident("is_boundary"),
+            dsl::block(vec![dsl::assign_expr(
+                Expr::ident("c_neigh_vec"),
+                Expr::ident("face_center_vec"),
+            )]),
+            None,
+        ));
+    }
 
     // Match OpenFOAM's `surfaceInterpolation::weights()` (basicFvGeometryScheme).
     let d_own = dsl::abs(
@@ -1376,10 +1483,7 @@ fn face_stmts_runtime_scheme(
             let off = flux_layout
                 .offset_for(comp_name)
                 .unwrap_or_else(|| panic!("missing flux layout component '{comp_name}'"));
-            body.push(dsl::assign_expr(
-                dsl::array_access_linear("fluxes", Expr::ident("idx"), flux_stride, off),
-                Expr::ident(name.clone()),
-            ));
+            body.push(dsl::assign_expr(flux_face(off), Expr::ident(name.clone())));
         }
 
         return body;

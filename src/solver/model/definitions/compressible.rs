@@ -391,13 +391,44 @@ pub fn compressible_mms_biharmonic_model() -> Result<ModelSpec, String> {
     )
 }
 
+/// STRUCTURED (`TopologyMode::Structured2D`) density-based compressible model:
+/// the same conserved (rho, rho_u, rho_e) central-upwind solver on the dense
+/// Cartesian grid.
+pub fn compressible_structured_model() -> Result<ModelSpec, String> {
+    compressible_model_impl_topo(
+        crate::solver::model::eos::EosSpec::IdealGas {
+            gamma: 1.4,
+            gas_constant: 1.0,
+            temperature: 1.0,
+        },
+        false,
+        false,
+        cfd2_ir::equation::TopologyMode::Structured2D,
+    )
+}
+
 fn compressible_model_impl(
     eos: crate::solver::model::eos::EosSpec,
     with_mms_sources: bool,
     biharmonic: bool,
 ) -> Result<ModelSpec, String> {
+    compressible_model_impl_topo(
+        eos,
+        with_mms_sources,
+        biharmonic,
+        cfd2_ir::equation::TopologyMode::Unstructured,
+    )
+}
+
+fn compressible_model_impl_topo(
+    eos: crate::solver::model::eos::EosSpec,
+    with_mms_sources: bool,
+    biharmonic: bool,
+    topology: cfd2_ir::equation::TopologyMode,
+) -> Result<ModelSpec, String> {
     let fields = CompressibleFields::new();
-    let system = build_compressible_system_impl(&fields, with_mms_sources, biharmonic);
+    let mut system = build_compressible_system_impl(&fields, with_mms_sources, biharmonic);
+    system.set_topology(topology);
     // Flux module reconstruction uses gradient fields in the state layout when enabled.
     // These are computed by the optional `flux_module_gradients` stage (Gauss gradients).
     let grad_rho = vol_vector_dim::<DivDim<Density, Length>>("grad_rho");
@@ -794,11 +825,14 @@ fn compressible_model_impl(
         // MUST get a distinct id — otherwise they reuse the stride-22/26 kernels of
         // the plain model while their buffers are the larger (lap-extended) stride,
         // misaligning every cell (gradients never land, the conserved state collapses).
-        id: match (with_mms_sources, biharmonic) {
-            (true, true) => "compressible_mms_biharmonic",
-            (true, false) => "compressible_mms",
-            (false, true) => "compressible_biharmonic",
-            (false, false) => "compressible",
+        id: match (with_mms_sources, biharmonic, topology) {
+            (false, false, cfd2_ir::equation::TopologyMode::Structured2D) => {
+                "compressible_structured"
+            }
+            (true, true, _) => "compressible_mms_biharmonic",
+            (true, false, _) => "compressible_mms",
+            (false, true, _) => "compressible_biharmonic",
+            (false, false, _) => "compressible",
         },
         system,
         state_layout: layout,

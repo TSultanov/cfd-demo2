@@ -622,6 +622,10 @@ pub struct MovingMeshDriver {
     /// teleports, but the killed slot vanishes from the seed array so a
     /// post-step observer cannot recover where the hole opened.
     last_kill_sites: Vec<(f64, f64)>,
+    /// This step's outlet exports were folded into the resize event
+    /// ([`Self::plan_recycle_resize`]) — the mid-step relabel teleport is
+    /// suppressed for the step. Cleared every step.
+    recycle_via_resize: bool,
     /// TRIAL-STEP adaptation ([`Self::set_trial_step_adaptation`], opt-in,
     /// CPU backend): on adapt steps, trial-solve the step on the current
     /// mesh, plan the resize from the trial's END state (the solution the
@@ -915,6 +919,7 @@ impl MovingMeshDriver {
                 .unwrap_or(true),
             last_transfer_projection: (0.0, 0.0),
             last_kill_sites: Vec::new(),
+            recycle_via_resize: false,
             trial_step_adaptation: false,
             adaptive_dt_cfl: None,
             last_pinned_dt: None,
@@ -1437,6 +1442,7 @@ impl MovingMeshDriver {
         let (mut cells_born, mut cells_killed) = (0usize, 0usize);
         let mut transfer_defect = (0.0f64, 0.0f64);
         self.last_kill_sites.clear();
+        self.recycle_via_resize = false;
         if self.adapt_fires_this_step() {
             if self.trial_step_adaptation && self.driver.solver().is_cpu() {
                 let checkpoint = self.motion_checkpoint();
@@ -1446,8 +1452,10 @@ impl MovingMeshDriver {
                     return Ok(trial);
                 }
                 let targets = self.adapt_target_vols()?;
-                let (kills, births) = self.plan_adaptation(&targets)?;
+                let (mut kills, mut births) = self.plan_adaptation(&targets)?;
                 let wall_segs = self.plan_wall_refinement(&targets);
+                self.recycle_via_resize =
+                    self.plan_recycle_resize(&targets, &mut kills, &mut births) > 0;
                 if kills.is_empty() && births.is_empty() && wall_segs.is_empty() {
                     // Nothing to adapt: accept the trial as the step.
                     self.adapt_targets = Some(targets);
@@ -1476,8 +1484,14 @@ impl MovingMeshDriver {
                 self.adapt_targets = Some(self.adapt_target_vols()?);
             } else {
                 let targets = self.adapt_target_vols()?;
-                let (kills, births) = self.plan_adaptation(&targets)?;
+                let (mut kills, mut births) = self.plan_adaptation(&targets)?;
                 let wall_segs = self.plan_wall_refinement(&targets);
+                // Fold the outlet exports into this resize event — the
+                // between-steps placement gives them the full transfer +
+                // projection + two-level re-solve discipline the mid-step
+                // teleport cannot have.
+                self.recycle_via_resize =
+                    self.plan_recycle_resize(&targets, &mut kills, &mut births) > 0;
                 if !kills.is_empty() || !births.is_empty() || !wall_segs.is_empty() {
                     let wall_born = self.resize_cells_impl(&kills, &births, &wall_segs)?;
                     cells_born = births.len() + wall_born;
@@ -2676,10 +2690,22 @@ impl MovingMeshDriver {
         // Outflow -> inflow seed recycling (relabel-in-place; inert when
         // disabled). Runs AFTER advection/steering/clamp so the trigger sees
         // the step's final positions; the teleport is not advection, so it
-        // does not enter the mesh-CFL dt cap above.
-        let recycled = if self.seed_recycling {
+        // does not enter the mesh-CFL dt cap above. Suppressed when this
+        // step's exports already rode the resize event (one recycle wave
+        // per step — see `plan_recycle_resize`).
+        let recycled = if self.seed_recycling && !self.recycle_via_resize {
             self.recycle_seeds(&mut new_seeds)
         } else {
+            if self.seed_recycling {
+                // The park clamp (anti-guard-squeeze backstop) must run
+                // even when the exports rode the resize.
+                let park_x = self.domain.x - FLOW_ADVECT_BOX_DEAD_CELLS * self.min_cell_size;
+                for i in 0..new_seeds.len() {
+                    if self.kinds[i] == SeedKind::Interior && new_seeds[i].x > park_x {
+                        new_seeds[i].x = park_x;
+                    }
+                }
+            }
             Vec::new()
         };
         Ok((dt, new_seeds, recycled))
@@ -2830,6 +2856,129 @@ impl MovingMeshDriver {
             }
         }
         recycled
+    }
+
+    /// RECYCLE-AS-RESIZE: when an adaptation event fires this step, the
+    /// squeeze-triggered outlet exports ride the RESIZE as kill+birth pairs
+    /// instead of the mid-step relabel teleport.
+    ///
+    /// A teleport is a topology event INSIDE the step: the published BDF2
+    /// references pre-teleport history at the drained hole and the respawn
+    /// ring, and the 1-3-frame settling is the outlet-corner pressure flare
+    /// the OSC watch flags (present with adaptation frozen too — recycling
+    /// continues there). The resize event happens BETWEEN steps at a static
+    /// reference point and already carries the full cured discipline —
+    /// state transfer, mass-row projection, birth pre-relax, and the
+    /// two-level re-solve that eliminated the analogous resize marks. (A
+    /// post-step static re-solve of the teleport was MEASURED WORSE:
+    /// replacing two real ALE steps' history with motion-less re-solves
+    /// costs more globally than the teleport-local seam noise it removes —
+    /// between-steps is the only correct placement of the discipline.)
+    ///
+    /// Trigger and intake mirror [`Self::recycle_seeds`], evaluated on the
+    /// t^n positions/volumes; the mid-step relabel is suppressed for the
+    /// step when this planned anything. Appends to `kills`/`births`
+    /// (most-squeezed first, [`RECYCLE_MAX_PER_STEP`] cap); returns the
+    /// number of pairs planned.
+    fn plan_recycle_resize(
+        &self,
+        targets: &[f64],
+        kills: &mut Vec<usize>,
+        births: &mut Vec<(Point2<f64>, usize)>,
+    ) -> usize {
+        use crate::meshgen::meshless::point_in_fluid;
+        if !self.seed_recycling {
+            return 0;
+        }
+        let h = self.min_cell_size;
+        let strip_x = self.domain.x - RECYCLE_TRIGGER_CELLS * h;
+        let vol_lo = self.recycle_vol_floor;
+        let kill_set: std::collections::HashSet<usize> = kills.iter().cloned().collect();
+        let floor = |i: usize| -> f64 {
+            match targets.get(i) {
+                Some(&t) if t.is_finite() && t > 0.0 => {
+                    vol_lo.min(RECYCLE_SQUEEZE_FRACTION * t)
+                }
+                _ => vol_lo,
+            }
+        };
+        let mut out: Vec<usize> = (0..self.seeds.len())
+            .filter(|&i| {
+                self.kinds[i] == SeedKind::Interior
+                    && !kill_set.contains(&i)
+                    && self.seeds[i].x > strip_x
+                    && self.mesh.cell_vol[i] < floor(i)
+            })
+            .collect();
+        out.sort_by(|&a, &b| self.mesh.cell_vol[a].total_cmp(&self.mesh.cell_vol[b]));
+        out.truncate(RECYCLE_MAX_PER_STEP);
+        if out.is_empty() {
+            return 0;
+        }
+        // Deepest-hole intake over the inlet band (the same scan as the
+        // mid-step path), spacing-disciplined against the survivors AND the
+        // births already planned this event.
+        let out_set: std::collections::HashSet<usize> = out.iter().cloned().collect();
+        let band_lim = (RECYCLE_TRIGGER_CELLS + 1.0) * h;
+        let mut occupants: Vec<Point2<f64>> = (0..self.seeds.len())
+            .filter(|&i| {
+                self.seeds[i].x < band_lim && !out_set.contains(&i) && !kill_set.contains(&i)
+            })
+            .map(|i| self.seeds[i])
+            .collect();
+        occupants.extend(births.iter().filter(|(p, _)| p.x < band_lim).map(|&(p, _)| p));
+        let min_sep = RECYCLE_MIN_SEP_CELLS * h;
+        let cand_step = 0.25 * h;
+        let x_levels = [1.5 * h, 2.0 * h, 2.5 * h, 3.0 * h];
+        let n_cand = (self.domain.y / cand_step).floor() as usize;
+        let mut planned = 0usize;
+        for &i in &out {
+            let mut best: Option<(f64, Point2<f64>)> = None;
+            for &cx in &x_levels {
+                for k in 1..n_cand {
+                    let p = Point2::new(cx, k as f64 * cand_step);
+                    if !point_in_fluid(p, &self.spec) {
+                        continue;
+                    }
+                    let d2 = occupants
+                        .iter()
+                        .map(|q| (q - p).norm_squared())
+                        .fold(f64::INFINITY, f64::min);
+                    if best.map_or(true, |(b, _)| d2 > b) {
+                        best = Some((d2, p));
+                    }
+                }
+            }
+            let Some((d2, p)) = best else { continue };
+            if d2.sqrt() < min_sep {
+                // No admissible hole: the slot stays squeezed this event;
+                // the trigger re-fires next step.
+                continue;
+            }
+            // Birth donor: the nearest surviving seed to the spawn point —
+            // the inlet neighborhood whose state the fresh parcel enters
+            // with (the same semantics as the relabel path's nearest-
+            // survivor reinit).
+            let (mut donor, mut d_best) = (usize::MAX, f64::INFINITY);
+            for (j, q) in self.seeds.iter().enumerate() {
+                if out_set.contains(&j) || kill_set.contains(&j) {
+                    continue;
+                }
+                let dj = (q - p).norm_squared();
+                if dj < d_best {
+                    d_best = dj;
+                    donor = j;
+                }
+            }
+            if donor == usize::MAX {
+                continue;
+            }
+            kills.push(i);
+            births.push((p, donor));
+            occupants.push(p);
+            planned += 1;
+        }
+        planned
     }
 
     /// Read the current per-cell velocity `(u_x, u_y)` (f64-widened f32) from the

@@ -47,6 +47,7 @@ use cfd2_ir::dimensions::{
 };
 use std::collections::HashMap;
 
+use super::incompressible_momentum::IBM_MOMENTUM_PENALTY_FIELD;
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
 
 /// Compressibility `psi = d(rho)/d(p) = 1/c^2`, units Density / Pressure.
@@ -221,6 +222,7 @@ fn build_allmach_system(
     compressible_mms: bool,
     thermal: bool,
     ale: bool,
+    ibm: bool,
 ) -> EquationSystem {
     // Two manufactured-solution modes:
     //  - BAROTROPIC mms (`with_mms_source && !compressible_mms`): strips the
@@ -285,6 +287,18 @@ fn build_allmach_system(
         );
         momentum_sum =
             momentum_sum + typed_fvc::source_vector(mms_src_typed, u_typed).cast_to::<Force>();
+    }
+    if ibm {
+        // Immersed-boundary Brinkman penalisation (structured only): an implicit
+        // per-component momentum sink `source_coeff(Sp, U)` (Sp a Density/Time
+        // reaction rate) pins `U -> 0` where the mask is large. The momentum
+        // unknown is the PRIMITIVE velocity U (as in incompressible_momentum), so
+        // the term is identical: Sp=0 in the fluid recovers the base operator.
+        let penalty_typed =
+            TypedFieldRef::<DivDim<Density, Time>, Scalar>::new(IBM_MOMENTUM_PENALTY_FIELD);
+        let penalty_coeff = TypedCoeff::from_field(penalty_typed);
+        momentum_sum =
+            momentum_sum + typed_fvm::source_coeff(penalty_coeff, u_typed).cast_to::<Force>();
     }
     let momentum_eqn = momentum_sum.eqn(u_typed);
 
@@ -487,7 +501,7 @@ fn build_allmach_system(
 
 pub fn allmach_pressure_system() -> EquationSystem {
     let fields = AllMachPressureFields::new();
-    build_allmach_system(&fields, false, false, false, false)
+    build_allmach_system(&fields, false, false, false, false, false)
 }
 
 pub fn allmach_pressure_model() -> Result<ModelSpec, String> {
@@ -653,7 +667,11 @@ fn allmach_pressure_model_impl_topo(
     // (real-EOS recovery, layout fields, Rhie–Chow) and just adds manufactured sources.
     let strip_all = with_mms_source && !compressible_mms;
     let fields = AllMachPressureFields::new();
-    let mut system = build_allmach_system(&fields, with_mms_source, compressible_mms, thermal, ale);
+    // The structured (dense-Cartesian) variant is immersed-boundary-capable:
+    // obstacles are a per-cell Brinkman momentum mask, never cut from the grid.
+    let ibm = topology == cfd2_ir::equation::TopologyMode::Structured2D;
+    let mut system =
+        build_allmach_system(&fields, with_mms_source, compressible_mms, thermal, ale, ibm);
     system.set_topology(topology);
 
     // Keep U,p,d_p,grad_p,grad_p_old at the same offsets as incompressible
@@ -721,6 +739,10 @@ fn allmach_pressure_model_impl_topo(
         if thermal {
             layout_fields.push(vol_scalar_dim::<TSourceUnit>(ALLMACH_MMS_SOURCE_T_FIELD));
         }
+    }
+    if ibm {
+        // Per-cell Brinkman momentum-penalty mask (structured immersed obstacles).
+        layout_fields.push(vol_scalar_dim::<DivDim<Density, Time>>(IBM_MOMENTUM_PENALTY_FIELD));
     }
     let layout = PortRegistry::from_fields(layout_fields).into_state_layout();
 

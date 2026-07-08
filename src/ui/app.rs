@@ -2441,25 +2441,33 @@ impl CFDApp {
             .clone()
             .ok_or("structured mode requires a GPU queue")?;
 
-        // Unit square, uniform spacing from the cell-size slider.
-        let (lx, ly) = (1.0_f64, 1.0_f64);
+        // Compressible runs the closed uniform-gas box (all-Wall); the flow models
+        // run a CHANNEL (inlet left, outlet right, no-slip walls) whose immersed
+        // obstacle — a Brinkman `ibm_penalty_U` mask, never a cut cell — is the
+        // structured analogue of the unstructured geometry.
+        let is_box = request.model_id == "compressible_structured";
+        let (lx, ly) = if is_box { (1.0_f64, 1.0_f64) } else { (3.0_f64, 1.0_f64) };
         let cell = request.max_cell_size.max(1.0e-3);
-        let nx = ((lx / cell).round() as usize).clamp(8, 96);
+        let nx = ((lx / cell).round() as usize).clamp(8, 192);
         let ny = ((ly / cell).round() as usize).clamp(8, 96);
 
         let mesh_start = std::time::Instant::now();
-        let mesh = generate_structured_rect_mesh(
-            nx,
-            ny,
-            lx,
-            ly,
+        let sides = if is_box {
             BoundarySides {
                 left: BoundaryType::Wall,
                 right: BoundaryType::Wall,
                 bottom: BoundaryType::Wall,
                 top: BoundaryType::Wall,
-            },
-        );
+            }
+        } else {
+            BoundarySides {
+                left: BoundaryType::Inlet,
+                right: BoundaryType::Outlet,
+                bottom: BoundaryType::Wall,
+                top: BoundaryType::Wall,
+            }
+        };
+        let mesh = generate_structured_rect_mesh(nx, ny, lx, ly, sides);
         CFDApp::push_trace_init_event(
             trace_init_events,
             "mesh.generate.structured",
@@ -2492,7 +2500,16 @@ impl CFDApp {
         )?;
         solver.set_fluid(request.params.density as f64, request.params.viscosity as f64);
         seed_structured_state(&mut solver, request.model_id);
-        setup_structured_bcs(&mut solver, request.model_id, request.params.inlet_velocity as f64, s);
+        // Immersed obstacle from the selected geometry (Brinkman mask; momentum
+        // is the only structured model with an `ibm_penalty_U` field).
+        seed_structured_ibm(&mut solver, request.selected_geometry, lx, ly);
+        setup_structured_bcs(
+            &mut solver,
+            request.model_id,
+            is_box,
+            request.params.inlet_velocity as f64,
+            s,
+        );
         CFDApp::push_trace_init_event(
             trace_init_events,
             "solver.new",
@@ -3218,10 +3235,10 @@ impl eframe::App for CFDApp {
                         }
                     });
 
-                    // Geometry / meshers only apply to the unstructured path; the
-                    // structured mode is a fixed dense box (lid cavity / gas box).
+                    // The geometry selector applies to BOTH paths: the unstructured
+                    // solver cuts the shape from the mesh; the structured solver
+                    // immerses it as a Brinkman `ibm_penalty_U` mask in a dense box.
                     let structured = self.mesh_mode == MeshMode::Structured2D;
-                    ui.add_enabled_ui(!structured, |ui| {
                     ui.group(|ui| {
                         ui.label("Geometry");
                         let mut geom_changed = false;
@@ -3259,26 +3276,30 @@ impl eframe::App for CFDApp {
                             // already on an all-Mach model). Then re-seed the per-case
                             // defaults (the nozzle override sets the choking inlet speed +
                             // sub-critical back-pressure) and rebuild — mirroring the Model
-                            // dropdown's apply-defaults-then-reinit behaviour.
-                            if self.selected_geometry == GeometryType::Nozzle {
-                                if self.model_id != "allmach_pressure"
-                                    && self.model_id != "allmach_thermal"
-                                {
-                                    self.model_id = "allmach_thermal";
+                            // dropdown's apply-defaults-then-reinit behaviour. In structured
+                            // mode the mesh type is fixed (dense Cartesian) and the models
+                            // are the *_structured set, so those unstructured-only side
+                            // effects are skipped — the obstacle is a Brinkman mask instead.
+                            if !structured {
+                                if self.selected_geometry == GeometryType::Nozzle {
+                                    if self.model_id != "allmach_pressure"
+                                        && self.model_id != "allmach_thermal"
+                                    {
+                                        self.model_id = "allmach_thermal";
+                                    }
+                                    // Default the nozzle to the body-fitted structured
+                                    // grid (the validated configuration). The user can
+                                    // still switch to an unstructured mesh below.
+                                    self.mesh_type = MeshType::Fitted;
+                                } else if self.mesh_type == MeshType::Fitted {
+                                    // `Fitted` is nozzle-only; fall back for other shapes.
+                                    self.mesh_type = MeshType::CutCell;
                                 }
-                                // Default the nozzle to the body-fitted structured
-                                // grid (the validated configuration). The user can
-                                // still switch to an unstructured mesh below.
-                                self.mesh_type = MeshType::Fitted;
-                            } else if self.mesh_type == MeshType::Fitted {
-                                // `Fitted` is nozzle-only; fall back for other shapes.
-                                self.mesh_type = MeshType::CutCell;
                             }
                             self.apply_model_defaults();
                             self.init_solver();
                         }
                     });
-                    }); // end add_enabled_ui(!structured) around Geometry
 
                     ui.group(|ui| {
                         ui.label("Mesh Parameters");
@@ -4957,11 +4978,58 @@ fn seed_structured_state(s: &mut StructuredGpuSolver, model_id: &str) {
     }
 }
 
-/// Apply the structured demo boundary conditions: a lid-driven cavity (momentum /
-/// all-Mach thermal — top MovingWall slides at `u_lid`, other walls no-slip) or a
-/// uniform gas box (compressible — all walls pinned to the rest state).
-fn setup_structured_bcs(s: &mut StructuredGpuSolver, model_id: &str, u_lid: f64, stride_s: usize) {
-    if model_id == "compressible_structured" {
+/// Is `(x, y)` inside the SOLID of the structured geometry (for the Brinkman mask)?
+/// `ChannelObstacle` = a cylinder; `BackwardsStep` = a solid block at the inlet
+/// floor; `Nozzle` = the region outside a converging–diverging profile.
+fn structured_geometry_is_solid(geom: GeometryType, x: f64, y: f64, lx: f64, ly: f64) -> bool {
+    match geom {
+        GeometryType::ChannelObstacle => {
+            let (cx, cy, r) = (lx / 3.0, ly * 0.51, ly * 0.1);
+            (x - cx).hypot(y - cy) < r
+        }
+        GeometryType::BackwardsStep => {
+            // Step: the inlet occupies the top; a solid block fills the bottom half
+            // upstream of x = lx/3 (the expansion behind the step).
+            x < lx / 3.0 && y < ly * 0.5
+        }
+        GeometryType::Nozzle => {
+            // Converging–diverging: half-width narrows to a throat at x = lx/2,
+            // widening toward the ends. Solid outside the profile.
+            let xc = (x - lx * 0.5) / (lx * 0.5); // -1..1
+            let half = ly * (0.18 + 0.30 * xc * xc); // throat 0.18, ends 0.48
+            (y - ly * 0.5).abs() > half
+        }
+    }
+}
+
+/// Rasterize the selected geometry into the momentum Brinkman penalty field
+/// `ibm_penalty_U` (large negative inside the solid; a `source_coeff(Sp,U)` sink
+/// pins U→0 there). No-op for models without the field (thermal / compressible).
+fn seed_structured_ibm(s: &mut StructuredGpuSolver, geom: GeometryType, lx: f64, ly: f64) {
+    let Some(off) = s.field_offset("ibm_penalty_U") else {
+        return;
+    };
+    s.set_state_component(off, move |x, y| {
+        if structured_geometry_is_solid(geom, x, y, lx, ly) {
+            -1.0e5
+        } else {
+            0.0
+        }
+    });
+}
+
+/// Apply the structured boundary conditions: a uniform gas box (compressible —
+/// all walls pinned to the rest state) or a CHANNEL (flow models — inlet-left
+/// Dirichlet velocity, outlet-right pressure-Dirichlet + zero-gradient velocity,
+/// no-slip top/bottom walls).
+fn setup_structured_bcs(
+    s: &mut StructuredGpuSolver,
+    model_id: &str,
+    is_box: bool,
+    u_in: f64,
+    stride_s: usize,
+) {
+    if is_box || model_id == "compressible_structured" {
         let (rho0, e0) = (1.0f32, 2.5f32);
         s.set_boundaries(move |_e, _x, _y| {
             let mut v = vec![
@@ -4975,16 +5043,44 @@ fn setup_structured_bcs(s: &mut StructuredGpuSolver, model_id: &str, u_lid: f64,
             (3, v)
         });
     } else {
+        // Channel: Inlet(1) left, Outlet(2) right, Wall(3) top/bottom. bc_kind
+        // 1=Dirichlet, 2=Neumann(zero-grad). Components 0=Ux,1=Uy,2=p (+3=T).
         s.set_boundaries(move |edge, _x, _y| {
-            let uw = if matches!(edge, StructEdge::Top) { u_lid as f32 } else { 0.0 };
-            let btype = if matches!(edge, StructEdge::Top) { 5 } else { 3 };
-            let mut v = vec![
-                StructBc { kind: 1, value: uw },
-                StructBc { kind: 1, value: 0.0 },
-                StructBc { kind: 2, value: 0.0 },
-            ];
+            let (btype, comps): (u32, Vec<StructBc>) = match edge {
+                StructEdge::Left => (
+                    1,
+                    vec![
+                        StructBc { kind: 1, value: u_in as f32 },
+                        StructBc { kind: 1, value: 0.0 },
+                        StructBc { kind: 2, value: 0.0 },
+                    ],
+                ),
+                StructEdge::Right => (
+                    2,
+                    vec![
+                        StructBc { kind: 2, value: 0.0 },
+                        StructBc { kind: 2, value: 0.0 },
+                        StructBc { kind: 1, value: 0.0 },
+                    ],
+                ),
+                _ => (
+                    3,
+                    vec![
+                        StructBc { kind: 1, value: 0.0 },
+                        StructBc { kind: 1, value: 0.0 },
+                        StructBc { kind: 2, value: 0.0 },
+                    ],
+                ),
+            };
+            let mut v = comps;
             if stride_s >= 4 {
-                v.push(StructBc { kind: 2, value: 0.0 });
+                // T: Dirichlet at inlet, zero-gradient elsewhere.
+                let t = if matches!(edge, StructEdge::Left) {
+                    StructBc { kind: 1, value: 1.0 }
+                } else {
+                    StructBc { kind: 2, value: 0.0 }
+                };
+                v.push(t);
             }
             (btype, v)
         });

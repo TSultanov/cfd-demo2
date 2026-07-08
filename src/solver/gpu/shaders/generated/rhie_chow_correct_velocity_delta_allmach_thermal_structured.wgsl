@@ -23,8 +23,13 @@ struct Constants {
 @compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.y * constants.stride_x + global_id.x;
+<<<<<<< HEAD
     if (idx >= (arrayLength(&state) / 21u)) { return; }
     let base = idx * 21u;
+=======
+    if (idx >= (arrayLength(&state) / 19u)) { return; }
+    let base = idx * 19u;
+>>>>>>> 5046e5d (feat(structured): geometry parity — Brinkman IBM obstacles for thermal + GUI un-gate)
     let d_p = state[base + 3u];
     let grad_px = state[base + 4u];
     let grad_py = state[base + 5u];

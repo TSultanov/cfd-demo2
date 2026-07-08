@@ -751,3 +751,205 @@ fn gpu_structured_bdf2_takes_effect() {
     println!("[gpu-structured] Euler vs BDF2 max|Δ|={max_d:e}");
     assert!(max_d > 1e-5, "time scheme had no effect max|Δ|={max_d}");
 }
+
+/// GEOMETRY PARITY: channel flow (inlet/outlet/walls) with an IMMERSED cylinder
+/// (Brinkman penalty via `ibm_penalty_U`) must run bounded, develop through-flow,
+/// and drive the velocity ~0 inside the solid — the structured analogue of the
+/// unstructured ChannelObstacle case (no cut cells).
+#[test]
+fn gpu_structured_channel_ibm_cylinder_runs() {
+    let (lx, ly) = (3.0f64, 1.0f64);
+    let (nx, ny) = (48usize, 16usize);
+    let model = incompressible_momentum_structured_model().unwrap();
+    let mut s = StructuredGpuSolver::new(StructuredGrid::new(nx, ny, lx, ly), &model, 0.02, 3).unwrap();
+    s.set_fluid(1.0, 0.01);
+    let u_in = 0.5f64;
+
+    // Immersed cylinder at (1.0, 0.51), r=0.1 — Brinkman sink (Sp<0) inside.
+    let (cx, cy, r) = (1.0f64, 0.51f64, 0.1f64);
+    let pen_off = s.field_offset("ibm_penalty_U").expect("ibm_penalty_U");
+    s.set_state_component(pen_off, move |x, y| {
+        if (x - cx).hypot(y - cy) < r {
+            -1.0e5
+        } else {
+            0.0
+        }
+    });
+
+    // Channel BCs: inlet left (Dirichlet u), outlet right (p Dirichlet 0, u
+    // zero-gradient), no-slip top/bottom walls.
+    s.set_boundaries(move |edge, _x, _y| match edge {
+        Edge::Left => (
+            1u32, // Inlet
+            vec![
+                BcComp { kind: 1, value: u_in as f32 },
+                BcComp { kind: 1, value: 0.0 },
+                BcComp { kind: 2, value: 0.0 },
+            ],
+        ),
+        Edge::Right => (
+            2u32, // Outlet
+            vec![
+                BcComp { kind: 2, value: 0.0 },
+                BcComp { kind: 2, value: 0.0 },
+                BcComp { kind: 1, value: 0.0 },
+            ],
+        ),
+        _ => (
+            3u32, // Wall
+            vec![
+                BcComp { kind: 1, value: 0.0 },
+                BcComp { kind: 1, value: 0.0 },
+                BcComp { kind: 2, value: 0.0 },
+            ],
+        ),
+    });
+
+    for _ in 0..40 {
+        s.step();
+    }
+    let ux = s.state_field(0);
+    let uy = s.state_field(1);
+    let mut umax = 0.0f64;
+    for (&a, &b) in ux.iter().zip(&uy) {
+        assert!(a.is_finite() && b.is_finite(), "channel+IBM diverged");
+        umax = umax.max(a.hypot(b));
+    }
+    assert!(umax > 0.1 && umax < 10.0, "unphysical channel speed {umax}");
+
+    // Velocity inside the cylinder must be near zero (Brinkman pinned).
+    let grid = s.grid();
+    let mut inside_max = 0.0f64;
+    let mut inlet_mean = 0.0f64;
+    let mut inlet_n = 0;
+    for p in 0..nx * ny {
+        let (x, y) = grid.cell_center(p);
+        let spd = ux[p].hypot(uy[p]);
+        if (x - cx).hypot(y - cy) < 0.6 * r {
+            inside_max = inside_max.max(spd);
+        }
+        if x < lx / (nx as f64) * 2.0 {
+            inlet_mean += ux[p];
+            inlet_n += 1;
+        }
+    }
+    inlet_mean /= inlet_n as f64;
+    println!("[gpu-structured] channel+IBM: umax={umax:.3}, inside_max={inside_max:.4}, inlet_ux={inlet_mean:.3}");
+    assert!(inlet_mean > 0.2, "through-flow did not develop (inlet ux={inlet_mean})");
+    assert!(inside_max < 0.15 * umax, "obstacle not pinned (inside_max={inside_max}, umax={umax})");
+}
+
+/// GEOMETRY PARITY: the all-Mach THERMAL structured model now also carries the
+/// Brinkman `ibm_penalty_U` momentum-penalty field (added for full geometry
+/// parity), so an immersed obstacle pins velocity inside the solid on the dense
+/// grid — the same channel+cylinder as the incompressible case, thermal physics.
+#[test]
+fn gpu_structured_thermal_channel_ibm_cylinder_runs() {
+    let (lx, ly) = (3.0f64, 1.0f64);
+    let (nx, ny) = (48usize, 16usize);
+    let model = allmach_thermal_structured_model().unwrap();
+    let ss = model.system.unknowns_per_cell() as usize;
+    let mut s =
+        StructuredGpuSolver::new(StructuredGrid::new(nx, ny, lx, ly), &model, 0.02, 3).unwrap();
+
+    // Thermal state seeding (barotropic-with-T; mirrors the thermal-lid test).
+    let psi = 0.5f64;
+    s.set_fluid(1.0, 0.01);
+    s.set_named_field("psi", |_, _| psi);
+    s.set_named_field("psi_precond", |_, _| psi.max(1.0));
+    s.set_named_field("rho", |_, _| 1.0);
+    s.set_named_field("rho_t_ref", |_, _| 1.0);
+    s.set_named_field("T", |_, _| 1.0);
+    if s.field_offset("t_ref").is_some() {
+        s.set_named_field("t_ref", |_, _| 1.0);
+    }
+    if s.field_offset("rho_floor").is_some() {
+        s.set_named_field("rho_floor", |_, _| psi * 1.0e-5);
+    }
+
+    let u_in = 0.5f64;
+    let (cx, cy, r) = (1.0f64, 0.51f64, 0.1f64);
+    let pen_off = s
+        .field_offset("ibm_penalty_U")
+        .expect("thermal structured must declare ibm_penalty_U");
+    s.set_state_component(pen_off, move |x, y| {
+        if (x - cx).hypot(y - cy) < r {
+            -1.0e5
+        } else {
+            0.0
+        }
+    });
+
+    // Channel BCs (+ T Dirichlet at inlet, zero-grad elsewhere for stride>=4).
+    s.set_boundaries(move |edge, _x, _y| {
+        let (btype, mut v): (u32, Vec<BcComp>) = match edge {
+            Edge::Left => (
+                1,
+                vec![
+                    BcComp { kind: 1, value: u_in as f32 },
+                    BcComp { kind: 1, value: 0.0 },
+                    BcComp { kind: 2, value: 0.0 },
+                ],
+            ),
+            Edge::Right => (
+                2,
+                vec![
+                    BcComp { kind: 2, value: 0.0 },
+                    BcComp { kind: 2, value: 0.0 },
+                    BcComp { kind: 1, value: 0.0 },
+                ],
+            ),
+            _ => (
+                3,
+                vec![
+                    BcComp { kind: 1, value: 0.0 },
+                    BcComp { kind: 1, value: 0.0 },
+                    BcComp { kind: 2, value: 0.0 },
+                ],
+            ),
+        };
+        if ss >= 4 {
+            let t = if matches!(edge, Edge::Left) {
+                BcComp { kind: 1, value: 1.0 }
+            } else {
+                BcComp { kind: 2, value: 0.0 }
+            };
+            v.push(t);
+        }
+        (btype, v)
+    });
+
+    for _ in 0..40 {
+        s.step();
+    }
+    let ux = s.state_field(0);
+    let uy = s.state_field(1);
+    let grid = s.grid();
+    let mut umax = 0.0f64;
+    let mut inside_max = 0.0f64;
+    let mut inlet_mean = 0.0f64;
+    let mut inlet_n = 0;
+    for p in 0..nx * ny {
+        assert!(ux[p].is_finite() && uy[p].is_finite(), "thermal channel+IBM diverged");
+        let (x, y) = grid.cell_center(p);
+        let spd = ux[p].hypot(uy[p]);
+        umax = umax.max(spd);
+        if (x - cx).hypot(y - cy) < 0.6 * r {
+            inside_max = inside_max.max(spd);
+        }
+        if x < lx / (nx as f64) * 2.0 {
+            inlet_mean += ux[p];
+            inlet_n += 1;
+        }
+    }
+    inlet_mean /= inlet_n as f64;
+    println!(
+        "[gpu-structured] thermal channel+IBM: umax={umax:.3}, inside_max={inside_max:.4}, inlet_ux={inlet_mean:.3}"
+    );
+    assert!(umax > 0.1 && umax < 10.0, "unphysical thermal channel speed {umax}");
+    assert!(inlet_mean > 0.2, "thermal through-flow did not develop (inlet ux={inlet_mean})");
+    assert!(
+        inside_max < 0.15 * umax,
+        "thermal obstacle not pinned (inside_max={inside_max}, umax={umax})"
+    );
+}

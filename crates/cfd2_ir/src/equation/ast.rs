@@ -279,6 +279,21 @@ pub struct Term {
     /// cell gradients, so declaring it forces the gradients pipeline on. Only
     /// meaningful on explicit `Source` terms whose `field` is a Vector2 velocity.
     pub viscous_dissipation: bool,
+    /// ALE (moving-mesh) NON-conservative own-variable ddt: skip the conservative
+    /// moving-volume weighting (`ale_vol_ratio_n/nm1`) the default own-variable ddt
+    /// applies, treating this ddt as an INTENSIVE rate at the CURRENT volume `V^{n+1}`
+    /// (the same geometric treatment as a cross-variable ddt). Use it for a
+    /// compressibility / pseudo-acoustic own-variable ddt (`ddt(psi_precond, p)` in the
+    /// continuity row) whose conserved-mass geometric part `psi*p*dV/dt` must NOT be
+    /// carried by a BDF2-weighted `d(V*psi*p)/dt`: that BDF2 geometric rate mismatches
+    /// the SCL-rate volume source + mesh-relative flux (both at the swept `ale_dvdt_scl`
+    /// rate) by `O(dt)`, capping the moving-mesh temporal order at 1. With the continuity
+    /// volume source carrying the FULL per-cell `rho*dV/dt` at the SCL rate (so it cancels
+    /// the mesh flux exactly), the acoustic ddt must contribute NO geometric part — only
+    /// the physical `psi*V^{n+1}*dp/dt` (BDF2) — for the row to be 2nd order AND free-stream
+    /// preserving. Byte-identical off ALE (the weighting block is skipped entirely when the
+    /// system is not ALE). Only meaningful on IMPLICIT own-variable `Ddt` terms.
+    pub non_conservative_ale: bool,
 }
 
 impl Term {
@@ -303,6 +318,7 @@ impl Term {
             linearize_pressure_flux: None,
             relative_to_mesh: false,
             viscous_dissipation: false,
+            non_conservative_ale: false,
         }
     }
 
@@ -376,6 +392,28 @@ impl Term {
             self.discretization
         );
         self.relative_to_mesh = true;
+        self
+    }
+
+    /// Declare a NON-conservative own-variable ddt on ALE (see `non_conservative_ale`
+    /// field docs): skip the conservative moving-volume weighting so this ddt is an
+    /// intensive rate at `V^{n+1}`. Only valid on IMPLICIT `Ddt` terms.
+    ///
+    /// # Panics
+    ///
+    /// Panics on any other term op or an explicit-discretized term.
+    pub fn with_non_conservative_ale(mut self) -> Self {
+        assert!(
+            matches!(self.op, TermOp::Ddt),
+            "with_non_conservative_ale is only valid on Ddt terms, got {:?}",
+            self.op
+        );
+        assert!(
+            self.discretization == Discretization::Implicit,
+            "with_non_conservative_ale is only valid on IMPLICIT ddt terms, got {:?}",
+            self.discretization
+        );
+        self.non_conservative_ale = true;
         self
     }
 

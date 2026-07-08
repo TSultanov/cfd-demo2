@@ -121,13 +121,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (constants.dtau > 0.0) {
         rhs_1 += state[idx * 18u + 11u] * dual_time_scale * state_iter[idx * 18u + 1u];
     }
-    rhs_2 += vol * state[idx * 18u + 9u] / select(constants.dt, state[idx * 18u + 10u], state[idx * 18u + 10u] > 0.0) * ale_vol_ratio_n * state_old[idx * 18u + 2u];
+    rhs_2 += vol * state[idx * 18u + 9u] / select(constants.dt, state[idx * 18u + 10u], state[idx * 18u + 10u] > 0.0) * state_old[idx * 18u + 2u];
     if (constants.time_scheme == 1u) {
         let r = constants.dt / constants.dt_old;
         let diag_bdf2 = vol * state[idx * 18u + 9u] / select(constants.dt, state[idx * 18u + 10u], state[idx * 18u + 10u] > 0.0) * (r * 2.0 + 1.0) / (r + 1.0);
         let factor_n = r + 1.0;
         let factor_nm1 = r * r / (r + 1.0);
-        rhs_2 = rhs_2 - vol * state[idx * 18u + 9u] / select(constants.dt, state[idx * 18u + 10u], state[idx * 18u + 10u] > 0.0) * ale_vol_ratio_n * state_old[idx * 18u + 2u] + vol * state[idx * 18u + 9u] / select(constants.dt, state[idx * 18u + 10u], state[idx * 18u + 10u] > 0.0) * (factor_n * ale_vol_ratio_n * state_old[idx * 18u + 2u] - factor_nm1 * ale_vol_ratio_nm1 * state_old_old[idx * 18u + 2u]);
+        rhs_2 = rhs_2 - vol * state[idx * 18u + 9u] / select(constants.dt, state[idx * 18u + 10u], state[idx * 18u + 10u] > 0.0) * state_old[idx * 18u + 2u] + vol * state[idx * 18u + 9u] / select(constants.dt, state[idx * 18u + 10u], state[idx * 18u + 10u] > 0.0) * (factor_n * state_old[idx * 18u + 2u] - factor_nm1 * state_old_old[idx * 18u + 2u]);
     }
     if (constants.dtau > 0.0) {
         rhs_2 += state[idx * 18u + 9u] * dual_time_scale * state_iter[idx * 18u + 2u];
@@ -149,6 +149,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     rhs_3 += state[idx * 18u + 17u] * vol;
     var bounded_sum_phi_0: f32 = 0.0;
     var bounded_sum_phi_1: f32 = 0.0;
+    var bounded_sum_phi_3: f32 = 0.0;
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];
         let owner = face_owner[face_idx];
@@ -344,6 +345,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (owner != idx) {
             phi_3 -= phi_3 * 2.0;
         }
+        bounded_sum_phi_3 += phi_3;
         if (!is_boundary) {
             var rec_3_phi_ho = select(state[idx * 18u + 12u], state[other_idx * 18u + 12u], phi_3 < 0.0);
             if (constants.scheme == 1u) {
@@ -379,7 +381,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     bounded_sum_phi_0 += state[idx * 18u + 11u] * ale_dvdt_ddt;
     bounded_sum_phi_1 += state[idx * 18u + 11u] * ale_dvdt_ddt;
-    rhs_2 -= constants.density * ale_dvdt_scl;
+    bounded_sum_phi_3 += state[idx * 18u + 11u] * ale_dvdt_ddt;
+    rhs_2 -= state[idx * 18u + 11u] * ale_dvdt_scl;
     rhs[idx * 4u + 0u] = rhs_0;
     rhs[idx * 4u + 1u] = rhs_1;
     rhs[idx * 4u + 2u] = rhs_2;

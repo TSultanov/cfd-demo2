@@ -295,7 +295,16 @@ fn build_allmach_system(
     // psi): it sets only the pseudo-acoustic time scale and vanishes at steady state
     // (dp/dt -> 0), so the converged solution is the real-psi physics. The physical psi
     // still drives the density recovery (host) and the thermal compression heating below.
-    let compressibility_term = typed_fvm::ddt_coeff(psi_precond_coeff, p_typed);
+    //
+    // `non_conservative_ale`: on a moving mesh this compressibility ddt is an INTENSIVE
+    // rate at the current volume (`psi_precond * V^{n+1} * dp/dt`), NOT a conserved
+    // product `d(V * psi_precond * p)/dt`. The conserved-mass geometric change
+    // `rho * dV/dt` is carried in full (per-cell rho) by the continuity volume source at
+    // the SCL rate, cancelling the mesh-relative flux exactly; a conservatively-weighted
+    // acoustic ddt would add a BDF2-rate `psi*p*dV/dt` that mismatches that SCL cancel by
+    // O(dt) and caps the moving-mesh temporal order at 1. Inert off ALE (byte-identical).
+    let compressibility_term =
+        typed_fvm::ddt_coeff(psi_precond_coeff, p_typed).with_non_conservative_ale();
     let p_laplacian_term = typed_fvm::laplacian(rho_dp_coeff, p_typed);
     // The predicted mass-flux divergence `div(phi_pred)` is the explicit source of
     // the pressure equation, elliptic-only on its own. At a SUPERSONIC outlet (p
@@ -382,7 +391,16 @@ fn build_allmach_system(
             // the O(0.1) velocity, where the analogous bounded momentum correction is
             // negligible) — it would leave a constant T error. Conservative div(m*T*) is
             // what the FD manufactured source expresses and matches the barotropic mms.
-            let d = if with_mms_source {
+            // On ALE the BOUNDED form is required even for the MMS: the bounded
+            // correction carries the geometric `rho*T*dV/dt` cancellation at the BDF2
+            // volume rate (`ale_dvdt_ddt`, mirroring the always-bounded momentum), without
+            // which the conservative form leaves a first-order
+            // `rho*T*(ale_dvdt_ddt - ale_dvdt_scl)` mismatch that caps the moving-mesh
+            // temporal order at 1 (and poisons rho -> p -> U through the EOS). The
+            // `T*div(phi)` worry above concerns the ABSOLUTE (physical) divergence; ALE MMS
+            // instruments are spatially UNIFORM (div(m*) = 0) so the bounded correction
+            // reduces to exactly the geometric term. Non-ALE MMS keeps the conservative form.
+            let d = if with_mms_source && !ale {
                 typed_fvm::div(phi_typed, t_typed)
             } else {
                 typed_fvm::div(phi_typed, t_typed).bounded()

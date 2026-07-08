@@ -258,6 +258,14 @@ impl<D: UnitDimension> TypedTerm<D> {
         self
     }
 
+    /// Declare a NON-conservative own-variable ddt on ALE: skip the conservative
+    /// moving-volume weighting so this ddt is an intensive rate at the current volume
+    /// `V^{n+1}`. See `Term::non_conservative_ale`. Only valid on implicit `Ddt` terms.
+    pub fn with_non_conservative_ale(mut self) -> Self {
+        self.inner = self.inner.with_non_conservative_ale();
+        self
+    }
+
     /// Create an equation from this single term.
     ///
     /// The target field is the unknown being solved for. Its dimension can be

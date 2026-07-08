@@ -1783,13 +1783,23 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
 
     // ALE continuity volume source: an equation whose `DivFlux` mass-flux
     // divergence is mesh-relative gains the compensating per-cell volume-change
-    // source. Mass balance on a moving cell (constant density):
+    // source. Mass balance on a moving cell:
     // ρ·(V^{n+1}−V^n)/dt + Σ_f φ_rel = 0, so the RHS (which already accumulated
     // `−Σ_f φ_rel` in the face loop) gains `−ρ·ale_dvdt_scl`. The rate is the
     // SCL/BDF1 rate — exactly what the mesh-flux closure guarantees
     // `Σ_f mesh_fluxes` sums to, so at a divergence-free absolute flux the two
     // cancel to f32 roundoff under any time scheme. Static mesh:
     // `ale_dvdt_scl == 0.0` bitwise and `rhs -= ρ·0.0` is the IEEE identity.
+    //
+    // Density is the PER-CELL `rho` (`ale_bounded_density`, = the `rho` state slot
+    // when present, else `constants.density`) — NOT `constants.density` — so it
+    // matches the per-cell `rho_f` the mesh-relative `Σ_f φ_rel` carries and the two
+    // geometric `rho·dV/dt` terms cancel EXACTLY for any density (not just `ρ≡ρ_ref`).
+    // Paired with a `non_conservative_ale` acoustic ddt (which then contributes NO
+    // geometric part), this makes the moving-mesh continuity row both 2nd-order and
+    // free-stream-preserving for a real (thermal-EOS) variable density. For the
+    // incompressible models (no `rho` slot) this is `constants.density`, bitwise the
+    // former behaviour.
     for equation in &system.equations {
         let has_ale_div_flux = equation.ops.iter().any(|op| {
             op.kind == DiscreteOpKind::Convection
@@ -1811,7 +1821,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             .expect("missing target offset");
         stmts.push(acc.sub_rhs(
             base_offset,
-            Expr::ident("constants").field("density") * Expr::ident("ale_dvdt_scl"),
+            ale_bounded_density.clone() * Expr::ident("ale_dvdt_scl"),
         ));
     }
 

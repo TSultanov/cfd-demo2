@@ -525,6 +525,86 @@ fn gpu_structured_compressible_box_matches_cpu() {
     assert!(max_d < 5e-3, "GPU vs CPU compressible mismatch {max_d}");
 }
 
+/// GEOMETRY PARITY: the density-based COMPRESSIBLE structured model now also
+/// carries the Brinkman momentum-penalty field (added for full geometry parity).
+/// Seeded with a uniform rightward momentum, the penalty must drive the velocity
+/// to ~0 inside a masked central block (u = rho_u/rho → 0) while the surrounding
+/// flow keeps moving, and the whole field must stay bounded. NOTE: the penalty
+/// pins momentum only; the mass/energy KT fluxes still cross solid faces, so this
+/// is a velocity-pinning obstacle, not a perfect no-penetration wall.
+#[test]
+fn gpu_structured_compressible_obstacle_pins_velocity() {
+    let (nx, ny) = (24usize, 24usize);
+    let model = compressible_structured_model().expect("model");
+    let s = model.system.unknowns_per_cell() as usize;
+    let (rho0, e0, p0, u0) = (1.0f64, 2.5f64, 1.0f64, 0.5f64);
+    let mut g =
+        StructuredGpuSolver::new(StructuredGrid::new(nx, ny, 1.0, 1.0), &model, 0.005, 2).unwrap();
+    g.set_fluid(1.0, 0.0);
+    g.set_named_field("rho", |_, _| rho0);
+    g.set_named_field("rho_u", |_, _| rho0 * u0); // rho_u_x = rho*u0 (uniform rightward)
+    g.set_named_field("rho_e", |_, _| e0);
+    g.set_named_field("p", |_, _| p0);
+    g.set_named_field("T", |_, _| 1.0);
+    if g.field_offset("mu").is_some() {
+        g.set_named_field("mu", |_, _| 0.0);
+    }
+
+    // Central solid block (away from the walls) — Brinkman momentum sink.
+    let pen_off = g
+        .field_offset("ibm_penalty_U")
+        .expect("compressible structured must declare ibm_penalty_U");
+    let solid = |x: f64, y: f64| (x - 0.5).abs() < 0.12 && (y - 0.5).abs() < 0.12;
+    g.set_state_component(pen_off, move |x, y| if solid(x, y) { -1.0e5 } else { 0.0 });
+
+    // Box Wall BCs (rho Dirichlet, rho_u=0, rho_e Dirichlet) as in the box test.
+    g.set_boundaries(move |_e, _x, _y| {
+        let mut v = vec![
+            BcComp { kind: 1, value: rho0 as f32 },
+            BcComp { kind: 1, value: 0.0 },
+            BcComp { kind: 1, value: 0.0 },
+        ];
+        if s >= 4 {
+            v.push(BcComp { kind: 1, value: e0 as f32 });
+        }
+        (3u32, v)
+    });
+
+    for _ in 0..12 {
+        g.step();
+    }
+    let u_off = g.field_offset("u").expect("primitive u");
+    let ux = g.state_field(u_off);
+    let uy = g.state_field(u_off + 1);
+    let rho = g.state_field(g.field_offset("rho").unwrap());
+    let grid = g.grid();
+    let mut inside_max = 0.0f64;
+    let mut outside_mean = 0.0f64;
+    let mut outside_n = 0;
+    for p in 0..nx * ny {
+        assert!(ux[p].is_finite() && uy[p].is_finite(), "compressible obstacle diverged");
+        assert!(rho[p] > 0.2 && rho[p] < 5.0, "compressible density drifted: {}", rho[p]);
+        let (x, y) = grid.cell_center(p);
+        let spd = ux[p].hypot(uy[p]);
+        if solid(x, y) {
+            inside_max = inside_max.max(spd);
+        } else if (x - 0.5).abs() > 0.25 {
+            // Sample the free stream well away from the block.
+            outside_mean += spd;
+            outside_n += 1;
+        }
+    }
+    outside_mean /= outside_n.max(1) as f64;
+    println!(
+        "[gpu-structured] compressible obstacle: inside_max={inside_max:.4}, outside_mean={outside_mean:.3}"
+    );
+    assert!(outside_mean > 0.1, "free stream stalled (outside_mean={outside_mean})");
+    assert!(
+        inside_max < 0.2 * outside_mean,
+        "compressible obstacle not pinned (inside_max={inside_max}, outside_mean={outside_mean})"
+    );
+}
+
 // Small shims so the thermal seeding is shared between the CPU and GPU solvers.
 trait ThermalSeed {
     fn set_fluid(&mut self, d: f64, v: f64);

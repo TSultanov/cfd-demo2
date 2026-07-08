@@ -38,6 +38,7 @@ type LapDensity = MulDim<Density, Length>;
 type LapMomentumDensity = MulDim<MomentumDensity, Length>;
 type LapEnergyDensity = MulDim<EnergyDensity, Length>;
 
+use super::incompressible_momentum::IBM_MOMENTUM_PENALTY_FIELD;
 use super::{BoundaryCondition, BoundarySpec, FieldBoundarySpec, ModelSpec};
 
 /// Manufactured continuity source field on the `compressible_mms` variant (scalar).
@@ -149,13 +150,14 @@ pub fn compressible_central_upwind_decl() -> crate::solver::model::flux_schemes:
 }
 
 fn build_compressible_system(fields: &CompressibleFields) -> EquationSystem {
-    build_compressible_system_impl(fields, false, false)
+    build_compressible_system_impl(fields, false, false, false)
 }
 
 fn build_compressible_system_impl(
     _fields: &CompressibleFields,
     with_mms_sources: bool,
     biharmonic: bool,
+    ibm: bool,
 ) -> EquationSystem {
     // cast_to() aligns terms to canonical dimension types: type-level dimension
     // expressions are not normalized, so semantically equivalent dimensions are
@@ -223,6 +225,22 @@ fn build_compressible_system_impl(
     if biharmonic {
         rho_u_sum = rho_u_sum
             + typed_fvm::laplacian(neg_bih_eps4.clone(), lap_rho_u_typed).cast_to::<Force>();
+    }
+    if ibm {
+        // Immersed-boundary Brinkman penalisation (structured only). The momentum
+        // unknown here is the CONSERVED momentum density rho_u (not primitive U),
+        // so the implicit sink `source_coeff(Sp, rho_u)` drives rho_u -> 0 (hence
+        // u = rho_u/rho -> 0) where the mask is large. Sp has FREQUENCY (1/Time)
+        // units so `Sp * rho_u * V` integrates to Force. Sp=0 in the fluid is the
+        // identity recovery of the base operator. NOTE: this pins the VELOCITY but
+        // the mass/energy KT fluxes (phi_rho, phi_rho_e) still cross solid faces,
+        // so the obstacle is porous to mass/energy — a true no-penetration wall
+        // additionally needs those fluxes masked (documented limitation).
+        let penalty_typed =
+            TypedFieldRef::<InvTime, Scalar>::new(IBM_MOMENTUM_PENALTY_FIELD);
+        let penalty_coeff = TypedCoeff::from_field(penalty_typed);
+        rho_u_sum =
+            rho_u_sum + typed_fvm::source_coeff(penalty_coeff, rho_u_typed).cast_to::<Force>();
     }
     let rho_u_eqn = rho_u_sum.eqn(rho_u_typed);
 
@@ -427,7 +445,10 @@ fn compressible_model_impl_topo(
     topology: cfd2_ir::equation::TopologyMode,
 ) -> Result<ModelSpec, String> {
     let fields = CompressibleFields::new();
-    let mut system = build_compressible_system_impl(&fields, with_mms_sources, biharmonic);
+    // The structured (dense-Cartesian) variant is immersed-boundary-capable:
+    // obstacles ride a per-cell Brinkman momentum mask, never cut from the grid.
+    let ibm = topology == cfd2_ir::equation::TopologyMode::Structured2D;
+    let mut system = build_compressible_system_impl(&fields, with_mms_sources, biharmonic, ibm);
     system.set_topology(topology);
     // Flux module reconstruction uses gradient fields in the state layout when enabled.
     // These are computed by the optional `flux_module_gradients` stage (Gauss gradients).
@@ -479,6 +500,12 @@ fn compressible_model_impl_topo(
         layout_fields.push(vol_scalar_dim::<RhoESourceUnit>(
             COMPRESSIBLE_MMS_SOURCE_RHO_E_FIELD,
         ));
+    }
+    if ibm {
+        // Per-cell Brinkman momentum-penalty mask (structured immersed obstacles).
+        // Frequency (1/Time) coefficient of source_coeff(Sp, rho_u); see the
+        // momentum equation in build_compressible_system_impl.
+        layout_fields.push(vol_scalar_dim::<InvTime>(IBM_MOMENTUM_PENALTY_FIELD));
     }
     let layout = PortRegistry::from_fields(layout_fields).into_state_layout();
 

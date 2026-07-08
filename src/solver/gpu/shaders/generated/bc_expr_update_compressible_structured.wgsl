@@ -70,7 +70,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (sfd_is_boundary) {
             let face_boundary_type = face_boundary[sfd_face_id];
             if (face_boundary_type == 1u) {
-                let in_p_c0 = state[idx * 22u + 8u];
+                let in_p_c0 = state[idx * 23u + 8u];
                 let bcv_rho_c0 = bc_value[sfd_face_id * 8u + 0u];
                 let bcv_u_c0 = bc_value[sfd_face_id * 8u + 4u];
                 let bcv_u_c1 = bc_value[sfd_face_id * 8u + 5u];
@@ -81,9 +81,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 bc_value[sfd_face_id * 8u + 7u] = max(in_p_c0, 0.000001) / (max(bcv_rho_c0, 0.000001) * max(constants.eos_r, 0.000000000001));
             }
             if (face_boundary_type == 2u) {
-                let in_rho_c0 = state[idx * 22u + 0u];
-                let in_u_c0 = state[idx * 22u + 10u];
-                let in_u_c1 = state[idx * 22u + 11u];
+                let in_rho_c0 = state[idx * 23u + 0u];
+                let in_u_c0 = state[idx * 23u + 10u];
+                let in_u_c1 = state[idx * 23u + 11u];
                 let bcv_p_c0 = bc_value[sfd_face_id * 8u + 6u];
                 bc_value[sfd_face_id * 8u + 0u] = max(in_rho_c0, 0.000001);
                 bc_value[sfd_face_id * 8u + 1u] = max(in_rho_c0, 0.000001) * in_u_c0;

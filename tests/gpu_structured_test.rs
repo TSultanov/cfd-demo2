@@ -605,6 +605,86 @@ fn gpu_structured_compressible_obstacle_pins_velocity() {
     );
 }
 
+/// GUI PARITY: the exact compressible CHANNEL the GUI's build_structured_init now
+/// runs — a uniform-freestream momentum IC + conserved-Dirichlet inlet (rho,
+/// rho*u_in, rho_e), zero-gradient outlet, no-slip walls — must sustain a
+/// through-flow past an immersed cylinder, pin the interior velocity, and stay
+/// bounded. Mirrors setup_structured_bcs' compressible branch + seed_structured_
+/// freestream so a regression there is caught here.
+#[test]
+fn gpu_structured_compressible_channel_ibm_runs() {
+    let (lx, ly) = (3.0f64, 1.0f64);
+    let (nx, ny) = (48usize, 16usize);
+    let model = compressible_structured_model().unwrap();
+    let s = model.system.unknowns_per_cell() as usize;
+    let (rho0, e0, u0) = (1.0f64, 2.5f64, 0.5f64);
+    let mut g =
+        StructuredGpuSolver::new(StructuredGrid::new(nx, ny, lx, ly), &model, 0.005, 2).unwrap();
+    g.set_fluid(1.0, 0.0);
+    g.set_named_field("rho", |_, _| rho0);
+    g.set_named_field("rho_u", |_, _| rho0 * u0); // uniform-freestream IC
+    g.set_named_field("rho_e", |_, _| e0);
+    g.set_named_field("p", |_, _| 1.0);
+    g.set_named_field("T", |_, _| 1.0);
+    if g.field_offset("mu").is_some() {
+        g.set_named_field("mu", |_, _| 0.0);
+    }
+    let (cx, cy, r) = (1.0f64, 0.51f64, 0.12f64);
+    let pen = g.field_offset("ibm_penalty_U").expect("compressible ibm_penalty_U");
+    g.set_state_component(pen, move |x, y| if (x - cx).hypot(y - cy) < r { -1.0e5 } else { 0.0 });
+
+    // Conserved-Dirichlet inlet, zero-gradient outlet, no-slip walls (GUI branch).
+    g.set_boundaries(move |edge, _x, _y| {
+        let d = |v: f32| BcComp { kind: 1, value: v };
+        let n = || BcComp { kind: 2, value: 0.0 };
+        let (bt, mut v): (u32, Vec<BcComp>) = match edge {
+            Edge::Left => (1, vec![d(rho0 as f32), d((rho0 * u0) as f32), d(0.0)]),
+            Edge::Right => (2, vec![n(), n(), n()]),
+            _ => (3, vec![n(), d(0.0), d(0.0)]),
+        };
+        if s >= 4 {
+            v.push(match edge {
+                Edge::Left => d(e0 as f32),
+                _ => n(),
+            });
+        }
+        (bt, v)
+    });
+
+    for _ in 0..30 {
+        g.step();
+    }
+    let uo = g.field_offset("u").unwrap();
+    let ux = g.state_field(uo);
+    let uy = g.state_field(uo + 1);
+    let rho = g.state_field(g.field_offset("rho").unwrap());
+    let grid = g.grid();
+    let (mut umax, mut inside_max, mut inlet_mean, mut inlet_n) = (0.0f64, 0.0f64, 0.0f64, 0usize);
+    for p in 0..nx * ny {
+        assert!(ux[p].is_finite() && uy[p].is_finite(), "compressible channel diverged");
+        assert!(rho[p] > 0.2 && rho[p] < 5.0, "density drifted: {}", rho[p]);
+        let (x, y) = grid.cell_center(p);
+        umax = umax.max(ux[p].hypot(uy[p]));
+        if (x - cx).hypot(y - cy) < 0.6 * r {
+            inside_max = inside_max.max(ux[p].hypot(uy[p]));
+        }
+        if x < lx / nx as f64 * 2.0 {
+            inlet_mean += ux[p];
+            inlet_n += 1;
+        }
+    }
+    inlet_mean /= inlet_n as f64;
+    println!(
+        "[gpu-structured] compressible channel+IBM: umax={umax:.3}, inside_max={inside_max:.4}, inlet_ux={inlet_mean:.3}"
+    );
+    assert!(inlet_mean > 0.2, "compressible through-flow did not develop (inlet_ux={inlet_mean})");
+    assert!(umax < 5.0, "unphysical compressible channel speed {umax}");
+    assert!(
+        inside_max < 0.15 * umax,
+        "compressible obstacle not pinned (inside_max={inside_max}, umax={umax})"
+    );
+}
+
 // Small shims so the thermal seeding is shared between the CPU and GPU solvers.
 trait ThermalSeed {
     fn set_fluid(&mut self, d: f64, v: f64);

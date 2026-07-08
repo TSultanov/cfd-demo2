@@ -2441,31 +2441,24 @@ impl CFDApp {
             .clone()
             .ok_or("structured mode requires a GPU queue")?;
 
-        // Compressible runs the closed uniform-gas box (all-Wall); the flow models
-        // run a CHANNEL (inlet left, outlet right, no-slip walls) whose immersed
-        // obstacle — a Brinkman `ibm_penalty_U` mask, never a cut cell — is the
-        // structured analogue of the unstructured geometry.
-        let is_box = request.model_id == "compressible_structured";
-        let (lx, ly) = if is_box { (1.0_f64, 1.0_f64) } else { (3.0_f64, 1.0_f64) };
+        // Every structured flow model runs a CHANNEL (inlet left, outlet right,
+        // no-slip walls) whose immersed obstacle — a Brinkman `ibm_penalty_U`
+        // mask, never a cut cell — is the structured analogue of the unstructured
+        // geometry. This includes the density-based compressible model, which
+        // drives the channel with a uniform-freestream momentum IC + conserved-
+        // Dirichlet inlet (its bc_expr closure keeps the dependent entries
+        // thermodynamically consistent).
+        let (lx, ly) = (3.0_f64, 1.0_f64);
         let cell = request.max_cell_size.max(1.0e-3);
         let nx = ((lx / cell).round() as usize).clamp(8, 192);
         let ny = ((ly / cell).round() as usize).clamp(8, 96);
 
         let mesh_start = std::time::Instant::now();
-        let sides = if is_box {
-            BoundarySides {
-                left: BoundaryType::Wall,
-                right: BoundaryType::Wall,
-                bottom: BoundaryType::Wall,
-                top: BoundaryType::Wall,
-            }
-        } else {
-            BoundarySides {
-                left: BoundaryType::Inlet,
-                right: BoundaryType::Outlet,
-                bottom: BoundaryType::Wall,
-                top: BoundaryType::Wall,
-            }
+        let sides = BoundarySides {
+            left: BoundaryType::Inlet,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::Wall,
+            top: BoundaryType::Wall,
         };
         let mesh = generate_structured_rect_mesh(nx, ny, lx, ly, sides);
         CFDApp::push_trace_init_event(
@@ -2500,13 +2493,16 @@ impl CFDApp {
         )?;
         solver.set_fluid(request.params.density as f64, request.params.viscosity as f64);
         seed_structured_state(&mut solver, request.model_id);
-        // Immersed obstacle from the selected geometry (Brinkman mask; momentum
-        // is the only structured model with an `ibm_penalty_U` field).
+        // Uniform-freestream momentum IC (compressible: rho_u = rho*u_in) so the
+        // channel starts from a moving state — the stable configuration; a rest
+        // IC on the fine grid can stall/diverge the density-based model.
+        seed_structured_freestream(&mut solver, request.model_id, request.params.inlet_velocity as f64);
+        // Immersed obstacle from the selected geometry (Brinkman mask; all three
+        // structured models now declare an `ibm_penalty_U` field).
         seed_structured_ibm(&mut solver, request.selected_geometry, lx, ly);
         setup_structured_bcs(
             &mut solver,
             request.model_id,
-            is_box,
             request.params.inlet_velocity as f64,
             s,
         );
@@ -5033,35 +5029,53 @@ fn seed_structured_ibm(s: &mut StructuredGpuSolver, geom: GeometryType, lx: f64,
     });
 }
 
-/// Apply the structured boundary conditions: a uniform gas box (compressible —
-/// all walls pinned to the rest state) or a CHANNEL (flow models — inlet-left
-/// Dirichlet velocity, outlet-right pressure-Dirichlet + zero-gradient velocity,
-/// no-slip top/bottom walls).
-fn setup_structured_bcs(
-    s: &mut StructuredGpuSolver,
-    model_id: &str,
-    is_box: bool,
-    u_in: f64,
-    stride_s: usize,
-) {
-    if is_box || model_id == "compressible_structured" {
+/// Seed the uniform-freestream momentum IC the density-based compressible
+/// channel needs: `rho_u = rho * u_in` (rightward). No-op for the pressure-based
+/// models, whose primitive-velocity channel drives fine from a rest IC.
+fn seed_structured_freestream(s: &mut StructuredGpuSolver, model_id: &str, u_in: f64) {
+    if model_id == "compressible_structured" {
+        // rho was seeded to 1.0 in seed_structured_state; rho_u_x = rho*u_in.
+        if s.field_offset("rho_u").is_some() {
+            s.set_named_field("rho_u", move |_, _| u_in);
+        }
+    }
+}
+
+/// Apply the structured CHANNEL boundary conditions (inlet left, outlet right,
+/// no-slip top/bottom walls). The two solved-unknown layouts need different
+/// component conventions:
+/// - pressure-based (incompressible / all-Mach thermal): primitive `[Ux, Uy, p]`
+///   (+`T`) — inlet Dirichlet velocity, outlet pressure-Dirichlet + zero-gradient
+///   velocity.
+/// - density-based (compressible): conserved `[rho, rho_u_x, rho_u_y, rho_e]` —
+///   conserved-Dirichlet inlet (`rho`, `rho*u_in`, `rho_e`), zero-gradient
+///   outlet; the model's `bc_expr` closure keeps the dependent entries
+///   thermodynamically consistent.
+fn setup_structured_bcs(s: &mut StructuredGpuSolver, model_id: &str, u_in: f64, stride_s: usize) {
+    if model_id == "compressible_structured" {
         let (rho0, e0) = (1.0f32, 2.5f32);
-        s.set_boundaries(move |_e, _x, _y| {
-            let mut v = vec![
-                StructBc { kind: 1, value: rho0 },
-                StructBc { kind: 1, value: 0.0 },
-                StructBc { kind: 1, value: 0.0 },
-            ];
+        s.set_boundaries(move |edge, _x, _y| {
+            let d = |v: f32| StructBc { kind: 1, value: v };
+            let n = || StructBc { kind: 2, value: 0.0 };
+            let (btype, mut v): (u32, Vec<StructBc>) = match edge {
+                StructEdge::Left => (1, vec![d(rho0), d(rho0 * u_in as f32), d(0.0)]),
+                StructEdge::Right => (2, vec![n(), n(), n()]),
+                // No-slip wall: momentum pinned to 0, rho/rho_e zero-gradient.
+                _ => (3, vec![n(), d(0.0), d(0.0)]),
+            };
             if stride_s >= 4 {
-                v.push(StructBc { kind: 1, value: e0 });
+                v.push(match edge {
+                    StructEdge::Left => d(e0),
+                    _ => n(),
+                });
             }
-            (3, v)
+            (btype, v)
         });
     } else {
-        // Channel: Inlet(1) left, Outlet(2) right, Wall(3) top/bottom. bc_kind
-        // 1=Dirichlet, 2=Neumann(zero-grad). Components 0=Ux,1=Uy,2=p (+3=T).
+        // Pressure-based channel. bc_kind 1=Dirichlet, 2=Neumann(zero-grad).
+        // Components 0=Ux, 1=Uy, 2=p (+3=T).
         s.set_boundaries(move |edge, _x, _y| {
-            let (btype, comps): (u32, Vec<StructBc>) = match edge {
+            let (btype, mut v): (u32, Vec<StructBc>) = match edge {
                 StructEdge::Left => (
                     1,
                     vec![
@@ -5087,15 +5101,13 @@ fn setup_structured_bcs(
                     ],
                 ),
             };
-            let mut v = comps;
             if stride_s >= 4 {
                 // T: Dirichlet at inlet, zero-gradient elsewhere.
-                let t = if matches!(edge, StructEdge::Left) {
+                v.push(if matches!(edge, StructEdge::Left) {
                     StructBc { kind: 1, value: 1.0 }
                 } else {
                     StructBc { kind: 2, value: 0.0 }
-                };
-                v.push(t);
+                });
             }
             (btype, v)
         });

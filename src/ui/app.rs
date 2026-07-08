@@ -1,16 +1,19 @@
 use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_cvt_mesh, generate_delaunay_mesh,
-    generate_structured_nozzle_mesh, generate_structured_symmetric_nozzle_mesh,
-    generate_voronoi_mesh, BackwardsStep, BoundarySides,
-    BoundaryType, ChannelWithObstacle, LloydConfig, Mesh, Nozzle,
+    generate_structured_nozzle_mesh, generate_structured_rect_mesh,
+    generate_structured_symmetric_nozzle_mesh, generate_voronoi_mesh, BackwardsStep,
+    BoundarySides, BoundaryType, ChannelWithObstacle, LloydConfig, Mesh, Nozzle,
 };
 use crate::solver::model::{
     all_models, compressible_model_with_eos, ModelPreconditionerSpec, ModelSpec,
 };
 use crate::solver::scheme::Scheme;
+use crate::solver::gpu::structured::{
+    BcComp as StructBc, Edge as StructEdge, StructuredGpuSolver, StructuredGrid,
+};
 use crate::solver::{
     GpuLowMachPrecondModel, LinearSolverStats, OuterStepStatus, PreconditionerType,
-    TimeScheme as GpuTimeScheme, UiPortSet,
+    TimeScheme as GpuTimeScheme, UiPortSet, UnifiedSolver,
 };
 use crate::trace as tracefmt;
 use crate::ui::{cfd_renderer, fluid::Fluid};
@@ -23,8 +26,8 @@ use std::thread;
 
 use crate::meshgen::meshless::{generate_cvt_mesh_with_seeds, CvtMeshSeeds};
 use crate::sim::{
-    BoundaryMotionSpec, DivergeReason, DriverBuild, MeshMotionSpec, MovingMeshDriver,
-    MovingMeshStats, OscAxis, RegenBackend, RuntimeParams, SolverDriver,
+    BoundaryMotionSpec, DivergeReason, DriverBuild, FieldStats, MeshMotionSpec, MovingMeshDriver,
+    MovingMeshStats, OscAxis, Readback, RegenBackend, RuntimeParams, SolverDriver, StepOutcome,
     OSC_AMPLITUDE_CELL_FRACTION,
 };
 
@@ -35,6 +38,24 @@ enum RenderMode {
     EguiPlot,
     /// Render directly on GPU (zero-copy)
     GpuDirect,
+}
+
+/// Discretisation mode. `Unstructured` is the incumbent face-connectivity mesh
+/// (cut-cell / Voronoi / Delaunay) driven by the `SolverDriver`/`UnifiedSolver`.
+/// `Structured2D` is the dense-Cartesian `TopologyMode::Structured2D` path driven
+/// by a `StructuredGpuSolver` — no connectivity indirection, immersed obstacles.
+/// Selecting it hides the unstructured meshers, ALE/moving-mesh, and the
+/// curvilinear nozzle geometry, and narrows the model list to structured models.
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+enum MeshMode {
+    Unstructured,
+    Structured2D,
+}
+
+impl Default for MeshMode {
+    fn default() -> Self {
+        Self::Unstructured
+    }
 }
 
 #[derive(PartialEq, Clone, Copy)]
@@ -205,6 +226,7 @@ struct SolverInitRequest {
     model_id: &'static str,
     selected_geometry: GeometryType,
     mesh_type: MeshType,
+    mesh_mode: MeshMode,
     min_cell_size: f64,
     max_cell_size: f64,
     growth_rate: f64,
@@ -306,22 +328,105 @@ struct CachedGpuStats {
 enum SolverMode {
     Static(SolverDriver),
     MovingMesh(MovingMeshDriver),
+    /// Dense-Cartesian `TopologyMode::Structured2D` path — a standalone
+    /// [`StructuredGpuSolver`] (no `SolverDriver`/`Mesh`). The worker drives it
+    /// through the mode-level abstraction methods below rather than `driver()`.
+    Structured(StructuredGpuSolver),
 }
 
 impl SolverMode {
-    /// The wrapped solver driver (shared telemetry/params/trace access).
+    /// The wrapped solver driver (Static/Moving only). Panics for `Structured`,
+    /// which has no `SolverDriver` — structured-reachable worker code must use the
+    /// abstraction methods below, never `driver()`.
     fn driver(&self) -> &SolverDriver {
         match self {
             SolverMode::Static(d) => d,
             SolverMode::MovingMesh(m) => m.driver(),
+            SolverMode::Structured(_) => panic!("driver() called on Structured SolverMode"),
         }
     }
 
-    /// Mutable access to the wrapped solver driver.
+    /// Mutable access to the wrapped solver driver (Static/Moving only).
     fn driver_mut(&mut self) -> &mut SolverDriver {
         match self {
             SolverMode::Static(d) => d,
             SolverMode::MovingMesh(m) => m.driver_mut(),
+            SolverMode::Structured(_) => panic!("driver_mut() called on Structured SolverMode"),
+        }
+    }
+
+    /// The wrapped `UnifiedSolver`, if this mode has one (Static/Moving). `None`
+    /// for `Structured`, whose telemetry/residual surface does not exist.
+    fn unified_solver(&self) -> Option<&UnifiedSolver> {
+        match self {
+            SolverMode::Static(d) => Some(d.solver()),
+            SolverMode::MovingMesh(m) => Some(m.driver().solver()),
+            SolverMode::Structured(_) => None,
+        }
+    }
+
+    fn unified_solver_mut(&mut self) -> Option<&mut UnifiedSolver> {
+        match self {
+            SolverMode::Static(d) => Some(d.solver_mut()),
+            SolverMode::MovingMesh(m) => Some(m.driver_mut().solver_mut()),
+            SolverMode::Structured(_) => None,
+        }
+    }
+
+    /// The packed cell-major `state` GPU buffer feeding the renderer viz color.
+    fn state_buffer(&self) -> &wgpu::Buffer {
+        match self {
+            SolverMode::Structured(s) => s.state_buffer(),
+            _ => self.driver().solver().state_buffer(),
+        }
+    }
+
+    /// Same-device copy of packed `state` into a renderer viz buffer.
+    fn copy_state_to_buffer(&self, dst: &wgpu::Buffer) {
+        match self {
+            SolverMode::Structured(s) => s.copy_state_to_buffer(dst),
+            _ => self.driver().solver().copy_state_to_buffer(dst),
+        }
+    }
+
+    /// The state-layout-derived UI ports (velocity/pressure offsets, stride).
+    fn ui_ports(&self) -> UiPortSet {
+        match self {
+            SolverMode::Structured(s) => UiPortSet::from_layout(s.state_layout()),
+            _ => self.driver().solver().ui_ports(),
+        }
+    }
+
+    fn model_id_str(&self) -> &'static str {
+        match self {
+            SolverMode::Structured(s) => s.model_id(),
+            _ => self.driver().solver().model().id,
+        }
+    }
+
+    fn sim_time(&self) -> f32 {
+        match self {
+            SolverMode::Structured(s) => s.time() as f32,
+            _ => self.driver().solver().time(),
+        }
+    }
+
+    fn sim_dt(&self) -> f32 {
+        match self {
+            SolverMode::Structured(s) => s.dt() as f32,
+            _ => self.driver().solver().dt(),
+        }
+    }
+
+    /// Apply live runtime params. Structured supports fluid + dt; the unstructured
+    /// arms route to the full `SolverDriver::apply_params`.
+    fn apply_params_any(&mut self, params: &RuntimeParams) {
+        match self {
+            SolverMode::Structured(s) => {
+                s.set_dt(params.requested_dt as f64);
+                s.set_fluid(params.density as f64, params.viscosity as f64);
+            }
+            _ => self.driver_mut().apply_params(params),
         }
     }
 }
@@ -665,6 +770,8 @@ pub struct CFDApp {
     timestep: f64,
     selected_geometry: GeometryType,
     mesh_type: MeshType,
+    /// Discretisation mode: dense-Cartesian structured vs unstructured mesh.
+    mesh_mode: MeshMode,
     plot_field: PlotField,
     is_running: bool,
     selected_scheme: Scheme,
@@ -853,6 +960,7 @@ impl CFDApp {
             timestep: 0.02,
             selected_geometry: GeometryType::default(),
             mesh_type: MeshType::default(),
+            mesh_mode: MeshMode::default(),
             plot_field: PlotField::VelocityMag,
             is_running: false,
             selected_scheme: Scheme::Upwind,
@@ -1137,7 +1245,16 @@ impl CFDApp {
     /// them) but only ever reproduce a manufactured solution — never a physical
     /// flow a user would want to run. The dropdown is therefore restricted to the
     /// genuine flow models; the completeness check is kept as a secondary guard.
-    fn supported_ui_models() -> Vec<(&'static str, &'static str)> {
+    fn supported_ui_models(mesh_mode: MeshMode) -> Vec<(&'static str, &'static str)> {
+        // Structured mode offers exactly the models with a `TopologyMode::Structured2D`
+        // variant (dense-Cartesian, immersed obstacles) — a fixed short list.
+        if mesh_mode == MeshMode::Structured2D {
+            return vec![
+                ("incompressible_momentum_structured", "Incompressible"),
+                ("allmach_thermal_structured", "All-Mach Thermal"),
+                ("compressible_structured", "Compressible"),
+            ];
+        }
         // Only physical-flow models belong in the GUI (these are exactly the ones
         // `model_label` names). Verification variants (`*_mms*`, `*biharmonic*`,
         // `*demo*`) are excluded.
@@ -1164,6 +1281,9 @@ impl CFDApp {
     }
 
     fn build_selected_model(&self) -> Result<ModelSpec, String> {
+        if self.mesh_mode == MeshMode::Structured2D {
+            return structured_model_by_id(self.model_id);
+        }
         if self.model_id == "compressible" {
             return compressible_model_with_eos(self.current_fluid.eos);
         }
@@ -1225,6 +1345,7 @@ impl CFDApp {
             model_id: self.model_id,
             selected_geometry: self.selected_geometry,
             mesh_type: self.mesh_type,
+            mesh_mode: self.mesh_mode,
             min_cell_size: self.min_cell_size,
             max_cell_size: self.max_cell_size,
             growth_rate: self.growth_rate,
@@ -2026,15 +2147,18 @@ impl CFDApp {
         // WITH its seeds and wraps a `MovingMeshDriver` around the incompressible
         // ALE model. Both yield the same downstream tuple, so the renderer / viz /
         // return tail below is shared.
-        let (mode, mesh, cached_u, cached_p, mut model_caps) = if request.enable_moving_mesh {
-            CFDApp::build_moving_init(&request, &mut trace_init_events)?
-        } else {
-            CFDApp::build_static_init(&request, &mut trace_init_events)?
-        };
+        let (mode, mesh, cached_u, cached_p, mut model_caps) =
+            if request.mesh_mode == MeshMode::Structured2D {
+                CFDApp::build_structured_init(&request, &mut trace_init_events)?
+            } else if request.enable_moving_mesh {
+                CFDApp::build_moving_init(&request, &mut trace_init_events)?
+            } else {
+                CFDApp::build_static_init(&request, &mut trace_init_events)?
+            };
         let n_cells = mesh.num_cells();
 
         // Update model_caps from the solver's ui_ports() (prefers PortRegistry over StateLayout)
-        let ui_ports = mode.driver().solver().ui_ports();
+        let ui_ports = mode.ui_ports();
         model_caps.plot_stride = ui_ports.stride;
         model_caps.plot_u_offset = ui_ports.u_offset.unwrap_or(0);
         model_caps.plot_p_offset = ui_ports.p_offset.unwrap_or(0);
@@ -2091,21 +2215,21 @@ impl CFDApp {
                     label: Some("cfd_viz:init_copy_state"),
                 });
                 encoder.copy_buffer_to_buffer(
-                    mode.driver().solver().state_buffer(),
+                    mode.state_buffer(),
                     0,
                     &viz_buffer,
                     0,
                     state_size_bytes,
                 );
                 encoder.copy_buffer_to_buffer(
-                    mode.driver().solver().state_buffer(),
+                    mode.state_buffer(),
                     0,
                     &viz_buffer_1,
                     0,
                     state_size_bytes,
                 );
                 encoder.copy_buffer_to_buffer(
-                    mode.driver().solver().state_buffer(),
+                    mode.state_buffer(),
                     0,
                     &viz_buffer_2,
                     0,
@@ -2291,6 +2415,94 @@ impl CFDApp {
 
         Ok((
             SolverMode::Static(driver),
+            mesh,
+            cached_u,
+            cached_p,
+            model_caps,
+        ))
+    }
+
+    /// Structured (dense-Cartesian `TopologyMode::Structured2D`) init path: build a
+    /// uniform grid + a companion render `Mesh` (row-major `p=j*nx+i`, so cell ids
+    /// line up 1:1 with the packed state) and a standalone [`StructuredGpuSolver`]
+    /// on the GUI's device. The scenario is a lid-driven cavity (momentum /
+    /// all-Mach thermal) or a uniform gas box (compressible) — the proven
+    /// structured demos. Obstacles are immersed (Brinkman), never cut.
+    fn build_structured_init(
+        request: &SolverInitRequest,
+        trace_init_events: &mut Vec<tracefmt::TraceInitEvent>,
+    ) -> Result<(SolverMode, Mesh, Vec<(f64, f64)>, Vec<f64>, ModelUiCaps), String> {
+        let device = request
+            .wgpu_device
+            .clone()
+            .ok_or("structured mode requires a GPU device")?;
+        let queue = request
+            .wgpu_queue
+            .clone()
+            .ok_or("structured mode requires a GPU queue")?;
+
+        // Unit square, uniform spacing from the cell-size slider.
+        let (lx, ly) = (1.0_f64, 1.0_f64);
+        let cell = request.max_cell_size.max(1.0e-3);
+        let nx = ((lx / cell).round() as usize).clamp(8, 96);
+        let ny = ((ly / cell).round() as usize).clamp(8, 96);
+
+        let mesh_start = std::time::Instant::now();
+        let mesh = generate_structured_rect_mesh(
+            nx,
+            ny,
+            lx,
+            ly,
+            BoundarySides {
+                left: BoundaryType::Wall,
+                right: BoundaryType::Wall,
+                bottom: BoundaryType::Wall,
+                top: BoundaryType::Wall,
+            },
+        );
+        CFDApp::push_trace_init_event(
+            trace_init_events,
+            "mesh.generate.structured",
+            mesh_start.elapsed(),
+            Some(format!("{nx}x{ny}")),
+        );
+
+        let grid = StructuredGrid::new(nx, ny, lx, ly);
+        let model = structured_model_by_id(request.model_id)?;
+        let model_caps = CFDApp::model_ui_caps(&model);
+        let s = model.system.unknowns_per_cell() as usize;
+        let dt = request.params.requested_dt.max(1.0e-6) as f64;
+        let outer = request.params.outer_iters.max(1) as usize;
+
+        let solver_start = std::time::Instant::now();
+        let ctx = pollster::block_on(crate::solver::gpu::context::GpuContext::new(
+            Some(device),
+            Some(queue),
+        ))?;
+        let mut solver = StructuredGpuSolver::with_context(ctx, grid, &model, dt, outer)?;
+        solver.set_fluid(request.params.density as f64, request.params.viscosity as f64);
+        seed_structured_state(&mut solver, request.model_id);
+        setup_structured_bcs(&mut solver, request.model_id, request.params.inlet_velocity as f64, s);
+        CFDApp::push_trace_init_event(
+            trace_init_events,
+            "solver.new",
+            solver_start.elapsed(),
+            Some(format!("model_id={} cells={}", request.model_id, nx * ny)),
+        );
+
+        // Initial fields for the first plot (before the first readback).
+        let ports = UiPortSet::from_layout(solver.state_layout());
+        let cached_u = ports
+            .u_offset
+            .map(|o| solver.get_u(o as usize))
+            .unwrap_or_default();
+        let cached_p = ports
+            .p_offset
+            .map(|o| solver.get_scalar(o as usize))
+            .unwrap_or_default();
+
+        Ok((
+            SolverMode::Structured(solver),
             mesh,
             cached_u,
             cached_p,
@@ -2933,6 +3145,64 @@ impl eframe::App for CFDApp {
 
                     ui.add_enabled_ui(!is_initializing, |ui| {
                     ui.group(|ui| {
+                        ui.label("Discretization");
+                        let mut mode_changed = false;
+                        mode_changed |= ui
+                            .radio_value(
+                                &mut self.mesh_mode,
+                                MeshMode::Unstructured,
+                                "Unstructured mesh",
+                            )
+                            .on_hover_text(
+                                "Face-connectivity mesh (cut-cell / Voronoi / Delaunay), \
+                                 the full solver + moving-mesh (ALE) feature set.",
+                            )
+                            .changed();
+                        mode_changed |= ui
+                            .radio_value(
+                                &mut self.mesh_mode,
+                                MeshMode::Structured2D,
+                                "Structured (dense grid)",
+                            )
+                            .on_hover_text(
+                                "Dense Cartesian grid with NO connectivity indirection; \
+                                 immersed (Brinkman) obstacles instead of cut cells. GPU only. \
+                                 A lid-driven cavity / uniform-gas box demo. Hides the \
+                                 unstructured meshers, mesh grading, moving mesh (ALE), and \
+                                 the nozzle geometry.",
+                            )
+                            .changed();
+                        if mode_changed {
+                            if self.mesh_mode == MeshMode::Structured2D {
+                                // Structured has no ALE and a fixed model family:
+                                // force-disable moving mesh, use the GPU backend, and
+                                // switch to a structured model id.
+                                self.enable_moving_mesh = false;
+                                self.backend = BackendChoice::Gpu;
+                                if !self.model_id.ends_with("_structured") {
+                                    self.model_id = "incompressible_momentum_structured";
+                                }
+                            } else if let Some(base) =
+                                self.model_id.strip_suffix("_structured")
+                            {
+                                // Back to unstructured: map the structured id → base.
+                                self.model_id = match base {
+                                    "incompressible_momentum" => "incompressible_momentum",
+                                    "allmach_thermal" => "allmach_thermal",
+                                    "compressible" => "compressible",
+                                    _ => "incompressible_momentum",
+                                };
+                            }
+                            self.apply_model_defaults();
+                            self.init_solver();
+                        }
+                    });
+
+                    // Geometry / meshers only apply to the unstructured path; the
+                    // structured mode is a fixed dense box (lid cavity / gas box).
+                    let structured = self.mesh_mode == MeshMode::Structured2D;
+                    ui.add_enabled_ui(!structured, |ui| {
+                    ui.group(|ui| {
                         ui.label("Geometry");
                         let mut geom_changed = false;
                         geom_changed |= ui
@@ -2988,13 +3258,15 @@ impl eframe::App for CFDApp {
                             self.init_solver();
                         }
                     });
+                    }); // end add_enabled_ui(!structured) around Geometry
 
                     ui.group(|ui| {
                         ui.label("Mesh Parameters");
-                        // The fitted (structured) mesh is a uniform grid: only a single
-                        // target cell size applies, so hide the min-size / growth-rate
-                        // controls it does not honour.
-                        let show_grading = self.mesh_type.supports_size_grading();
+                        // The fitted (structured) mesh AND the dense structured grid are
+                        // uniform: only a single target cell size applies, so hide the
+                        // min-size / growth-rate controls they do not honour.
+                        let show_grading =
+                            self.mesh_type.supports_size_grading() && !structured;
                         if show_grading {
                             ui.add(
                                 adaptive_slider(
@@ -3035,6 +3307,9 @@ impl eframe::App for CFDApp {
                                     .text("Growth Rate"),
                             );
                         }
+                        // The unstructured mesher choice is meaningless for a dense
+                        // Cartesian structured grid — hide it entirely in that mode.
+                        if !structured {
                         ui.separator();
                         ui.label("Mesh Type");
                         // Moving mesh locks Mesh Type to Voronoi (CVT) — grey the
@@ -3068,8 +3343,11 @@ impl eframe::App for CFDApp {
                                 "Locked to Voronoi (CVT) while Moving Mesh (ALE) is enabled.",
                             );
                         }
+                        } // end if !structured (Mesh Type)
                     });
 
+                        // Moving mesh (ALE) has no structured analogue.
+                        if !structured {
                         ui.group(|ui| {
                         ui.label("Moving Mesh (ALE)");
                         // Moving mesh keeps the user's SELECTED model — it maps it to
@@ -3381,6 +3659,7 @@ impl eframe::App for CFDApp {
                             ui.label("Applied on Initialize / Reset.");
                         }
                         });
+                        } // end if !structured (Moving Mesh ALE group)
 
                         ui.group(|ui| {
                         ui.label("Fluid Properties");
@@ -3889,6 +4168,9 @@ impl eframe::App for CFDApp {
                             );
                         }
 
+                        // The structured banded solver runs a fixed Upwind scheme —
+                        // the advection-scheme choice is inert there.
+                        if self.mesh_mode != MeshMode::Structured2D {
                         ui.separator();
                         ui.label("Advection Scheme");
                         if ui
@@ -3959,6 +4241,7 @@ impl eframe::App for CFDApp {
                         if self.model_caps.supports_eos_tuning {
                             ui.label("Compressible solver uses this for KT flux reconstruction + deferred-correction advection.");
                         }
+                        } // end if !structured (Advection Scheme)
 
                         ui.separator();
                         ui.label("Preconditioner");
@@ -4098,10 +4381,18 @@ impl eframe::App for CFDApp {
                         // All-Mach thermal under ALE is one click, never a
                         // disable-retick-reenable dance.
                         let moving_active = self.enable_moving_mesh || self.solver_is_moving;
+                        let ui_models = CFDApp::supported_ui_models(self.mesh_mode);
+                        let cur_label = ui_models
+                            .iter()
+                            .find(|(id, _)| *id == self.model_id)
+                            .map(|(_, l)| *l)
+                            .unwrap_or_else(|| CFDApp::model_label(self.model_id));
                         egui::ComboBox::from_label("Model")
-                            .selected_text(CFDApp::model_label(self.model_id))
+                            .selected_text(cur_label)
                             .show_ui(ui, |ui| {
-                                for (id, label) in CFDApp::supported_ui_models() {
+                                for (id, label) in ui_models {
+                                    // ALE has no structured variant; structured
+                                    // mode is never `moving_active`.
                                     let selectable =
                                         !moving_active || CFDApp::ale_model_for(id).is_some();
                                     let entry = ui.add_enabled(
@@ -4133,12 +4424,18 @@ impl eframe::App for CFDApp {
                         egui::ComboBox::from_label("Compute Backend")
                             .selected_text(self.backend.label())
                             .show_ui(ui, |ui| {
+                                // The structured GPU solver needs a GPU device (its
+                                // state buffer feeds the renderer) — only offer GPU.
+                                let structured = self.mesh_mode == MeshMode::Structured2D;
                                 for choice in BackendChoice::ALL {
-                                    ui.selectable_value(
-                                        &mut self.backend,
-                                        choice,
-                                        choice.label(),
-                                    );
+                                    let ok = !structured || choice == BackendChoice::Gpu;
+                                    ui.add_enabled_ui(ok, |ui| {
+                                        ui.selectable_value(
+                                            &mut self.backend,
+                                            choice,
+                                            choice.label(),
+                                        );
+                                    });
                                 }
                             })
                             .response
@@ -4401,7 +4698,7 @@ fn solver_worker_stop_trace(
         return;
     };
 
-    if let Some(s) = mode.as_mut().map(|m| m.driver_mut().solver_mut()) {
+    if let Some(s) = mode.as_mut().and_then(|m| m.unified_solver_mut()) {
         s.set_collect_trace(false);
         let _ = s.enable_detailed_profiling(false);
         if session.profiling_enabled {
@@ -4520,6 +4817,162 @@ fn solver_worker_stop_trace(
     let path = session.writer.path().display().to_string();
     let _ = session.writer.close();
     eprintln!("[cfd2][trace] closed {}", path);
+}
+
+/// One implicit step of the structured GPU solver, synthesising the same
+/// `StepOutcome`/`Readback`/`FieldStats` shape the worker consumes from the
+/// unstructured `SolverDriver::step` — the structured banded solve has no
+/// adaptive-dt / divergence machinery, so we build these here.
+fn structured_step(s: &mut StructuredGpuSolver, readback: bool) -> StepOutcome {
+    let t0 = std::time::Instant::now();
+    s.step();
+    let step_time_ms = t0.elapsed().as_secs_f32() * 1000.0;
+    let dt = s.dt() as f32;
+
+    let ports = UiPortSet::from_layout(s.state_layout());
+    let readback = if readback {
+        let u = ports
+            .u_offset
+            .map(|off| s.get_u(off as usize))
+            .unwrap_or_default();
+        let p = ports
+            .p_offset
+            .map(|off| s.get_scalar(off as usize))
+            .unwrap_or_default();
+        let mut max_vel = 0.0f64;
+        let mut nonfinite_u = 0usize;
+        for &(ux, uy) in &u {
+            let m = ux.hypot(uy);
+            if m.is_finite() {
+                max_vel = max_vel.max(m);
+            } else {
+                nonfinite_u += 1;
+            }
+        }
+        let mut p_min = f64::INFINITY;
+        let mut p_max = f64::NEG_INFINITY;
+        let mut nonfinite_p = 0usize;
+        for &pv in &p {
+            if pv.is_finite() {
+                p_min = p_min.min(pv);
+                p_max = p_max.max(pv);
+            } else {
+                nonfinite_p += 1;
+            }
+        }
+        let p_finite = nonfinite_p == 0 && !p.is_empty();
+        let stats = FieldStats {
+            max_vel,
+            nonfinite_u,
+            p_min: if p_finite { p_min } else { 0.0 },
+            p_max: if p_finite { p_max } else { 0.0 },
+            p_finite,
+            nonfinite_p,
+            rho: None,
+        };
+        Some(Readback { u, p, stats })
+    } else {
+        None
+    };
+
+    let diverged = readback.as_ref().and_then(|rb| {
+        if rb.stats.nonfinite_u > 0 || rb.stats.nonfinite_p > 0 {
+            Some(DivergeReason::NonFinite {
+                u: rb.stats.nonfinite_u,
+                p: rb.stats.nonfinite_p,
+            })
+        } else {
+            None
+        }
+    });
+
+    StepOutcome {
+        dt,
+        step_time_ms,
+        linear_stats: Vec::new(),
+        outer_iters: None,
+        diverged,
+        should_stop: false,
+        readback,
+    }
+}
+
+/// Resolve the `TopologyMode::Structured2D` model for a structured model id.
+fn structured_model_by_id(id: &str) -> Result<ModelSpec, String> {
+    Ok(match id {
+        "incompressible_momentum_structured" => {
+            crate::solver::model::incompressible_momentum_structured_model()?
+        }
+        "allmach_thermal_structured" => crate::solver::model::allmach_thermal_structured_model()?,
+        "compressible_structured" => crate::solver::model::compressible_structured_model()?,
+        other => return Err(format!("no structured model for id '{other}'")),
+    })
+}
+
+/// Seed the non-solved state fields a structured model needs (all-Mach `psi`/`rho`
+/// reference fields; compressible conserved rest state). Mirrors the driver's
+/// seeding + the structured tests.
+fn seed_structured_state(s: &mut StructuredGpuSolver, model_id: &str) {
+    match model_id {
+        "allmach_thermal_structured" => {
+            let psi = 0.5_f64;
+            s.set_named_field("psi", |_, _| psi);
+            s.set_named_field("psi_precond", move |_, _| psi.max(1.0));
+            s.set_named_field("rho", |_, _| 1.0);
+            s.set_named_field("rho_t_ref", |_, _| 1.0);
+            s.set_named_field("T", |_, _| 1.0);
+            if s.field_offset("t_ref").is_some() {
+                s.set_named_field("t_ref", |_, _| 1.0);
+            }
+            if s.field_offset("rho_floor").is_some() {
+                s.set_named_field("rho_floor", move |_, _| psi * 1.0e-5);
+            }
+        }
+        "compressible_structured" => {
+            s.set_named_field("rho", |_, _| 1.0);
+            s.set_named_field("rho_e", |_, _| 2.5);
+            s.set_named_field("p", |_, _| 1.0);
+            s.set_named_field("T", |_, _| 1.0);
+            if s.field_offset("mu").is_some() {
+                s.set_named_field("mu", |_, _| 0.0);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Apply the structured demo boundary conditions: a lid-driven cavity (momentum /
+/// all-Mach thermal — top MovingWall slides at `u_lid`, other walls no-slip) or a
+/// uniform gas box (compressible — all walls pinned to the rest state).
+fn setup_structured_bcs(s: &mut StructuredGpuSolver, model_id: &str, u_lid: f64, stride_s: usize) {
+    if model_id == "compressible_structured" {
+        let (rho0, e0) = (1.0f32, 2.5f32);
+        s.set_boundaries(move |_e, _x, _y| {
+            let mut v = vec![
+                StructBc { kind: 1, value: rho0 },
+                StructBc { kind: 1, value: 0.0 },
+                StructBc { kind: 1, value: 0.0 },
+            ];
+            if stride_s >= 4 {
+                v.push(StructBc { kind: 1, value: e0 });
+            }
+            (3, v)
+        });
+    } else {
+        s.set_boundaries(move |edge, _x, _y| {
+            let uw = if matches!(edge, StructEdge::Top) { u_lid as f32 } else { 0.0 };
+            let btype = if matches!(edge, StructEdge::Top) { 5 } else { 3 };
+            let mut v = vec![
+                StructBc { kind: 1, value: uw },
+                StructBc { kind: 1, value: 0.0 },
+                StructBc { kind: 2, value: 0.0 },
+            ];
+            if stride_s >= 4 {
+                v.push(StructBc { kind: 2, value: 0.0 });
+            }
+            (btype, v)
+        });
+    }
 }
 
 fn solver_worker_main(
@@ -4644,6 +5097,7 @@ fn solver_worker_main(
         // per-step telemetry to publish.
         let (outcome, moving_refresh) = match mode {
             SolverMode::Static(d) => (d.step(should_readback), None),
+            SolverMode::Structured(s) => (structured_step(s, should_readback), None),
             SolverMode::MovingMesh(m) => match m.step(should_readback) {
                 Ok((o, mstats)) => {
                     // Clone + publish the regenerated mesh only at readback
@@ -4705,7 +5159,6 @@ fn solver_worker_main(
                 stats: mstats,
             });
         }
-        let solver = mode.driver().solver();
         let step_time_ms = outcome.step_time_ms;
 
         if let Some(viz_field) = viz_field.as_ref() {
@@ -4725,7 +5178,7 @@ fn solver_worker_main(
                     // Should be unreachable with n>=3, but keep a safe fallback.
                     write_idx = (front + 1) % n;
                 }
-                solver.copy_state_to_buffer(&viz_field.buffers[write_idx]);
+                mode.copy_state_to_buffer(&viz_field.buffers[write_idx]);
                 viz_field.ready_idx.store(write_idx, Ordering::Release);
             }
         }
@@ -4748,30 +5201,35 @@ fn solver_worker_main(
         }
 
         let mut stats = CachedGpuStats {
-            dt: solver.dt(),
+            dt: mode.sim_dt(),
             step_time_ms,
             linear_solves,
             linear_last,
             ..Default::default()
         };
 
-        let step_stats = solver.step_stats();
-        if let Some(iters) = step_stats.outer_iterations {
-            stats.outer_iterations = iters;
+        // Outer-iteration / positivity telemetry only exists on the UnifiedSolver
+        // path; the structured banded solver reports none.
+        if let Some(solver) = mode.unified_solver() {
+            let step_stats = solver.step_stats();
+            if let Some(iters) = step_stats.outer_iterations {
+                stats.outer_iterations = iters;
+            }
+            if let Some(res_u) = step_stats.outer_residual_u {
+                stats.outer_residual_u = res_u;
+            }
+            if let Some(res_p) = step_stats.outer_residual_p {
+                stats.outer_residual_p = res_p;
+            }
+            stats.outer_step_status = step_stats.outer_step_status;
+            stats.positivity_min_rho = step_stats.positivity_min_rho;
+            stats.positivity_min_p = step_stats.positivity_min_p;
+            stats.positivity_rho_undershoots =
+                step_stats.positivity_rho_undershoot_count.unwrap_or(0);
+            stats.positivity_pressure_undershoots = step_stats
+                .positivity_pressure_undershoot_count
+                .unwrap_or(0);
         }
-        if let Some(res_u) = step_stats.outer_residual_u {
-            stats.outer_residual_u = res_u;
-        }
-        if let Some(res_p) = step_stats.outer_residual_p {
-            stats.outer_residual_p = res_p;
-        }
-        stats.outer_step_status = step_stats.outer_step_status;
-        stats.positivity_min_rho = step_stats.positivity_min_rho;
-        stats.positivity_min_p = step_stats.positivity_min_p;
-        stats.positivity_rho_undershoots = step_stats.positivity_rho_undershoot_count.unwrap_or(0);
-        stats.positivity_pressure_undershoots = step_stats
-            .positivity_pressure_undershoot_count
-            .unwrap_or(0);
 
         let mut trace_max_u: Option<f64> = None;
         let mut trace_p_min: Option<f64> = None;
@@ -4787,43 +5245,46 @@ fn solver_worker_main(
             trace_p_max = Some(fs.p_max);
 
             if should_log || fs.nonfinite_u > 0 || fs.nonfinite_p > 0 {
-                let step_stats = solver.step_stats();
-                let outer_str = step_stats
-                    .outer_iterations
-                    .map(|iters| {
-                        let status_suffix = step_stats
-                            .outer_step_status
-                            .map(|status| format!(", status={}", status.as_str()))
-                            .unwrap_or_default();
-                        let abs_residuals = solver.outer_field_residuals();
-                        let scaled_residuals = solver.outer_field_residuals_scaled();
+                let outer_str = mode
+                    .unified_solver()
+                    .map(|solver| {
+                        let step_stats = solver.step_stats();
+                        step_stats
+                            .outer_iterations
+                            .map(|iters| {
+                                let status_suffix = step_stats
+                                    .outer_step_status
+                                    .map(|status| format!(", status={}", status.as_str()))
+                                    .unwrap_or_default();
+                                let abs_residuals = solver.outer_field_residuals();
+                                let scaled_residuals = solver.outer_field_residuals_scaled();
 
-                        if let (Some(abs), Some(scaled)) = (abs_residuals, scaled_residuals) {
-                            let fields = abs
-                                .iter()
-                                .zip(scaled.iter())
-                                .map(|((name, abs_res), (_, scaled_res))| {
-                                    format!("{name}={scaled_res:.3e} (abs={abs_res:.3e})")
-                                })
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            format!(" outer(iters={iters}, res=[{fields}]{status_suffix})")
-                        } else if let Some(fields) = abs_residuals {
-                            let fields = fields
-                                .iter()
-                                .map(|(name, res)| format!("{name}={res:.3e}"))
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            format!(" outer(iters={iters}, res=[{fields}]{status_suffix})")
-                        } else if let (Some(res_u), Some(res_p)) =
-                            (step_stats.outer_residual_u, step_stats.outer_residual_p)
-                        {
-                            format!(
-                                " outer(iters={iters}, u={res_u:.3e}, p={res_p:.3e}{status_suffix})"
-                            )
-                        } else {
-                            format!(" outer(iters={iters}{status_suffix})")
-                        }
+                                if let (Some(abs), Some(scaled)) = (abs_residuals, scaled_residuals) {
+                                    let fields = abs
+                                        .iter()
+                                        .zip(scaled.iter())
+                                        .map(|((name, abs_res), (_, scaled_res))| {
+                                            format!("{name}={scaled_res:.3e} (abs={abs_res:.3e})")
+                                        })
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    format!(" outer(iters={iters}, res=[{fields}]{status_suffix})")
+                                } else if let Some(fields) = abs_residuals {
+                                    let fields = fields
+                                        .iter()
+                                        .map(|(name, res)| format!("{name}={res:.3e}"))
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    format!(" outer(iters={iters}, res=[{fields}]{status_suffix})")
+                                } else if let (Some(res_u), Some(res_p)) =
+                                    (step_stats.outer_residual_u, step_stats.outer_residual_p)
+                                {
+                                    format!(" outer(iters={iters}, u={res_u:.3e}, p={res_p:.3e}{status_suffix})")
+                                } else {
+                                    format!(" outer(iters={iters}{status_suffix})")
+                                }
+                            })
+                            .unwrap_or_default()
                     })
                     .unwrap_or_default();
 
@@ -4831,8 +5292,8 @@ fn solver_worker_main(
                     "[cfd2][{}] step={} t={:.4e} dt={:.2e} max|u|={:.3e} p=[{:.3e},{:.3e}] solves={} last(iters={}, res={:.3e}, conv={}, div={}){} nonfinite(u={}, p={})",
                     model_id,
                     step_idx,
-                    solver.time(),
-                    solver.dt(),
+                    mode.sim_time(),
+                    mode.sim_dt(),
                     fs.max_vel,
                     fs.p_min,
                     fs.p_max,
@@ -4867,7 +5328,9 @@ fn solver_worker_main(
             let _ = evt_tx.send(SolverWorkerEvent::Stats { stats });
         }
 
-        if let Some(trace) = trace.as_mut() {
+        // Per-step trace is a UnifiedSolver capability (graph timings); the
+        // structured banded path has none, so it is skipped entirely.
+        if let (Some(trace), Some(solver)) = (trace.as_mut(), mode.unified_solver()) {
             let linear_solves = outcome
                 .linear_stats
                 .iter()
@@ -4939,7 +5402,7 @@ fn solver_worker_handle_cmd(
             if trace.is_some() {
                 solver_worker_stop_trace(trace, mode);
             }
-            *model_id = next.driver().solver().model().id;
+            *model_id = next.model_id_str();
             *mode = Some(next);
             *viz_field = next_viz_field;
             *running = false;
@@ -4962,7 +5425,7 @@ fn solver_worker_handle_cmd(
                 if let SolverMode::MovingMesh(_) = m {
                     params.adaptive_dt = false;
                 }
-                m.driver_mut().apply_params(params);
+                m.apply_params_any(params);
             }
         }
         SolverWorkerCommand::ClearSolver => {
@@ -5010,12 +5473,12 @@ fn solver_worker_handle_cmd(
                     moving.set_adaptive_dt(adaptive_dt.then_some(params.target_cfl));
                     moving.set_configured_dt(params.requested_dt as f64);
                 }
-                m.driver_mut().apply_params(params);
+                m.apply_params_any(params);
             }
             if let (Some(trace), Some(m)) = (trace.as_mut(), mode.as_ref()) {
                 let event = tracefmt::TraceEvent::Params(tracefmt::TraceParamsEvent {
                     step: *step_idx,
-                    sim_time: m.driver().solver().time(),
+                    sim_time: m.sim_time(),
                     params: trace_runtime_params_from_worker(*params),
                 });
                 let _ = trace.writer.write_event(&event);
@@ -5030,7 +5493,7 @@ fn solver_worker_handle_cmd(
                     let event = tracefmt::TraceEvent::Header(Box::new(header));
                     let _ = writer.write_event(&event);
 
-                    if let Some(s) = mode.as_mut().map(|m| m.driver_mut().solver_mut()) {
+                    if let Some(s) = mode.as_mut().and_then(|m| m.unified_solver_mut()) {
                         s.set_collect_trace(true);
                         let _ = s.enable_detailed_profiling(profiling_enabled);
                         if profiling_enabled {

@@ -559,3 +559,96 @@ impl ThermalSeed for GpuThermal<'_> {
         }
     }
 }
+
+/// GUI surface: the accessors the GUI worker drives — `get_u` (paired velocity),
+/// `get_scalar`, `time`/`dt`, `model_id`, `state_layout`, `copy_state_to_buffer`
+/// (the viz feed) — behave correctly on a lid-driven cavity built like the GUI's
+/// `build_structured_init`.
+#[test]
+fn gpu_structured_gui_accessors_work() {
+    use cfd2::solver::UiPortSet;
+    let ctx = pollster::block_on(cfd2::solver::gpu::context::GpuContext::new(None, None)).unwrap();
+    let device = ctx.device.clone();
+    let queue = ctx.queue.clone();
+    let model = incompressible_momentum_structured_model().unwrap();
+    let (nx, ny) = (12usize, 12usize);
+    let mut s = StructuredGpuSolver::with_context(
+        ctx,
+        StructuredGrid::new(nx, ny, 1.0, 1.0),
+        &model,
+        0.05,
+        3,
+    )
+    .unwrap();
+    s.set_fluid(1.0, 0.01);
+    let u_lid = 1.0f64;
+    s.set_boundaries(move |edge, _x, _y| {
+        let uw = if matches!(edge, Edge::Top) { u_lid as f32 } else { 0.0 };
+        let btype = if matches!(edge, Edge::Top) { 5 } else { 3 };
+        (
+            btype,
+            vec![
+                BcComp { kind: 1, value: uw },
+                BcComp { kind: 1, value: 0.0 },
+                BcComp { kind: 2, value: 0.0 },
+            ],
+        )
+    });
+
+    assert_eq!(s.model_id(), "incompressible_momentum_structured");
+    assert!((s.dt() - 0.05).abs() < 1e-12);
+    let t0 = s.time();
+    for _ in 0..8 {
+        s.step();
+    }
+    assert!((s.time() - (t0 + 8.0 * 0.05)).abs() < 1e-9, "sim time accumulates");
+
+    let ports = UiPortSet::from_layout(s.state_layout());
+    let u = s.get_u(ports.u_offset.unwrap() as usize);
+    assert_eq!(u.len(), nx * ny, "get_u one pair per cell");
+    let mut umax = 0.0f64;
+    for &(ux, uy) in &u {
+        assert!(ux.is_finite() && uy.is_finite(), "finite velocity");
+        umax = umax.max(ux.hypot(uy));
+    }
+    assert!(umax > 0.05 && umax < 5.0, "lid-driven flow developed (umax={umax})");
+
+    // copy_state_to_buffer (viz feed): copy packed state to a same-device buffer,
+    // read it back, and confirm component 0 matches state_field(0).
+    let sstride = model.state_layout.stride() as usize;
+    let dst = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("test_viz"),
+        size: s.state_size_bytes(),
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    s.copy_state_to_buffer(&dst);
+    let staging = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("test_viz_staging"),
+        size: s.state_size_bytes(),
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    enc.copy_buffer_to_buffer(&dst, 0, &staging, 0, s.state_size_bytes());
+    let idx = queue.submit(Some(enc.finish()));
+    let slice = staging.slice(..);
+    let (tx, rx) = std::sync::mpsc::channel();
+    slice.map_async(wgpu::MapMode::Read, move |v| {
+        let _ = tx.send(v);
+    });
+    let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(idx), timeout: None });
+    rx.recv().unwrap().unwrap();
+    let data = slice.get_mapped_range();
+    let viz: Vec<f32> = bytemuck::cast_slice(&data).to_vec();
+    drop(data);
+    staging.unmap();
+    let ux0 = s.get_scalar(0);
+    for p in 0..nx * ny {
+        assert!(
+            (viz[p * sstride] as f64 - ux0[p]).abs() < 1e-6,
+            "viz buffer matches state at cell {p}"
+        );
+    }
+    println!("[gpu-structured] GUI accessors ok: umax={umax:.4}");
+}

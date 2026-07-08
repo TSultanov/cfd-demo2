@@ -432,6 +432,9 @@ pub struct StructuredGpuSolver {
 
     outer_iters: usize,
     dt: f64,
+    /// Model id (for the GUI's model-echo / caps) and accumulated sim time.
+    model_id: &'static str,
+    time: f64,
 }
 
 impl StructuredGpuSolver {
@@ -618,6 +621,8 @@ impl StructuredGpuSolver {
             solver,
             outer_iters: outer_iters.max(1),
             dt,
+            model_id: model.id,
+            time: 0.0,
         })
     }
 
@@ -842,6 +847,7 @@ impl StructuredGpuSolver {
             let upd = self.update.clone();
             self.dispatch_ids(&upd);
         }
+        self.time += self.dt;
     }
 
     /// Read a state component field (length `nx*ny`).
@@ -850,6 +856,77 @@ impl StructuredGpuSolver {
         (0..self.n)
             .map(|p| st[p * self.state_stride + offset] as f64)
             .collect()
+    }
+
+    // ---- GUI integration surface --------------------------------------------
+
+    /// The packed `state` GPU buffer (cell-major `state[p*stride + off]`) — the
+    /// renderer's viz-color source. Lives on the solver's device; build the solver
+    /// via `with_context` on the GUI's device so a same-device copy is legal.
+    pub fn state_buffer(&self) -> &wgpu::Buffer {
+        self.buf("state")
+    }
+
+    /// Size of the packed `state` buffer in bytes (`n * stride * 4`).
+    pub fn state_size_bytes(&self) -> u64 {
+        (self.n * self.state_stride * 4) as u64
+    }
+
+    /// GPU-to-GPU copy of the packed `state` into a renderer viz buffer (same
+    /// device). Mirrors `GpuUnifiedSolver::copy_state_to_buffer`.
+    pub fn copy_state_to_buffer(&self, dst: &wgpu::Buffer) {
+        let mut enc = self
+            .ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("structgpu:viz") });
+        enc.copy_buffer_to_buffer(self.buf("state"), 0, dst, 0, self.state_size_bytes());
+        self.ctx.queue.submit(Some(enc.finish()));
+    }
+
+    /// The state layout (for `UiPortSet::from_layout` in the GUI caps path).
+    pub fn state_layout(&self) -> &crate::solver::model::backend::state_layout::StateLayout {
+        &self.layout
+    }
+
+    /// The model id this solver runs (GUI model-echo).
+    pub fn model_id(&self) -> &'static str {
+        self.model_id
+    }
+
+    /// Accumulated simulation time (`sum of dt`).
+    pub fn time(&self) -> f64 {
+        self.time
+    }
+
+    /// The dense grid (for the GUI's structured cell-polygon adapter).
+    pub fn grid(&self) -> StructuredGrid {
+        self.grid
+    }
+
+    /// Set the implicit time-step size (GUI timestep slider).
+    pub fn set_dt(&mut self, dt: f64) {
+        self.dt = dt;
+    }
+
+    /// The implicit time-step size.
+    pub fn dt(&self) -> f64 {
+        self.dt
+    }
+
+    /// Paired velocity `(Ux, Uy)` per cell — the GUI readback shape.
+    pub fn get_u(&self, u_offset: usize) -> Vec<(f64, f64)> {
+        let st = self.read_f32("state", self.n * self.state_stride);
+        (0..self.n)
+            .map(|p| {
+                let b = p * self.state_stride + u_offset;
+                (st[b] as f64, st[b + 1] as f64)
+            })
+            .collect()
+    }
+
+    /// Scalar field (e.g. pressure) per cell — the GUI readback shape.
+    pub fn get_scalar(&self, offset: usize) -> Vec<f64> {
+        self.state_field(offset)
     }
 }
 

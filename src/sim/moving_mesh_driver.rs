@@ -3691,11 +3691,18 @@ impl MovingMeshDriver {
                     // (measured: late-window flags 139/200 vs the event-free
                     // control's 21/150). After the two-level redo, every
                     // level the published step touches is the new mesh's
-                    // OWN converged solution. The first redo step runs
-                    // Euler (no t^{n-3} exists — two steps back, weight
-                    // ~0.3 in the final BDF2, the degradation is
-                    // negligible); the second runs BDF2 on the redone
-                    // level. On any failure, fall back to the transferred
+                    // OWN converged solution. The first redo step is
+                    // FIRST-ORDER-in-time: step_count = old-2 is non-zero so
+                    // the step_count==0 Euler-startup fallback does not fire;
+                    // with the flat t^{n-2} history and r=dt/dt_old=1 the BDF2
+                    // stencil collapses to a 1.5x-scaled backward-Euler
+                    // (diag = 1.5*base, rhs = 1.5*base*phi_old), NOT the plain
+                    // Euler this comment used to claim. Both are first order and
+                    // the affected level enters the next published BDF2 at a
+                    // diluted ~0.5 weight, so the degradation is negligible (the
+                    // validated 139->21 mark reduction was measured with exactly
+                    // this 1.5x behaviour). The second redo runs BDF2 on the
+                    // redone level. On any failure, fall back to the transferred
                     // t^n state.
                     let mut x_prev = vec![0.0f32; n_new * s_unk];
                     for c in 0..n_new {

@@ -4283,12 +4283,27 @@ impl eframe::App for CFDApp {
                         ui.separator();
                         ui.label("Preconditioner");
                         const UI_MAX_BLOCK_JACOBI: u32 = 16;
-                        let supports_preconditioner = self.model_caps.supports_preconditioner;
+                        let structured_precond = self.mesh_mode == MeshMode::Structured2D;
+                        let supports_preconditioner =
+                            self.model_caps.supports_preconditioner && !structured_precond;
                         let model_owns_preconditioner = self.model_caps.model_owns_preconditioner;
                         let block_jacobi_supported =
                             self.model_caps.unknowns_per_cell <= UI_MAX_BLOCK_JACOBI;
 
-                        if model_owns_preconditioner {
+                        if structured_precond {
+                            // The dense-banded matrix-free structured solve carries its
+                            // own preconditioner rather than the recipe's Krylov one:
+                            // block-Jacobi (per-cell s×s block inverse) for the coupled
+                            // U–p GMRES, degenerating to diagonal Jacobi for the scalar
+                            // SPD CG. Point-Jacobi is singular on the saddle-point
+                            // pressure diagonal and the CSR-aggregation AMG / model Schur
+                            // do not apply to the banded operator, so no selector is
+                            // shown — the choice is fixed and always valid.
+                            ui.weak(
+                                "Structured banded solve: block-Jacobi (coupled) / \
+                                 diagonal Jacobi (scalar). Fixed.",
+                            );
+                        } else if model_owns_preconditioner {
                             ui.weak("Model-owned Schur: selector chooses pressure solve (Chebyshev vs AMG).");
                         } else {
                             ui.weak("Krylov preconditioner for the coupled linear solve.");
@@ -4334,7 +4349,7 @@ impl eframe::App for CFDApp {
                                 self.selected_preconditioner = PreconditionerType::Amg;
                                 self.update_gpu_preconditioner();
                             }
-                        } else {
+                        } else if !structured_precond {
                             ui.weak("(not declared by model)");
                         }
 

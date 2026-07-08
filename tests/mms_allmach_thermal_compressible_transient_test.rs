@@ -265,13 +265,17 @@ fn solve(steps: usize) -> (f64, f64, f64, f64) {
 /// pseudo-compressibility) are correctly signed and scaled by driving them to the
 /// manufactured solution and refining dt.
 ///
-/// The observed order is BDF1-limited (~1) because the two CROSS-variable ddt couplings
-/// (thermal expansion in the pressure row, T1 dp/dt in the energy row) are emitted as
-/// first-order implicit off-diagonal terms by construction (the diagonal accumulators
-/// cannot carry a 2nd-order history off-diagonal). The own-variable ddt (rho*U, rho*T,
-/// psi_precond*p) is BDF2. The point of THIS test is transient-term CORRECTNESS (monotone
-/// convergence to the exact solution at the designed rate), complementing the steady test
-/// which covers the spatial operator.
+/// The observed order is SECOND (~2) on every field: `time_integration.rs` now emits BOTH
+/// the own-variable ddt (rho*U, rho*T, psi_precond*p) AND the two CROSS-variable ddt
+/// couplings (thermal expansion `rho_dT*dT/dt` in the pressure row, T1 `inv_cp*dp/dt` in the
+/// energy row) as BDF2 — the cross-variable branch writes directly to the off-diagonal
+/// `matrix_values` entry and carries the same variable-dt BDF2 stencil (2r+1)/(r+1) plus a
+/// two-level `state_old_old` history, WITHOUT the diagonal's conservative `ale_vol_ratio`
+/// weighting (which would break free-stream on a moving mesh). This lifted the coupled
+/// transient from the former BDF1-cross-coupling cap (~0.95) to full second order. The point
+/// of THIS test is transient-term CORRECTNESS (monotone convergence at the designed 2nd-order
+/// rate — a BDF1 regression of either cross term would drop the order back to ~1 and trip the
+/// floors below), complementing the steady test which covers the spatial operator.
 #[test]
 fn allmach_thermal_compressible_transient_order() {
     let step_counts = [16usize, 32, 64, 128];
@@ -322,15 +326,17 @@ fn allmach_thermal_compressible_transient_order() {
         }
     }
 
-    // Observed temporal order is FIRST-ORDER-limited by the two cross-variable ddt
-    // couplings (thermal expansion `rho_dT*dT/dt` in the pressure row and T1 `inv_cp*dp/dt`
-    // in the energy row), which are emitted as BDF1 implicit off-diagonal terms. The
-    // pressure/temperature/density — the fields those transient terms directly produce —
-    // fit a clean ~0.95. The velocity inherits the order through the `rho(p,T)` coefficient
-    // of its own (BDF2) ddt; its log-log error curve is convex (successive-pair orders
-    // climb 0.65 -> 0.78 -> 0.86), so the least-squares fit sits lower (~0.76) yet is still
-    // solidly first-order-approaching. A frozen/dropped transient term would collapse the
-    // order to ~0 (and fail the monotone gate). Assert a first-order sanity floor.
+    // Observed temporal order is SECOND now that BOTH cross-variable ddt couplings (thermal
+    // expansion `rho_dT*dT/dt` in the pressure row, T1 `inv_cp*dp/dt` in the energy row) are
+    // emitted as BDF2 off-diagonal terms alongside the own-variable BDF2 ddt. Measured on
+    // this instrument: U~2.09, T~2.25, p~2.05, rho~1.91. The pressure/temperature — produced
+    // DIRECTLY by the transient terms — sit cleanly above 2; density is a nonlinear recovery
+    // `rho = rho_t_ref/T + gamma*psi_ref*t_ref*p/T` of two now-2nd-order primitives, so its
+    // fit sits just under 2 (~1.91) at these step counts; velocity inherits 2nd order through
+    // the `rho(p,T)` coefficient of its own BDF2 ddt. A BDF1 regression of EITHER cross term
+    // (dropping the `state_old_old` history / the (2r+1)/(r+1) matrix scale) collapses the
+    // order back to ~0.95 and trips this floor. Floor set well below the observed values to
+    // absorb GPU/backend fit jitter while still rejecting the first-order regression.
     for (name, order) in [
         ("U", u_order),
         ("T", t_order),
@@ -338,28 +344,30 @@ fn allmach_thermal_compressible_transient_order() {
         ("rho", r_order),
     ] {
         assert!(
-            order >= 0.6,
-            "[compressible-transient] {name} temporal order {order:.3} below 0.6 \
-             (a transient ddt term regressed toward zeroth order)"
+            order >= 1.6,
+            "[compressible-transient] {name} temporal order {order:.3} below 1.6 \
+             (a cross-variable ddt regressed from BDF2 to BDF1 — expected ~2)"
         );
     }
-    // The pressure, temperature and density are produced DIRECTLY by the transient terms
-    // (acoustic ddt, T1, thermal expansion, variable-density thermal inertia), so their
-    // fits are asymptotically clean; hold them to a tighter first-order bound.
-    for (name, order) in [("T", t_order), ("p", p_order), ("rho", r_order)] {
+    // Pressure and temperature are produced DIRECTLY by the transient terms (acoustic ddt, T1,
+    // thermal expansion, variable-density thermal inertia) with no nonlinear-recovery softening,
+    // so their fits are asymptotically clean; hold them to a tighter near-2 bound.
+    for (name, order) in [("T", t_order), ("p", p_order)] {
         assert!(
-            order >= 0.8,
-            "[compressible-transient] {name} temporal order {order:.3} below 0.8 \
-             (a transient ddt term regressed)"
+            order >= 1.9,
+            "[compressible-transient] {name} temporal order {order:.3} below 1.9 \
+             (a transient ddt term regressed from clean 2nd order)"
         );
     }
 
     // Coefficient-regression guard: a transient term with the right sign but a wrong
-    // magnitude still converges monotonically (to the wrong field), leaving the order
-    // near-first but inflating the finest-dt error. Cap it (~2x the observed finest error).
+    // magnitude still converges monotonically (to the wrong field), inflating the finest-dt
+    // error even at 2nd order. Cap it at ~2x the observed finest error (128 steps, measured
+    // U=6.4e-7 T=5.0e-6 p=6.5e-5 rho=6.2e-6 — an order of magnitude tighter than the former
+    // BDF1-era caps, now that the cross-variable ddt is BDF2).
     let finest = (*u_err.last().unwrap(), *t_err.last().unwrap(), *p_err.last().unwrap(), *r_err.last().unwrap());
     assert!(
-        finest.0 < 1.0e-4 && finest.1 < 2.0e-3 && finest.2 < 2.6e-2 && finest.3 < 1.5e-3,
+        finest.0 < 1.3e-6 && finest.1 < 1.1e-5 && finest.2 < 1.4e-4 && finest.3 < 1.3e-5,
         "[compressible-transient] finest-dt errors too large: U={:.3e} T={:.3e} p={:.3e} rho={:.3e}",
         finest.0, finest.1, finest.2, finest.3
     );

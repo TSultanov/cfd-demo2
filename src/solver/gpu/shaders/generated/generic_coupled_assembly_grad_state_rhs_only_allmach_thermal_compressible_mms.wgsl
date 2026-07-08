@@ -121,6 +121,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         rhs_2 += state[idx * 25u + 9u] * dual_time_scale * state_iter[idx * 25u + 2u];
     }
     rhs_2 += vol * state[idx * 25u + 14u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * state_old[idx * 25u + 12u];
+    if (constants.time_scheme == 1u) {
+        let r_x = constants.dt / constants.dt_old;
+        let diag_bdf2_x = vol * state[idx * 25u + 14u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * (r_x * 2.0 + 1.0) / (r_x + 1.0);
+        let factor_n_x = r_x + 1.0;
+        let factor_nm1_x = r_x * r_x / (r_x + 1.0);
+        rhs_2 += vol * state[idx * 25u + 14u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * (factor_n_x * state_old[idx * 25u + 12u] - factor_nm1_x * state_old_old[idx * 25u + 12u]) - vol * state[idx * 25u + 14u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * state_old[idx * 25u + 12u];
+    }
     rhs_3 += vol * state[idx * 25u + 11u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * state_old[idx * 25u + 12u];
     if (constants.time_scheme == 1u) {
         let r = constants.dt / constants.dt_old;
@@ -133,6 +140,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         rhs_3 += state[idx * 25u + 11u] * dual_time_scale * state_iter[idx * 25u + 12u];
     }
     rhs_3 += vol * -0.4 * state[idx * 25u + 18u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * state_old[idx * 25u + 2u];
+    if (constants.time_scheme == 1u) {
+        let r_x = constants.dt / constants.dt_old;
+        let diag_bdf2_x = vol * -0.4 * state[idx * 25u + 18u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * (r_x * 2.0 + 1.0) / (r_x + 1.0);
+        let factor_n_x = r_x + 1.0;
+        let factor_nm1_x = r_x * r_x / (r_x + 1.0);
+        rhs_3 += vol * -0.4 * state[idx * 25u + 18u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * (factor_n_x * state_old[idx * 25u + 2u] - factor_nm1_x * state_old_old[idx * 25u + 2u]) - vol * -0.4 * state[idx * 25u + 18u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * state_old[idx * 25u + 2u];
+    }
     rhs_0 += state[idx * 25u + 21u] * vol;
     rhs_1 += state[idx * 25u + 22u] * vol;
     rhs_2 += state[idx * 25u + 23u] * vol;

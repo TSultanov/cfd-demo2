@@ -217,6 +217,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     matrix_values[k1_start_row_2 + k1_diag_rank * 4u + 3u] += k1_vol * state[idx * 25u + 14u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0);
     k1_rhs_2 += k1_vol * state[idx * 25u + 14u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * state_old[idx * 25u + 12u];
+    if (constants.time_scheme == 1u) {
+        let k1_r_x = constants.dt / constants.dt_old;
+        let k1_diag_bdf2_x = k1_vol * state[idx * 25u + 14u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * (k1_r_x * 2.0 + 1.0) / (k1_r_x + 1.0);
+        let k1_factor_n_x = k1_r_x + 1.0;
+        let k1_factor_nm1_x = k1_r_x * k1_r_x / (k1_r_x + 1.0);
+        matrix_values[k1_start_row_2 + k1_diag_rank * 4u + 3u] += k1_diag_bdf2_x - k1_vol * state[idx * 25u + 14u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0);
+        k1_rhs_2 += k1_vol * state[idx * 25u + 14u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * (k1_factor_n_x * state_old[idx * 25u + 12u] - k1_factor_nm1_x * state_old_old[idx * 25u + 12u]) - k1_vol * state[idx * 25u + 14u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * state_old[idx * 25u + 12u];
+    }
     k1_diag_3 += k1_vol * state[idx * 25u + 11u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0);
     k1_rhs_3 += k1_vol * state[idx * 25u + 11u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * state_old[idx * 25u + 12u];
     if (constants.time_scheme == 1u) {
@@ -233,6 +241,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     matrix_values[k1_start_row_3 + k1_diag_rank * 4u + 2u] += k1_vol * -0.4 * state[idx * 25u + 18u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0);
     k1_rhs_3 += k1_vol * -0.4 * state[idx * 25u + 18u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * state_old[idx * 25u + 2u];
+    if (constants.time_scheme == 1u) {
+        let k1_r_x = constants.dt / constants.dt_old;
+        let k1_diag_bdf2_x = k1_vol * -0.4 * state[idx * 25u + 18u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * (k1_r_x * 2.0 + 1.0) / (k1_r_x + 1.0);
+        let k1_factor_n_x = k1_r_x + 1.0;
+        let k1_factor_nm1_x = k1_r_x * k1_r_x / (k1_r_x + 1.0);
+        matrix_values[k1_start_row_3 + k1_diag_rank * 4u + 2u] += k1_diag_bdf2_x - k1_vol * -0.4 * state[idx * 25u + 18u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0);
+        k1_rhs_3 += k1_vol * -0.4 * state[idx * 25u + 18u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * (k1_factor_n_x * state_old[idx * 25u + 2u] - k1_factor_nm1_x * state_old_old[idx * 25u + 2u]) - k1_vol * -0.4 * state[idx * 25u + 18u] / select(constants.dt, state[idx * 25u + 10u], state[idx * 25u + 10u] > 0.0) * state_old[idx * 25u + 2u];
+    }
     k1_rhs_0 += state[idx * 25u + 21u] * k1_vol;
     k1_rhs_1 += state[idx * 25u + 22u] * k1_vol;
     k1_rhs_2 += state[idx * 25u + 23u] * k1_vol;

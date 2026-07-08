@@ -147,6 +147,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     matrix_values[start_row_2 + diag_rank * 4u + 3u] += vol * state[idx * 21u + 14u] / select(constants.dt, state[idx * 21u + 10u], state[idx * 21u + 10u] > 0.0);
     rhs_2 += vol * state[idx * 21u + 14u] / select(constants.dt, state[idx * 21u + 10u], state[idx * 21u + 10u] > 0.0) * state_old[idx * 21u + 12u];
+    if (constants.time_scheme == 1u) {
+        let r_x = constants.dt / constants.dt_old;
+        let diag_bdf2_x = vol * state[idx * 21u + 14u] / select(constants.dt, state[idx * 21u + 10u], state[idx * 21u + 10u] > 0.0) * (r_x * 2.0 + 1.0) / (r_x + 1.0);
+        let factor_n_x = r_x + 1.0;
+        let factor_nm1_x = r_x * r_x / (r_x + 1.0);
+        matrix_values[start_row_2 + diag_rank * 4u + 3u] += diag_bdf2_x - vol * state[idx * 21u + 14u] / select(constants.dt, state[idx * 21u + 10u], state[idx * 21u + 10u] > 0.0);
+        rhs_2 += vol * state[idx * 21u + 14u] / select(constants.dt, state[idx * 21u + 10u], state[idx * 21u + 10u] > 0.0) * (factor_n_x * state_old[idx * 21u + 12u] - factor_nm1_x * state_old_old[idx * 21u + 12u]) - vol * state[idx * 21u + 14u] / select(constants.dt, state[idx * 21u + 10u], state[idx * 21u + 10u] > 0.0) * state_old[idx * 21u + 12u];
+    }
     diag_3 += vol * state[idx * 21u + 11u] / select(constants.dt, state[idx * 21u + 10u], state[idx * 21u + 10u] > 0.0);
     rhs_3 += vol * state[idx * 21u + 11u] / select(constants.dt, state[idx * 21u + 10u], state[idx * 21u + 10u] > 0.0) * state_old[idx * 21u + 12u];
     if (constants.time_scheme == 1u) {
@@ -163,6 +171,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     matrix_values[start_row_3 + diag_rank * 4u + 2u] += vol * -0.4 * state[idx * 21u + 18u] / select(constants.dt, state[idx * 21u + 10u], state[idx * 21u + 10u] > 0.0);
     rhs_3 += vol * -0.4 * state[idx * 21u + 18u] / select(constants.dt, state[idx * 21u + 10u], state[idx * 21u + 10u] > 0.0) * state_old[idx * 21u + 2u];
+    if (constants.time_scheme == 1u) {
+        let r_x = constants.dt / constants.dt_old;
+        let diag_bdf2_x = vol * -0.4 * state[idx * 21u + 18u] / select(constants.dt, state[idx * 21u + 10u], state[idx * 21u + 10u] > 0.0) * (r_x * 2.0 + 1.0) / (r_x + 1.0);
+        let factor_n_x = r_x + 1.0;
+        let factor_nm1_x = r_x * r_x / (r_x + 1.0);
+        matrix_values[start_row_3 + diag_rank * 4u + 2u] += diag_bdf2_x - vol * -0.4 * state[idx * 21u + 18u] / select(constants.dt, state[idx * 21u + 10u], state[idx * 21u + 10u] > 0.0);
+        rhs_3 += vol * -0.4 * state[idx * 21u + 18u] / select(constants.dt, state[idx * 21u + 10u], state[idx * 21u + 10u] > 0.0) * (factor_n_x * state_old[idx * 21u + 2u] - factor_nm1_x * state_old_old[idx * 21u + 2u]) - vol * -0.4 * state[idx * 21u + 18u] / select(constants.dt, state[idx * 21u + 10u], state[idx * 21u + 10u] > 0.0) * state_old[idx * 21u + 2u];
+    }
     rhs_3 += 0.4 * state[idx * 21u + 18u] * state[idx * 21u + 15u] * vol;
     rhs_3 += 0.4 * state[idx * 21u + 18u] * constants.viscosity * 2.0 * (grad_state[idx * 21u + 0u].x * grad_state[idx * 21u + 0u].x + grad_state[idx * 21u + 1u].y * grad_state[idx * 21u + 1u].y + 0.5 * (grad_state[idx * 21u + 0u].y + grad_state[idx * 21u + 1u].x) * (grad_state[idx * 21u + 0u].y + grad_state[idx * 21u + 1u].x) - 0.33333334 * (grad_state[idx * 21u + 0u].x + grad_state[idx * 21u + 1u].y) * (grad_state[idx * 21u + 0u].x + grad_state[idx * 21u + 1u].y)) * vol;
     var bounded_sum_phi_0: f32 = 0.0;

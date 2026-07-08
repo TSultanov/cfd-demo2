@@ -449,6 +449,8 @@ pub fn emit_ddt_contributions(
                     });
                 let field_old =
                     state_component_slot(slots.stride, "state_old", "idx", field_slot, 0);
+                let field_old_old =
+                    state_component_slot(slots.stride, "state_old_old", "idx", field_slot, 0);
 
                 let entry_index = acc.start_row(eqn_offset)
                     + dsl::linear_index(
@@ -458,7 +460,7 @@ pub fn emit_ddt_contributions(
                     );
                 stmts.push(dsl::assign_op_expr(
                     AssignOp::Add,
-                    dsl::array_access("matrix_values", entry_index),
+                    dsl::array_access("matrix_values", entry_index.clone()),
                     base_coeff.clone(),
                 ));
                 // BDF1 old-time part. NOTE: a cross-variable ddt on a moving mesh
@@ -475,7 +477,65 @@ pub fn emit_ddt_contributions(
                 // The `ρ·dV/dt` piece lives in the barotropic continuity volume
                 // source; the conservative moving-volume weighting is applied only
                 // to the PRIMARY ddts (paired with the bounded correction).
-                stmts.push(acc.add_rhs(eqn_offset, base_coeff * field_old));
+                stmts.push(acc.add_rhs(eqn_offset, base_coeff.clone() * field_old.clone()));
+
+                // Optional BDF2 correction for the cross-variable (off-diagonal) ddt,
+                // mirroring the own-variable diagonal path (`BdfDualTimeIntegrator::
+                // emit_component`). Written INCREMENTALLY (subtract the just-emitted
+                // BDF1 part, add the variable-dt BDF2 part) so Euler/BDF1 runs — and
+                // every model without a cross-variable ddt — stay byte-identical, and
+                // the whole block is inert unless `time_scheme == BDF2`. `field_old_old`
+                // reads the SAME cross-field slot from `state_old_old` (already bound,
+                // and consumed by the diagonal BDF2 correction above). CRUCIALLY, unlike
+                // the own-variable ddt, the cross history is NOT `ale_vol_ratio`-weighted:
+                // both time levels stay on `V^{n+1}` (`base_coeff`) so free-stream is
+                // preserved on a moving mesh — the identity `(2r+1)/(r+1) == factor_n −
+                // factor_nm1` makes the unweighted stencil vanish exactly at a
+                // uniform-in-time field (vol-ratio weighting would inject `coeff·ξ·dV/dt`
+                // and break the GCL; see the BDF1 note above). `r` uses the global
+                // `constants.dt/dt_old`, matching the diagonal path whose `base_coeff`
+                // likewise carries `dt_eff` while `r` uses the global step.
+                {
+                    use super::dsl::EnumExpr;
+                    use crate::solver::gpu::enums::TimeScheme;
+                    let dt = Expr::ident("constants").field("dt");
+                    let dt_old = Expr::ident("constants").field("dt_old");
+                    let time_scheme = EnumExpr::<TimeScheme>::from_expr(
+                        Expr::ident("constants").field("time_scheme"),
+                    );
+                    stmts.push(dsl::if_block_expr(
+                        time_scheme.eq(TimeScheme::BDF2),
+                        dsl::block(vec![
+                            dsl::let_expr("r_x", dt / dt_old),
+                            dsl::let_expr(
+                                "diag_bdf2_x",
+                                base_coeff.clone() * (Expr::ident("r_x") * 2.0 + 1.0)
+                                    / (Expr::ident("r_x") + 1.0),
+                            ),
+                            dsl::let_expr("factor_n_x", Expr::ident("r_x") + 1.0),
+                            dsl::let_expr(
+                                "factor_nm1_x",
+                                (Expr::ident("r_x") * Expr::ident("r_x"))
+                                    / (Expr::ident("r_x") + 1.0),
+                            ),
+                            // matrix: swap the BDF1 coeff for the BDF2 coeff.
+                            dsl::assign_op_expr(
+                                AssignOp::Add,
+                                dsl::array_access("matrix_values", entry_index),
+                                Expr::ident("diag_bdf2_x") - base_coeff.clone(),
+                            ),
+                            // rhs: swap the BDF1 old-time part for the two-level part.
+                            acc.add_rhs(
+                                eqn_offset,
+                                base_coeff.clone()
+                                    * (Expr::ident("factor_n_x") * field_old.clone()
+                                        - Expr::ident("factor_nm1_x") * field_old_old)
+                                    - base_coeff * field_old,
+                            ),
+                        ]),
+                        None,
+                    ));
+                }
             }
         }
     }

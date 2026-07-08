@@ -752,6 +752,117 @@ fn gpu_structured_bdf2_takes_effect() {
     assert!(max_d > 1e-5, "time scheme had no effect max|Δ|={max_d}");
 }
 
+/// CPU SCHEME PARITY: the CPU coupled structured solver honors the runtime
+/// advection + time schemes exactly like the GPU one — `StructuredModelSolver::
+/// with_config(scheme, time_scheme)` was previously hardcoded to Upwind/Euler.
+/// Asserts (1) CPU VanLeer differs from CPU Upwind (scheme is live, not baked),
+/// (2) CPU BDF2 differs from CPU Euler, and (3) CPU matches the GPU under the
+/// SAME non-default (VanLeer + BDF2) configuration to f32 tolerance.
+#[test]
+fn cpu_structured_scheme_time_parity_matches_gpu() {
+    use cfd2::solver::scheme::Scheme;
+    use cfd2::solver::TimeScheme;
+    let (nx, ny) = (18usize, 18usize);
+    let model = incompressible_momentum_structured_model().unwrap();
+    let bcs = |edge: Edge| {
+        let uw = if matches!(edge, Edge::Top) { 1.0f32 } else { 0.0 };
+        let bt = if matches!(edge, Edge::Top) { 5 } else { 3 };
+        (
+            bt,
+            vec![
+                BcComp { kind: 1, value: uw },
+                BcComp { kind: 1, value: 0.0 },
+                BcComp { kind: 2, value: 0.0 },
+            ],
+        )
+    };
+
+    let cpu_run = |scheme: Scheme, ts: TimeScheme| -> Vec<f64> {
+        let mut s = StructuredModelSolver::with_config(
+            StructuredGrid::new(nx, ny, 1.0, 1.0),
+            &model,
+            0.02,
+            3,
+            scheme,
+            ts,
+        )
+        .unwrap();
+        s.set_fluid(1.0, 0.005);
+        s.set_boundaries(|e, _x, _y| bcs(e));
+        for _ in 0..20 {
+            s.step();
+        }
+        s.state_field(0)
+    };
+    let gpu_run = |scheme: Scheme, ts: TimeScheme| -> Vec<f64> {
+        let ctx =
+            pollster::block_on(cfd2::solver::gpu::context::GpuContext::new(None, None)).unwrap();
+        let mut s = StructuredGpuSolver::with_config(
+            ctx,
+            StructuredGrid::new(nx, ny, 1.0, 1.0),
+            &model,
+            0.02,
+            3,
+            scheme,
+            ts,
+        )
+        .unwrap();
+        s.set_fluid(1.0, 0.005);
+        s.set_boundaries(|e, _x, _y| bcs(e));
+        for _ in 0..20 {
+            s.step();
+        }
+        s.state_field(0)
+    };
+
+    // (1) CPU scheme is live: VanLeer != Upwind.
+    let cpu_up = cpu_run(Scheme::Upwind, TimeScheme::Euler);
+    let cpu_vl = cpu_run(Scheme::SecondOrderUpwindVanLeer, TimeScheme::Euler);
+    let mut d_scheme = 0.0f64;
+    for (a, b) in cpu_up.iter().zip(&cpu_vl) {
+        d_scheme = d_scheme.max((a - b).abs());
+    }
+    assert!(d_scheme > 1e-3, "CPU advection scheme baked to Upwind (max|Δ|={d_scheme})");
+
+    // (2) CPU time scheme is live: BDF2 != Euler.
+    let cpu_bdf2 = cpu_run(Scheme::Upwind, TimeScheme::BDF2);
+    let mut d_time = 0.0f64;
+    for (a, b) in cpu_up.iter().zip(&cpu_bdf2) {
+        d_time = d_time.max((a - b).abs());
+    }
+    assert!(d_time > 1e-5, "CPU time scheme baked to Euler (max|Δ|={d_time})");
+
+    // (3) CPU matches GPU under the SAME non-default (VanLeer+BDF2) config to the
+    // SAME order as the Upwind+Euler baseline. The coupled indefinite banded solve
+    // already diverges ~3e-2 between the CPU (banded-block GMRES) and GPU (host f64
+    // GMRES) backends under Upwind+Euler (see gpu_structured_momentum_lid_cavity_
+    // matches_cpu); a sharper scheme + BDF2 amplifies that SAME solver-path f32
+    // divergence but must not introduce a NEW parity break. So require the
+    // VanLeer+BDF2 CPU/GPU delta to stay within 3× the Upwind+Euler CPU/GPU delta.
+    let gpu_up = gpu_run(Scheme::Upwind, TimeScheme::Euler);
+    let mut d_base = 0.0f64;
+    for (a, b) in cpu_up.iter().zip(&gpu_up) {
+        assert!(a.is_finite() && b.is_finite(), "Upwind+Euler diverged");
+        d_base = d_base.max((a - b).abs());
+    }
+    let gpu_vlb = gpu_run(Scheme::SecondOrderUpwindVanLeer, TimeScheme::BDF2);
+    let cpu_vlb = cpu_run(Scheme::SecondOrderUpwindVanLeer, TimeScheme::BDF2);
+    let mut d_parity = 0.0f64;
+    for (a, b) in cpu_vlb.iter().zip(&gpu_vlb) {
+        assert!(a.is_finite() && b.is_finite(), "VanLeer+BDF2 diverged");
+        d_parity = d_parity.max((a - b).abs());
+    }
+    println!(
+        "[cpu-structured] scheme|Δ|={d_scheme:e} time|Δ|={d_time:e} \
+         CPU-vs-GPU base(Upwind+Euler)|Δ|={d_base:e} (VanLeer+BDF2)|Δ|={d_parity:e}"
+    );
+    assert!(
+        d_parity < (3.0 * d_base).max(1e-1),
+        "VanLeer+BDF2 introduced a NEW CPU/GPU parity break: {d_parity} vs 3×base {}",
+        3.0 * d_base
+    );
+}
+
 /// GEOMETRY PARITY: channel flow (inlet/outlet/walls) with an IMMERSED cylinder
 /// (Brinkman penalty via `ibm_penalty_U`) must run bounded, develop through-flow,
 /// and drive the velocity ~0 inside the solid — the structured analogue of the

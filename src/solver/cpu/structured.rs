@@ -693,18 +693,35 @@ pub struct StructuredModelSolver {
 
 impl StructuredModelSolver {
     /// Build a structured solver for a coupled model on `grid`. `outer_iters` is
-    /// the number of Picard/Newton sweeps per time step.
+    /// the number of Picard/Newton sweeps per time step. Defaults to first-order
+    /// Upwind advection + backward-Euler time integration; use
+    /// [`Self::with_config`] to select any of the runtime schemes.
     pub fn new(
         grid: StructuredGrid,
         model: &ModelSpec,
         dt: f64,
         outer_iters: usize,
     ) -> Result<Self, String> {
-        let scheme = Scheme::Upwind;
+        Self::with_config(grid, model, dt, outer_iters, Scheme::Upwind, TimeScheme::Euler)
+    }
+
+    /// Build a structured coupled solver with an explicit advection scheme and
+    /// time-integration scheme. Both are honoured at RUNTIME by the same codegen
+    /// kernels the GPU path runs (`constants.scheme` selects the deferred-
+    /// correction reconstruction; `constants.time_scheme==1` is BDF2) — full
+    /// parity with [`crate::solver::gpu::structured::StructuredGpuSolver::with_config`].
+    pub fn with_config(
+        grid: StructuredGrid,
+        model: &ModelSpec,
+        dt: f64,
+        outer_iters: usize,
+        scheme: Scheme,
+        time_scheme: TimeScheme,
+    ) -> Result<Self, String> {
         let recipe = SolverRecipe::from_model(
             model,
             scheme,
-            TimeScheme::Euler,
+            time_scheme,
             PreconditionerType::Jacobi,
             SteppingMode::Coupled,
         )?;
@@ -781,7 +798,8 @@ impl StructuredModelSolver {
 
         let mut constants = recipe.initial_constants;
         constants.dtau = 0.0;
-        constants.time_scheme = 0; // Euler
+        // `time_scheme` (and `scheme`) come from `from_model` via the args — the
+        // runtime kernels branch on them (BDF2 at time_scheme==1). Do NOT override.
         constants.stride_x = grid.nx as u32;
 
         Ok(Self {

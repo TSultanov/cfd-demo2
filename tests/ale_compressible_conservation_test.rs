@@ -260,3 +260,144 @@ fn allmach_thermal_ale_conserves_mass_closed_box_cpu() {
         moving.max_total_drift,
     );
 }
+
+const ASTEPS: usize = 80;
+const SHEAR: f64 = 0.6;
+
+struct ShearOut {
+    max_total_drift: f64,
+    cell_min: usize,
+    cell_max: usize,
+}
+
+/// A FlowCoupled shear-flow run on the closed box, with adaptation (birth/kill) optionally on.
+/// The SAME flow with adapt off is the control that isolates the transfer's conservation
+/// contribution from the base pressure-based drift of this (more energetic) flow.
+fn run_shear(adapt: bool, label: &str) -> ShearOut {
+    let (geo, domain) = square();
+    let mut cvt = generate_cvt_mesh_with_seeds(&geo, H, H, 1.0, domain, &LloydConfig::default());
+    tag_closed_box(&mut cvt.mesh);
+    let n0 = cvt.mesh.num_cells();
+
+    let u0: Vec<(f64, f64)> = (0..n0)
+        .map(|c| (SHEAR * (cvt.mesh.cell_cy[c] - 0.5 * LY), 0.0))
+        .collect();
+    let p0: Vec<f64> = (0..n0)
+        .map(|c| p_bump(cvt.mesh.cell_cx[c], cvt.mesh.cell_cy[c]))
+        .collect();
+
+    let params = test_params();
+    let model = allmach_thermal_ale_model().expect("allmach thermal ale model");
+    let mut moving = pollster::block_on(MovingMeshDriver::build_with_model(
+        cvt,
+        model,
+        &params,
+        MeshMotionSpec::FlowCoupled { regularization: 0.5 },
+        &u0,
+        &p0,
+        None,
+        None,
+    ))
+    .expect("moving allmach thermal driver build");
+    moving.set_boundary_retag(Some(tag_closed_box));
+    if adapt {
+        moving.set_adaptive_sizing(1);
+        moving.set_adaptive_sizing_band(Some((0.03, 0.10)));
+        moving.set_adaptive_budget_factor(4.0);
+        moving.set_smoothing(1, 1, 0.5);
+    }
+    moving.driver_mut().apply_params(&params);
+
+    let layout = moving.driver().solver().model().state_layout.clone();
+    let stride = layout.stride() as usize;
+    let rho_off = layout.offset_for("rho").expect("rho offset") as usize;
+
+    let mut m_ref = 0.0f64;
+    let (mut cell_min, mut cell_max) = (n0, n0);
+    let mut max_total_drift = 0.0f64;
+    let mut final_drift = 0.0f64;
+    let mut traj: Vec<(usize, f64)> = Vec::new(); // (step, signed drift)
+    for step in 0..ASTEPS {
+        let (outcome, _stats) = moving
+            .step(false)
+            .unwrap_or_else(|e| panic!("{label} step {step} failed: {e}"));
+        assert!(outcome.diverged.is_none(), "{label} step {step} diverged");
+        let nc = moving.mesh().num_cells();
+        cell_min = cell_min.min(nc);
+        cell_max = cell_max.max(nc);
+        let m = total_mass(&moving, rho_off, stride);
+        assert!(m.is_finite() && m > 0.0, "{label} step {step}: non-finite mass {m}");
+        if step == 0 {
+            m_ref = m;
+            continue;
+        }
+        let signed = (m - m_ref) / m_ref;
+        max_total_drift = max_total_drift.max(signed.abs());
+        final_drift = signed;
+        if step % 10 == 9 || step + 1 == ASTEPS {
+            traj.push((step, signed));
+        }
+    }
+    // monotonic-in-one-direction (a LEAK) vs a bounded excursion that relaxes back
+    let traj_str: String = traj
+        .iter()
+        .map(|(s, d)| format!("{s}:{:+.2e}", d))
+        .collect::<Vec<_>>()
+        .join(" ");
+    println!(
+        "[ale-compressible-conservation] {label}: M_ref = {m_ref:.6}, cells {n0} -> [{cell_min}, {cell_max}], \
+         max drift = {max_total_drift:.3e}, FINAL drift = {final_drift:+.3e} ({ASTEPS} steps)\n  \
+         traj(signed): {traj_str}"
+    );
+    ShearOut { max_total_drift, cell_min, cell_max }
+}
+
+/// Mass behaviour under ADAPTATION (birth/kill) — the #4-transfer concern (adaptive mesh).
+/// Runs the SAME FlowCoupled shear flow with adaptation OFF (control: deformation only, fixed
+/// cell count) and ON (birth/kill fires).
+///
+/// WHAT THIS MEASURES (and what it deliberately does NOT gate tight): the mass drift here is
+/// MONOTONIC in BOTH runs (control climbs to ~1.5%, adapt to ~2.9% over 80 steps). The
+/// DOMINANT part is a BASE pressure-based property — the continuity conserves a preconditioned
+/// pseudo-mass, not the thermal-EOS mass — present in the adapt-OFF control (and, per the
+/// smooth-motion gate above, motion-neutral, i.e. it is NOT the ALE terms; it is the
+/// pressure-based-vs-density-based gap = the density-based-ALE roadmap item). Adaptation adds
+/// ~1.9x on top, but that extra is CONFOUNDED: the adapted mesh (more cells) evolves a
+/// different flow with its own base drift, so this instrument cannot cleanly separate a
+/// birth/kill state-TRANSFER leak from the adapted mesh's own base drift — that needs a
+/// single-resize-event before/after probe (deferred; the audit rated the strictly-conservative
+/// transfer fix research-scale). So this is a REGRESSION GUARD (adaptation must not
+/// CATASTROPHICALLY break conservation beyond the base flow drift), not a tight transfer gate.
+#[test]
+fn allmach_thermal_ale_conserves_mass_under_adaptation_cpu() {
+    let control = run_shear(false, "shear-noadapt");
+    let adaptive = run_shear(true, "shear-adapt");
+
+    // Adaptation must actually have fired, or the comparison is vacuous.
+    assert!(
+        adaptive.cell_min != control.cell_min || adaptive.cell_max != control.cell_max,
+        "adaptation never changed the cell count — cannot test transfer conservation"
+    );
+    println!(
+        "[ale-compressible-conservation] adapt/control drift ratio = {:.2} \
+         (control {:.3e}, adapt {:.3e}) — dominant drift is the base pressure-based property; \
+         the adaptation delta is confounded with the adapted-mesh base drift",
+        adaptive.max_total_drift / control.max_total_drift.max(1e-12),
+        control.max_total_drift,
+        adaptive.max_total_drift,
+    );
+
+    // Regression guard: adaptation must not inflate the drift CATASTROPHICALLY beyond the same
+    // flow's adapt-off base drift (a true birth/kill transfer BLOW-UP would be many-fold). The
+    // measured ~1.9x is the confounded base-drift-of-a-different-mesh + any transfer effect; 3x
+    // catches a real leak while tolerating that confound. (Tightening this requires the
+    // single-event transfer probe — deferred.)
+    assert!(
+        adaptive.max_total_drift <= control.max_total_drift * 3.0,
+        "adaptation catastrophically breaks mass conservation: control {:.3e} vs adapt {:.3e} \
+         ({:.1}x — expected < 3x)",
+        control.max_total_drift,
+        adaptive.max_total_drift,
+        adaptive.max_total_drift / control.max_total_drift.max(1e-12),
+    );
+}

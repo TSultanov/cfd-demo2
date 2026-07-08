@@ -707,7 +707,7 @@ impl StructuredModelSolver {
             // host coupled solve).
             let a = self.buffers.f32_vec("matrix_values");
             let b = self.buffers.f32_vec("rhs");
-            let (x, _res) = crate::solver::banded_schur::banded_gmres(
+            let (x, _res) = crate::solver::banded_schur::banded_gmres_t(
                 &a,
                 self.grid.nx,
                 self.grid.ny,
@@ -717,6 +717,7 @@ impl StructuredModelSolver {
                 60,
                 200,
                 crate::solver::banded_schur::default_step_tol(),
+                self.threads,
             );
             self.buffers.copy_into_f32("x", &x);
             for id in &upd {

@@ -51,6 +51,48 @@ pub enum CoupledPrecondKind {
     SchurAmg,
 }
 
+// ---- Threading helpers ------------------------------------------------------
+// The banded solve is the structured coupled bottleneck. Its per-cell passes
+// (SpMV, preconditioner apply) and the Arnoldi dots parallelize over DISJOINT
+// cell chunks. cfg-gated: the CPU backend has the persistent worker pool
+// (`cpu::parallel`); the pure-GPU build (no `cpu` feature) runs serial (the GPU
+// host solve is a small read-back system anyway).
+
+/// Fill `y` (`ncells * width`, cell-major) in parallel: `f(cell0, y_chunk)` owns
+/// the disjoint slice for cells `[cell0, cell0 + y_chunk.len()/width)`.
+#[cfg(feature = "cpu")]
+#[inline]
+fn cells_mut<F: Fn(usize, &mut [f64]) + Sync>(
+    ncells: usize,
+    width: usize,
+    threads: usize,
+    y: &mut [f64],
+    f: F,
+) {
+    crate::solver::cpu::parallel::parallel_cell_chunks_mut(ncells, width, threads, y, f);
+}
+#[cfg(not(feature = "cpu"))]
+#[inline]
+fn cells_mut<F: Fn(usize, &mut [f64])>(_n: usize, _w: usize, _t: usize, y: &mut [f64], f: F) {
+    f(0, y);
+}
+
+/// Parallel dot product (deterministic per fixed 8192-chunk).
+#[cfg(feature = "cpu")]
+#[inline]
+fn pdot(threads: usize, a: &[f64], b: &[f64]) -> f64 {
+    crate::solver::cpu::parallel::par_dot(threads, a, b)
+}
+#[cfg(not(feature = "cpu"))]
+#[inline]
+fn pdot(_threads: usize, a: &[f64], b: &[f64]) -> f64 {
+    dot(a, b)
+}
+#[inline]
+fn pnorm(threads: usize, a: &[f64]) -> f64 {
+    pdot(threads, a, a).sqrt()
+}
+
 /// `matrix_values[p*5*s*s + 5*s*r + band*s + c]` as f64.
 #[inline]
 fn block(a: &[f32], s: usize, p: usize, band: usize, r: usize, c: usize) -> f64 {
@@ -102,25 +144,30 @@ impl Stencil5 {
 }
 
 /// `y = A x` over the 5-point block stencil (public for tests that build a
-/// known operator and need `b = A x*`).
+/// known operator and need `b = A x*`; serial).
 pub fn spmv(a: &[f32], nx: usize, ny: usize, s: usize, x: &[f64]) -> Vec<f64> {
+    spmv_t(a, nx, ny, s, x, 1)
+}
+
+/// `y = A x`, parallel over disjoint cell chunks (`threads`).
+fn spmv_t(a: &[f32], nx: usize, ny: usize, s: usize, x: &[f64], threads: usize) -> Vec<f64> {
     let n = nx * ny;
     let mut y = vec![0.0f64; n * s];
-    for j in 0..ny {
-        for i in 0..nx {
-            let p = j * nx + i;
-            let nbrs = neighbors(i, j, nx, ny);
+    cells_mut(n, s, threads, &mut y, |cell0, chunk| {
+        for li in 0..chunk.len() / s {
+            let p = cell0 + li;
+            let (i, j) = (p % nx, p / nx);
             for r in 0..s {
                 let mut acc = 0.0;
-                for &(band, q) in nbrs.iter() {
+                for &(band, q) in neighbors(i, j, nx, ny).iter() {
                     for c in 0..s {
                         acc += block(a, s, p, band, r, c) * x[q * s + c];
                     }
                 }
-                y[p * s + r] = acc;
+                chunk[li * s + r] = acc;
             }
         }
-    }
+    });
     y
 }
 
@@ -421,20 +468,23 @@ fn heavy_ball_pressure(sd: &SchurData, nx: usize, ny: usize, g: &[f64]) -> Vec<f
     best
 }
 
-fn apply(built: &Built, a: &[f32], nx: usize, ny: usize, s: usize, r: &[f64]) -> Vec<f64> {
+fn apply(built: &Built, a: &[f32], nx: usize, ny: usize, s: usize, r: &[f64], threads: usize) -> Vec<f64> {
     match built {
         Built::BlockJacobi { minv } => {
             let ncells = nx * ny;
             let mut z = vec![0.0f64; ncells * s];
-            for p in 0..ncells {
-                for i in 0..s {
-                    let mut acc = 0.0;
-                    for k in 0..s {
-                        acc += minv[p][i * s + k] * r[p * s + k];
+            cells_mut(ncells, s, threads, &mut z, |cell0, chunk| {
+                for li in 0..chunk.len() / s {
+                    let p = cell0 + li;
+                    for i in 0..s {
+                        let mut acc = 0.0;
+                        for k in 0..s {
+                            acc += minv[p][i * s + k] * r[p * s + k];
+                        }
+                        chunk[li * s + i] = acc;
                     }
-                    z[p * s + i] = acc;
                 }
-            }
+            });
             z
         }
         Built::Schur(sd) => {
@@ -538,21 +588,39 @@ pub fn banded_gmres(
     max_outer: usize,
     tol: f64,
 ) -> (Vec<f32>, f64) {
+    banded_gmres_t(a, nx, ny, s, b, precond, restart, max_outer, tol, 1)
+}
+
+/// Threaded variant: `threads` parallelizes the per-cell SpMV / preconditioner
+/// apply and the Arnoldi dots over disjoint cell chunks.
+#[allow(clippy::too_many_arguments)]
+pub fn banded_gmres_t(
+    a: &[f32],
+    nx: usize,
+    ny: usize,
+    s: usize,
+    b: &[f32],
+    precond: &BandedPrecond,
+    restart: usize,
+    max_outer: usize,
+    tol: f64,
+    threads: usize,
+) -> (Vec<f32>, f64) {
     let built = build(a, nx, ny, s, precond);
     if matches!(built, Built::Schur(_)) {
-        return banded_fgmres(a, nx, ny, s, b, &built, restart, max_outer, tol);
+        return banded_fgmres(a, nx, ny, s, b, &built, restart, max_outer, tol, threads);
     }
     let n = nx * ny * s;
     let b64: Vec<f64> = b.iter().map(|&v| v as f64).collect();
-    let bnorm = norm(&b64).max(1e-30);
+    let bnorm = pnorm(threads, &b64).max(1e-30);
     let mut x = vec![0.0f64; n];
 
     for _outer in 0..max_outer {
         // r0 = M^{-1}(b - A x)
-        let ax = spmv(a, nx, ny, s, &x);
+        let ax = spmv_t(a, nx, ny, s, &x, threads);
         let r0: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-        let r = apply(&built, a, nx, ny, s, &r0);
-        let beta = norm(&r);
+        let r = apply(&built, a, nx, ny, s, &r0, threads);
+        let beta = pnorm(threads, &r);
         if beta / bnorm <= tol {
             return (x.iter().map(|&v| v as f32).collect(), beta / bnorm);
         }
@@ -569,13 +637,13 @@ pub fn banded_gmres(
 
         for k in 0..m {
             // w = M^{-1} A v_k
-            let av = spmv(a, nx, ny, s, &v[k]);
-            let mut w = apply(&built, a, nx, ny, s, &av);
+            let av = spmv_t(a, nx, ny, s, &v[k], threads);
+            let mut w = apply(&built, a, nx, ny, s, &av, threads);
             for i in 0..=k {
-                h[i][k] = dot(&w, &v[i]);
+                h[i][k] = pdot(threads, &w, &v[i]);
                 axpy(&mut w, -h[i][k], &v[i]);
             }
-            h[k + 1][k] = norm(&w);
+            h[k + 1][k] = pnorm(threads, &w);
             if h[k + 1][k] > 1e-14 {
                 v.push(scale(&w, 1.0 / h[k + 1][k]));
             } else {
@@ -616,15 +684,15 @@ pub fn banded_gmres(
             axpy(&mut x, y[i], &v[i]);
         }
 
-        let ax = spmv(a, nx, ny, s, &x);
+        let ax = spmv_t(a, nx, ny, s, &x, threads);
         let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-        if norm(&res) / bnorm <= tol {
-            return (x.iter().map(|&v| v as f32).collect(), norm(&res) / bnorm);
+        if pnorm(threads, &res) / bnorm <= tol {
+            return (x.iter().map(|&v| v as f32).collect(), pnorm(threads, &res) / bnorm);
         }
     }
-    let ax = spmv(a, nx, ny, s, &x);
+    let ax = spmv_t(a, nx, ny, s, &x, threads);
     let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-    let rel = norm(&res) / bnorm;
+    let rel = pnorm(threads, &res) / bnorm;
     if std::env::var("CFD2_STRUCT_SOLVE_DEBUG").is_ok() {
         eprintln!(
             "[banded] MAXED max_outer={max_outer} restart={restart} rel_res={rel:.3e} (tol={tol:.1e} not reached)"
@@ -638,6 +706,7 @@ pub fn banded_gmres(
 /// apply. Stores the preconditioned Krylov vectors `z_k = M⁻¹ v_k` and updates
 /// `x = x0 + Z y`, so a data-dependent preconditioner does not corrupt the
 /// Arnoldi recurrence (unlike plain GMRES). Mirrors `cpu::linalg::fgmres`.
+#[allow(clippy::too_many_arguments)]
 fn banded_fgmres(
     a: &[f32],
     nx: usize,
@@ -648,18 +717,19 @@ fn banded_fgmres(
     restart: usize,
     max_outer: usize,
     tol: f64,
+    threads: usize,
 ) -> (Vec<f32>, f64) {
     let n = nx * ny * s;
     let b64: Vec<f64> = b.iter().map(|&v| v as f64).collect();
-    let bnorm = norm(&b64).max(1e-30);
+    let bnorm = pnorm(threads, &b64).max(1e-30);
     let mut x = vec![0.0f64; n];
 
     for _outer in 0..max_outer {
         // Right-preconditioned: the Arnoldi space is built on the UNpreconditioned
         // residual r0 = b - A x.
-        let ax = spmv(a, nx, ny, s, &x);
+        let ax = spmv_t(a, nx, ny, s, &x, threads);
         let r0: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-        let beta = norm(&r0);
+        let beta = pnorm(threads, &r0);
         if beta / bnorm <= tol {
             return (x.iter().map(|&v| v as f32).collect(), beta / bnorm);
         }
@@ -677,14 +747,14 @@ fn banded_fgmres(
 
         for k in 0..m {
             // z_k = M^{-1} v_k ; w = A z_k.
-            let zk = apply(built, a, nx, ny, s, &v[k]);
-            let mut w = spmv(a, nx, ny, s, &zk);
+            let zk = apply(built, a, nx, ny, s, &v[k], threads);
+            let mut w = spmv_t(a, nx, ny, s, &zk, threads);
             z.push(zk);
             for i in 0..=k {
-                h[i][k] = dot(&w, &v[i]);
+                h[i][k] = pdot(threads, &w, &v[i]);
                 axpy(&mut w, -h[i][k], &v[i]);
             }
-            h[k + 1][k] = norm(&w);
+            h[k + 1][k] = pnorm(threads, &w);
             if h[k + 1][k] > 1e-14 {
                 v.push(scale(&w, 1.0 / h[k + 1][k]));
             } else {

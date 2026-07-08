@@ -1265,7 +1265,16 @@ impl BandedGpuLinAlg {
         let (nx, ny, s) = (self.nx as usize, self.ny as usize, self.s as usize);
         let a = read_buffer_f32(ctx, mat, nx * ny * BAND_STRIDE * s * s);
         let b = read_buffer_f32(ctx, rhs, nx * ny * s);
-        let (xh, _res) = crate::solver::banded_schur::banded_gmres(
+        // Parallelize the host-side banded solve over the available cores (the
+        // GUI is a wgpu app but the coupled solve is host-side; parallel only
+        // takes effect under the `cpu` feature — the GUI build has it).
+        let threads = std::env::var("CFD2_CPU_THREADS")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .or_else(|| std::thread::available_parallelism().ok().map(|n| n.get()))
+            .unwrap_or(1)
+            .max(1);
+        let (xh, _res) = crate::solver::banded_schur::banded_gmres_t(
             &a,
             nx,
             ny,
@@ -1275,6 +1284,7 @@ impl BandedGpuLinAlg {
             self.restart.max(1),
             200,
             crate::solver::banded_schur::default_step_tol(),
+            threads,
         );
         ctx.queue.write_buffer(x, 0, bytemuck::cast_slice(&xh));
     }

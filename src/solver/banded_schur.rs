@@ -327,7 +327,16 @@ fn build(a: &[f32], nx: usize, ny: usize, s: usize, prec: &BandedPrecond) -> Bui
             for cell in 0..ncells {
                 for (i, &u) in u_idx.iter().enumerate() {
                     let d = block(a, s, cell, BAND_DIAG, u, u);
-                    diag_u_inv[cell * u_len + i] = if d.abs() > 1e-30 { 1.0 / d } else { 0.0 };
+                    // Guard on a POSITIVE diagonal, not |d|. The momentum diagonal
+                    // `ddt + diffusion + convection − bounded_sum_phi` (OpenFOAM
+                    // bounded-Gauss net-outflux correction) can transiently go
+                    // NEGATIVE during a through-flow startup (net outward flux
+                    // exceeds ddt+diffusion). `1/d` with `d<0` is a wrong-sign,
+                    // amplifying preconditioner that stalls the momentum solve
+                    // (rel_res≈1). Zeroing it there leaves those few cells
+                    // unpreconditioned (safe) instead of anti-preconditioned.
+                    // For the well-posed `d>0` case this is bit-identical to before.
+                    diag_u_inv[cell * u_len + i] = if d > 1e-30 { 1.0 / d } else { 0.0 };
                 }
                 for band in 0..5 {
                     a_pp[cell * 5 + band] = block(a, s, cell, band, *pp, *pp);

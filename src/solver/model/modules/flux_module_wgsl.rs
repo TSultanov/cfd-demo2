@@ -1141,9 +1141,10 @@ fn face_stmts(
 
     let mut state_keys = HashSet::new();
     collect_state_keys_from_flux_spec(spec, primitives, resolver, &mut state_keys);
-    let (state_vars, state_var_stmts) = precompute_state_vars(resolver, flux_layout, &state_keys);
+    let (state_vars, state_var_stmts) =
+        precompute_state_vars(resolver, flux_layout, &state_keys, structured);
     body.extend(state_var_stmts);
-    let ctx = LowerCtx::new(resolver, primitives, flux_layout, state_vars);
+    let ctx = LowerCtx::new(resolver, primitives, flux_layout, state_vars, structured);
     let mut cse = CseBuilder::new("_cse_");
 
     match spec {
@@ -1364,9 +1365,10 @@ fn face_stmts_runtime_scheme(
     for (_, spec) in variants {
         collect_state_keys_from_flux_spec(spec, primitives, resolver, &mut state_keys);
     }
-    let (state_vars, state_var_stmts) = precompute_state_vars(resolver, flux_layout, &state_keys);
+    let (state_vars, state_var_stmts) =
+        precompute_state_vars(resolver, flux_layout, &state_keys, structured);
     body.extend(state_var_stmts);
-    let ctx = LowerCtx::new(resolver, primitives, flux_layout, state_vars);
+    let ctx = LowerCtx::new(resolver, primitives, flux_layout, state_vars, structured);
     let mut cse = CseBuilder::new("_cse_");
 
     if variants.is_empty() {
@@ -1678,7 +1680,10 @@ fn face_stmts_runtime_scheme(
         let flux = num / Expr::ident("denom");
 
         body.push(dsl::assign_expr(
-            dsl::array_access_linear("fluxes", Expr::ident("idx"), flux_stride, off),
+            // Use the face-id-aware helper: in the structured lowering the flux slot
+            // is `sfd_face_id`, not the cell `idx` (same class of bug as the boundary
+            // BC-table keying above).
+            flux_face(off),
             flux * Expr::ident("area"),
         ));
     }
@@ -1909,6 +1914,7 @@ fn precompute_state_vars<'a>(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
     keys: &HashSet<StateKey<'a>>,
+    structured: bool,
 ) -> (HashMap<StateKey<'a>, String>, Vec<Stmt>) {
     let mut vars = HashMap::new();
     let mut stmts = Vec::new();
@@ -1931,6 +1937,7 @@ fn precompute_state_vars<'a>(
             key.field,
             key.component,
             flux_layout,
+            structured,
         );
         stmts.push(dsl::let_expr(&name, expr));
         vars.insert(key, name);
@@ -1944,6 +1951,7 @@ struct LowerCtx<'a> {
     primitives: &'a HashMap<&'a str, &'a Expr>,
     flux_layout: &'a FluxLayout,
     state_vars: HashMap<StateKey<'a>, String>,
+    structured: bool,
 }
 
 impl<'a> LowerCtx<'a> {
@@ -1952,12 +1960,14 @@ impl<'a> LowerCtx<'a> {
         primitives: &'a HashMap<&'a str, &'a Expr>,
         flux_layout: &'a FluxLayout,
         state_vars: HashMap<StateKey<'a>, String>,
+        structured: bool,
     ) -> Self {
         Self {
             resolver,
             primitives,
             flux_layout,
             state_vars,
+            structured,
         }
     }
 
@@ -1977,6 +1987,7 @@ impl<'a> LowerCtx<'a> {
             field,
             component,
             self.flux_layout,
+            self.structured,
         )
     }
 }
@@ -2148,6 +2159,7 @@ fn state_component_at_side_resolver(
     field: &str,
     component: u32,
     flux_layout: &FluxLayout,
+    structured: bool,
 ) -> Expr {
     let owner =
         state_component_at_resolver(resolver, buffer, Expr::ident("owner"), field, component);
@@ -2185,7 +2197,19 @@ fn state_component_at_side_resolver(
     };
 
     if let Some(unknown_offset) = flux_layout.offset_for(&comp_name) {
-        let bc = BcTable::new(Expr::ident("idx"), Expr::from(flux_layout.stride));
+        // The boundary BC table is keyed per-FACE. In the structured (cell-dispatched)
+        // lowering the face id is `sfd_face_id = idx*4 + k`; only the unstructured
+        // (face-dispatched) path has `idx` == face. Keying by `idx` in the structured
+        // path reads a wrong (usually interior, kind=0) slot, so a Dirichlet inlet's
+        // continuity face flux never sees the prescribed velocity — the channel then
+        // under-conserves mass. Match `face_boundary[sfd_face_id]` (and the structured
+        // assembly / grad_p_update / bc_expr, which all key by the face id).
+        let bc_face_idx = if structured {
+            Expr::ident("sfd_face_id")
+        } else {
+            Expr::ident("idx")
+        };
+        let bc = BcTable::new(bc_face_idx, Expr::from(flux_layout.stride));
         let kind = bc.kind_raw(Expr::from(unknown_offset));
         let value = bc.value(Expr::from(unknown_offset));
 

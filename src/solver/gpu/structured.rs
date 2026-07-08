@@ -1274,7 +1274,7 @@ impl BandedGpuLinAlg {
             &self.precond,
             self.restart.max(1),
             200,
-            1e-9,
+            crate::solver::banded_schur::default_step_tol(),
         );
         ctx.queue.write_buffer(x, 0, bytemuck::cast_slice(&xh));
     }

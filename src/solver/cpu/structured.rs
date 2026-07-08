@@ -716,7 +716,7 @@ impl StructuredModelSolver {
                 &self.precond,
                 60,
                 200,
-                1e-9,
+                crate::solver::banded_schur::default_step_tol(),
             );
             self.buffers.copy_into_f32("x", &x);
             for id in &upd {
@@ -793,8 +793,12 @@ impl StructuredModelSolver {
                     dx: self.grid.dx as f32,
                     dy: self.grid.dy as f32,
                 };
+                // Structured binds the NEUTRAL low-Mach params (model=0), matching
+                // the interpreter's build_ctx — so an all-zero uniform.
+                let low_mach: crate::solver::gpu::structs::GpuLowMachParams =
+                    bytemuck::Zeroable::zeroed();
                 crate::solver::cpu::parallel::parallel_ranges(n, self.threads, |start, end| {
-                    f(&self.buffers, start as u32, end as u32, &self.constants, &grid);
+                    f(&self.buffers, start as u32, end as u32, &self.constants, &grid, &low_mach);
                 });
                 return;
             }

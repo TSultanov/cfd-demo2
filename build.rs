@@ -1394,12 +1394,11 @@ fn emit_transpiled_cpu_kernels(
                         // this kernel (interpreter fallback covers it).
                         continue;
                     };
-                    // Skip kernels that reference uniforms not yet threaded into
-                    // the transpiled function signature (constants + the structured
-                    // grid are available); e.g. `low_mach_params` in the compressible
-                    // KT flux and the all-Mach/thermal structured kernels. These
-                    // fall back to the interpreter.
-                    if src.contains("low_mach_params") {
+                    // Unstructured kernels have only `constants` threaded into the
+                    // signature, so any that reference `low_mach_params` (the
+                    // compressible KT flux) fall back to the interpreter. Structured
+                    // kernels DO get a `low_mach_params` param, so they transpile.
+                    if !structured && src.contains("low_mach_params") {
                         continue;
                     }
                     fns.push_str(&src);
@@ -1430,7 +1429,7 @@ fn emit_transpiled_cpu_kernels(
     out.push_str("        _ => None,\n    }\n}\n");
     // Structured variant: the extra `grid` param (see rust_emit::emit_kernel_fn_structured).
     out.push_str(
-        "\n/// Structured (`TopologyMode::Structured2D`) chunk-range entry point —\n/// the same shape plus the dense-grid geometry param.\npub type TranspiledStructuredKernel = fn(&Buffers, u32, u32, &GpuConstants, &StructuredGridRt);\n",
+        "\n/// Structured (`TopologyMode::Structured2D`) chunk-range entry point —\n/// the same shape plus the dense-grid geometry + low-Mach uniform params.\npub type TranspiledStructuredKernel = fn(&Buffers, u32, u32, &GpuConstants, &StructuredGridRt, &GpuLowMachParams);\n",
     );
     out.push_str(
         "pub fn lookup_structured(model_id: &str, kernel_id: &str) -> Option<TranspiledStructuredKernel> {\n",

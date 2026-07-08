@@ -13,6 +13,6 @@ use crate::solver::cpu::interpreter::Buffers;
 #[allow(unused_imports)]
 use crate::solver::cpu::transpile_rt::*;
 #[allow(unused_imports)]
-use crate::solver::gpu::structs::GpuConstants;
+use crate::solver::gpu::structs::{GpuConstants, GpuLowMachParams};
 
 include!(concat!(env!("OUT_DIR"), "/cpu_transpiled_kernels.rs"));

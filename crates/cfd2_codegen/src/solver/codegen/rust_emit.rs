@@ -66,21 +66,28 @@ pub fn emit_kernel_fn(fn_name: &str, program: &KernelProgram) -> String {
     emit_kernel_fn_inner(fn_name, program, false)
 }
 
-/// Emit a STRUCTURED (`TopologyMode::Structured2D`) kernel: the same body plus a
-/// trailing `grid: &StructuredGridRt` param. Structured kernels read the dense
-/// grid geometry as `grid.nx/ny/dx/dy`, which resolves against the param by the
-/// same name-coincidence `constants.*` uses — no field-access special-casing.
+/// Emit a STRUCTURED (`TopologyMode::Structured2D`) kernel: the same body plus
+/// trailing `grid: &StructuredGridRt` and `low_mach_params: &GpuLowMachParams`
+/// params. Structured kernels read the dense grid geometry as `grid.nx/ny/dx/dy`
+/// and the all-Mach/thermal ones read `low_mach_params.model` etc.; both resolve
+/// against the params by the same name-coincidence `constants.*` uses — no
+/// field-access special-casing. Both params are always emitted (unused ones are
+/// harmless under `#[allow(unused_variables)]`) so `lookup_structured` has one ABI.
 pub fn emit_kernel_fn_structured(fn_name: &str, program: &KernelProgram) -> String {
     emit_kernel_fn_inner(fn_name, program, true)
 }
 
-fn emit_kernel_fn_inner(fn_name: &str, program: &KernelProgram, with_grid: bool) -> String {
+fn emit_kernel_fn_inner(fn_name: &str, program: &KernelProgram, structured: bool) -> String {
     let tx = Tx::from_program(program);
     let mut s = String::new();
     s.push_str("#[allow(unused_variables, unused_mut, unused_parens, clippy::all)]\n");
-    let grid_param = if with_grid { ", grid: &StructuredGridRt" } else { "" };
+    let extra = if structured {
+        ", grid: &StructuredGridRt, low_mach_params: &GpuLowMachParams"
+    } else {
+        ""
+    };
     s.push_str(&format!(
-        "pub fn {fn_name}(bufs: &Buffers, start: u32, end: u32, constants: &GpuConstants{grid_param}) {{\n"
+        "pub fn {fn_name}(bufs: &Buffers, start: u32, end: u32, constants: &GpuConstants{extra}) {{\n"
     ));
     // Resolve each buffer handle once PER CHUNK, not per index: `bufs.atom` is
     // a HashMap<String, _> lookup that dominates otherwise. The dispatch loop

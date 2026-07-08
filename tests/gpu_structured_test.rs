@@ -1473,3 +1473,90 @@ fn cpu_structured_transpiled_matches_interpreter() {
     assert!(umax > 0.05, "lid flow must develop (umax={umax})");
     assert!(max_d < 1e-5, "transpiled kernels disagree with interpreter: {max_d}");
 }
+
+/// TRANSPILER PARITY (thermal): the all-Mach thermal structured kernels now
+/// transpile too (the `low_mach_params` uniform is a transpiled param, like
+/// `grid`), giving a large CPU speedup over the interpreter. They must stay
+/// BIT-IDENTICAL to the interpreter (the correctness oracle) — thermal channel,
+/// both engines, exact match.
+#[test]
+fn cpu_structured_transpiled_thermal_matches_interpreter() {
+    use cfd2::solver::cpu::CpuEngine;
+    use cfd2::solver::scheme::Scheme;
+    use cfd2::solver::TimeScheme;
+    let (nx, ny) = (24usize, 12usize);
+    let model = allmach_thermal_structured_model().unwrap();
+    let ss = model.system.unknowns_per_cell() as usize;
+    let build = |engine: CpuEngine| -> Vec<f64> {
+        let mut s = StructuredModelSolver::with_config(
+            StructuredGrid::new(nx, ny, 3.0, 1.0),
+            &model,
+            0.02,
+            4,
+            Scheme::SecondOrderUpwindVanLeer,
+            TimeScheme::BDF2,
+        )
+        .unwrap();
+        s.set_engine(engine, 2);
+        s.set_fluid(1.0, 0.02);
+        let psi = 0.5f64;
+        for (n, v) in [
+            ("psi", psi),
+            ("psi_precond", psi.max(1.0)),
+            ("rho", 1.0),
+            ("rho_t_ref", 1.0),
+            ("T", 1.0),
+        ] {
+            s.set_named_field(n, move |_, _| v);
+        }
+        if s.field_offset("t_ref").is_some() {
+            s.set_named_field("t_ref", |_, _| 1.0);
+        }
+        if s.field_offset("rho_floor").is_some() {
+            s.set_named_field("rho_floor", move |_, _| psi * 1e-5);
+        }
+        s.set_boundaries(move |edge, _x, _y| {
+            let (bt, mut v): (u32, Vec<BcComp>) = match edge {
+                Edge::Left => (1, vec![
+                    BcComp { kind: 1, value: 0.05 },
+                    BcComp { kind: 1, value: 0.0 },
+                    BcComp { kind: 2, value: 0.0 },
+                ]),
+                Edge::Right => (2, vec![
+                    BcComp { kind: 2, value: 0.0 },
+                    BcComp { kind: 2, value: 0.0 },
+                    BcComp { kind: 1, value: 0.0 },
+                ]),
+                _ => (3, vec![
+                    BcComp { kind: 1, value: 0.0 },
+                    BcComp { kind: 1, value: 0.0 },
+                    BcComp { kind: 2, value: 0.0 },
+                ]),
+            };
+            if ss >= 4 {
+                v.push(if matches!(edge, Edge::Left) {
+                    BcComp { kind: 1, value: 1.0 }
+                } else {
+                    BcComp { kind: 2, value: 0.0 }
+                });
+            }
+            (bt, v)
+        });
+        for _ in 0..8 {
+            s.step();
+        }
+        s.state_field(0)
+    };
+    let interp = build(CpuEngine::Interpreter);
+    let transp = build(CpuEngine::Transpiled);
+    let mut max_d = 0.0f64;
+    let mut umax = 0.0f64;
+    for i in 0..interp.len() {
+        assert!(transp[i].is_finite(), "thermal transpiled diverged");
+        max_d = max_d.max((interp[i] - transp[i]).abs());
+        umax = umax.max(interp[i].abs());
+    }
+    println!("[cpu-structured] thermal transpiled vs interpreter: umax={umax:.4} max|Δ|={max_d:e}");
+    assert!(umax > 0.01, "thermal flow must develop");
+    assert!(max_d < 1e-9, "thermal transpiled disagrees with interpreter: {max_d}");
+}

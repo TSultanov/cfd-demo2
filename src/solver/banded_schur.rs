@@ -230,6 +230,22 @@ fn default_pressure_sweeps(num_cells: usize, sweeps_cap: u32) -> usize {
         })
 }
 
+/// Relative-residual tolerance for the coupled banded inner solve inside the
+/// Picard/outer loop. INEXACT-PICARD: the outer loop re-linearizes every sweep,
+/// so driving each linearization past ~1e-4 of its initial residual is wasted
+/// work — this matches the unstructured model's declared 1e-4 linear tolerance
+/// (`ModelLinearSolverSettings::default`) and cuts the inner iteration count
+/// several-fold vs. an exact 1e-9 solve. `CFD2_STRUCT_LINEAR_TOL` overrides (e.g.
+/// tighten for an MMS order study). Both the CPU and GPU host coupled solves use
+/// it, so they stay bit-identical.
+pub fn default_step_tol() -> f64 {
+    std::env::var("CFD2_STRUCT_LINEAR_TOL")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|t| *t > 0.0)
+        .unwrap_or(1e-4)
+}
+
 /// The heavy-ball relaxation weight (1.0 → auto 1.95; mirrors
 /// `gpu::modules::coupled_schur::heavy_ball_omega`).
 fn heavy_ball_omega(model_omega: f32) -> f64 {
@@ -608,7 +624,13 @@ pub fn banded_gmres(
     }
     let ax = spmv(a, nx, ny, s, &x);
     let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-    (x.iter().map(|&v| v as f32).collect(), norm(&res) / bnorm)
+    let rel = norm(&res) / bnorm;
+    if std::env::var("CFD2_STRUCT_SOLVE_DEBUG").is_ok() {
+        eprintln!(
+            "[banded] MAXED max_outer={max_outer} restart={restart} rel_res={rel:.3e} (tol={tol:.1e} not reached)"
+        );
+    }
+    (x.iter().map(|&v| v as f32).collect(), rel)
 }
 
 /// Restarted, RIGHT-preconditioned FLEXIBLE GMRES — FGMRES(`restart`) — for the
@@ -712,7 +734,13 @@ fn banded_fgmres(
     }
     let ax = spmv(a, nx, ny, s, &x);
     let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-    (x.iter().map(|&v| v as f32).collect(), norm(&res) / bnorm)
+    let rel = norm(&res) / bnorm;
+    if std::env::var("CFD2_STRUCT_SOLVE_DEBUG").is_ok() {
+        eprintln!(
+            "[banded] MAXED max_outer={max_outer} restart={restart} rel_res={rel:.3e} (tol={tol:.1e} not reached)"
+        );
+    }
+    (x.iter().map(|&v| v as f32).collect(), rel)
 }
 
 /// A model's declared Schur block layout, extracted once so a solver can rebuild

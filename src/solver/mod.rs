@@ -1,5 +1,6 @@
 pub use cfd2_codegen::compiler;
 pub use cfd2_codegen::solver::codegen;
+pub mod banded_schur;
 pub mod dimensions;
 pub mod gpu;
 #[cfg(feature = "cpu")]

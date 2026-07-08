@@ -388,285 +388,6 @@ fn banded_cg(a: &[f32], b: &[f32], nx: usize, ny: usize, tol: f64, max_iter: usi
 }
 
 // ===========================================================================
-// Coupled (block) banded matrix-free solver — for the structured incompressible
-// momentum system (block stride 3: Ux, Uy, p). The assembled operator is a
-// fixed 5-point band of `s x s` blocks: `matrix_values[p*5*s*s + r*(5*s) + b*s + c]`
-// is block-band `b` (S,W,diag,E,N), row `r`, col `c` of cell `p` — the SoA layout
-// the codegen emits (start_row_r = p*5*s*s + 5*s*r). The U–p system is a
-// saddle point (indefinite), so we use restarted GMRES with a block-Jacobi
-// (per-cell s x s block inverse) preconditioner rather than CG.
-// ===========================================================================
-
-/// Block-banded matrix-free operator over a structured grid.
-pub struct BandedBlockOperator<'a> {
-    a: &'a [f32],
-    nx: usize,
-    ny: usize,
-    s: usize, // block stride (unknowns per cell)
-}
-
-impl<'a> BandedBlockOperator<'a> {
-    fn n(&self) -> usize {
-        self.nx * self.ny * self.s
-    }
-
-    #[inline]
-    fn block(&self, p: usize, band: usize, r: usize, c: usize) -> f64 {
-        // start_row_r = p*5*s*s + 5*s*r ; entry = start_row_r + band*s + c
-        let s = self.s;
-        self.a[p * 5 * s * s + 5 * s * r + band * s + c] as f64
-    }
-
-    /// `y = A x` over the 5-point block stencil (edge neighbours skipped — their
-    /// bands are zero, closed via the diagonal + RHS by the assembly).
-    fn spmv(&self, x: &[f64]) -> Vec<f64> {
-        let (nx, ny, s) = (self.nx, self.ny, self.s);
-        let mut y = vec![0.0f64; self.n()];
-        for j in 0..ny {
-            for i in 0..nx {
-                let p = j * nx + i;
-                // (band, neighbour cell) pairs present at this cell.
-                let mut nbrs: Vec<(usize, usize)> = vec![(BAND_DIAG, p)];
-                if j > 0 {
-                    nbrs.push((BAND_SOUTH, p - nx));
-                }
-                if i > 0 {
-                    nbrs.push((BAND_WEST, p - 1));
-                }
-                if i + 1 < nx {
-                    nbrs.push((BAND_EAST, p + 1));
-                }
-                if j + 1 < ny {
-                    nbrs.push((BAND_NORTH, p + nx));
-                }
-                for r in 0..s {
-                    let mut acc = 0.0;
-                    for &(band, q) in &nbrs {
-                        for c in 0..s {
-                            acc += self.block(p, band, r, c) * x[q * s + c];
-                        }
-                    }
-                    y[p * s + r] = acc;
-                }
-            }
-        }
-        y
-    }
-
-    /// Per-cell block-Jacobi preconditioner: the inverse of each cell's diagonal
-    /// `s x s` block, stored as a flat `s*s` slice per cell (any block size).
-    fn block_jacobi_inverses(&self) -> Vec<Vec<f64>> {
-        let ncells = self.nx * self.ny;
-        let s = self.s;
-        let mut inv = vec![Vec::new(); ncells];
-        for p in 0..ncells {
-            let mut m = vec![0.0f64; s * s];
-            for r in 0..s {
-                for c in 0..s {
-                    m[r * s + c] = self.block(p, BAND_DIAG, r, c);
-                }
-            }
-            inv[p] = invert_block(&m, s);
-        }
-        inv
-    }
-
-    fn apply_block_jacobi(&self, minv: &[Vec<f64>], r: &[f64]) -> Vec<f64> {
-        let s = self.s;
-        let ncells = self.nx * self.ny;
-        let mut z = vec![0.0f64; self.n()];
-        for p in 0..ncells {
-            for i in 0..s {
-                let mut acc = 0.0;
-                for k in 0..s {
-                    acc += minv[p][i * s + k] * r[p * s + k];
-                }
-                z[p * s + i] = acc;
-            }
-        }
-        z
-    }
-}
-
-/// Invert a general `s x s` matrix (row-major) via Gauss–Jordan with partial
-/// pivoting; falls back to the (pseudo-)diagonal inverse for singular blocks so
-/// the preconditioner stays well-defined on weak saddle rows.
-fn invert_block(m: &[f64], s: usize) -> Vec<f64> {
-    // Augmented [m | I].
-    let mut a = vec![0.0f64; s * 2 * s];
-    for r in 0..s {
-        for c in 0..s {
-            a[r * 2 * s + c] = m[r * s + c];
-        }
-        a[r * 2 * s + s + r] = 1.0;
-    }
-    for col in 0..s {
-        // Partial pivot.
-        let mut piv = col;
-        let mut best = a[col * 2 * s + col].abs();
-        for r in (col + 1)..s {
-            let v = a[r * 2 * s + col].abs();
-            if v > best {
-                best = v;
-                piv = r;
-            }
-        }
-        if best < 1e-30 {
-            // Singular: diagonal fallback.
-            let mut out = vec![0.0f64; s * s];
-            for k in 0..s {
-                let d = m[k * s + k];
-                out[k * s + k] = if d.abs() > 1e-30 { 1.0 / d } else { 0.0 };
-            }
-            return out;
-        }
-        if piv != col {
-            for c in 0..(2 * s) {
-                a.swap(col * 2 * s + c, piv * 2 * s + c);
-            }
-        }
-        let d = a[col * 2 * s + col];
-        for c in 0..(2 * s) {
-            a[col * 2 * s + c] /= d;
-        }
-        for r in 0..s {
-            if r == col {
-                continue;
-            }
-            let f = a[r * 2 * s + col];
-            if f != 0.0 {
-                for c in 0..(2 * s) {
-                    a[r * 2 * s + c] -= f * a[col * 2 * s + c];
-                }
-            }
-        }
-    }
-    let mut out = vec![0.0f64; s * s];
-    for r in 0..s {
-        for c in 0..s {
-            out[r * s + c] = a[r * 2 * s + s + c];
-        }
-    }
-    out
-}
-
-/// Restarted, block-Jacobi-preconditioned GMRES on the banded block operator.
-/// Handles the indefinite (saddle-point) U–p system the scalar CG cannot.
-/// Returns `(x, relative_residual)`.
-fn banded_block_gmres(
-    op: &BandedBlockOperator,
-    b: &[f32],
-    restart: usize,
-    max_outer: usize,
-    tol: f64,
-) -> (Vec<f32>, f64) {
-    let n = op.n();
-    let minv = op.block_jacobi_inverses();
-    let b64: Vec<f64> = b.iter().map(|&v| v as f64).collect();
-    let bnorm = norm(&b64).max(1e-30);
-    let mut x = vec![0.0f64; n];
-
-    for _outer in 0..max_outer {
-        // r0 = M^{-1}(b - A x)
-        let ax = op.spmv(&x);
-        let r0: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-        let mut r = op.apply_block_jacobi(&minv, &r0);
-        let beta = norm(&r);
-        if beta / bnorm <= tol {
-            return (x.iter().map(|&v| v as f32).collect(), beta / bnorm);
-        }
-
-        let m = restart;
-        let mut v: Vec<Vec<f64>> = Vec::with_capacity(m + 1);
-        v.push(scale(&r, 1.0 / beta));
-        let mut h = vec![vec![0.0f64; m]; m + 1];
-        let mut g = vec![0.0f64; m + 1];
-        g[0] = beta;
-        let mut cs = vec![0.0f64; m];
-        let mut sn = vec![0.0f64; m];
-        let mut k_used = 0;
-
-        for k in 0..m {
-            // w = M^{-1} A v_k
-            let av = op.spmv(&v[k]);
-            let mut w = op.apply_block_jacobi(&minv, &av);
-            // Arnoldi (modified Gram–Schmidt).
-            for i in 0..=k {
-                h[i][k] = dot(&w, &v[i]);
-                axpy(&mut w, -h[i][k], &v[i]);
-            }
-            h[k + 1][k] = norm(&w);
-            if h[k + 1][k] > 1e-14 {
-                v.push(scale(&w, 1.0 / h[k + 1][k]));
-            } else {
-                v.push(vec![0.0f64; n]);
-            }
-            // Apply previous Givens rotations, then a new one.
-            for i in 0..k {
-                let temp = cs[i] * h[i][k] + sn[i] * h[i + 1][k];
-                h[i + 1][k] = -sn[i] * h[i][k] + cs[i] * h[i + 1][k];
-                h[i][k] = temp;
-            }
-            let denom = (h[k][k] * h[k][k] + h[k + 1][k] * h[k + 1][k]).sqrt();
-            if denom < 1e-300 {
-                k_used = k;
-                break;
-            }
-            cs[k] = h[k][k] / denom;
-            sn[k] = h[k + 1][k] / denom;
-            h[k][k] = cs[k] * h[k][k] + sn[k] * h[k + 1][k];
-            h[k + 1][k] = 0.0;
-            g[k + 1] = -sn[k] * g[k];
-            g[k] = cs[k] * g[k];
-            k_used = k + 1;
-            if g[k + 1].abs() / bnorm <= tol {
-                break;
-            }
-        }
-
-        // Back-substitute for y, update x = x + V y.
-        let kk = k_used;
-        let mut y = vec![0.0f64; kk];
-        for i in (0..kk).rev() {
-            let mut s = g[i];
-            for j in (i + 1)..kk {
-                s -= h[i][j] * y[j];
-            }
-            y[i] = if h[i][i].abs() > 1e-300 { s / h[i][i] } else { 0.0 };
-        }
-        for i in 0..kk {
-            axpy(&mut x, y[i], &v[i]);
-        }
-
-        // Convergence check on the true residual.
-        let ax = op.spmv(&x);
-        let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-        if norm(&res) / bnorm <= tol {
-            return (x.iter().map(|&v| v as f32).collect(), norm(&res) / bnorm);
-        }
-    }
-    let ax = op.spmv(&x);
-    let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-    (x.iter().map(|&v| v as f32).collect(), norm(&res) / bnorm)
-}
-
-// Small dense-vector helpers (f64).
-fn dot(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(&x, &y)| x * y).sum()
-}
-fn norm(a: &[f64]) -> f64 {
-    dot(a, a).sqrt()
-}
-fn scale(a: &[f64], s: f64) -> Vec<f64> {
-    a.iter().map(|&x| x * s).collect()
-}
-fn axpy(y: &mut [f64], a: f64, x: &[f64]) {
-    for (yi, &xi) in y.iter_mut().zip(x) {
-        *yi += a * xi;
-    }
-}
-
-// ===========================================================================
 // General coupled structured model solver: runs ANY `TopologyMode::Structured2D`
 // model's recipe schedule (flux → gradients → assembly → banded solve → update)
 // through the interpreter, on the dense grid, with the matrix-free banded
@@ -689,6 +410,12 @@ pub struct StructuredModelSolver {
     outer_iters: usize,
     dt: f64,
     threads: usize,
+    /// Active coupled-solve preconditioner (shared banded routine): block-Jacobi
+    /// or the model-owned Schur.
+    precond: crate::solver::banded_schur::BandedPrecond,
+    /// The model's declared Schur layout (`None` if it declares none), so
+    /// `set_preconditioner` can toggle without re-reading the model.
+    schur_precond: Option<crate::solver::banded_schur::BandedPrecond>,
 }
 
 impl StructuredModelSolver {
@@ -816,7 +543,25 @@ impl StructuredModelSolver {
             outer_iters: outer_iters.max(1),
             dt,
             threads: 1,
+            precond: crate::solver::banded_schur::BandedPrecond::BlockJacobi,
+            schur_precond: crate::solver::banded_schur::schur_from_model(model),
         })
+    }
+
+    /// Select the coupled-solve preconditioner: `true` = the model-owned SIMPLE
+    /// Schur (if declared), `false` = block-Jacobi. Returns whether Schur is now
+    /// active. Mirrors [`crate::solver::gpu::structured::StructuredGpuSolver::set_preconditioner`].
+    pub fn set_preconditioner(&mut self, use_schur: bool) -> bool {
+        self.precond = match (use_schur, &self.schur_precond) {
+            (true, Some(schur)) => schur.clone(),
+            _ => crate::solver::banded_schur::BandedPrecond::BlockJacobi,
+        };
+        matches!(self.precond, crate::solver::banded_schur::BandedPrecond::Schur { .. })
+    }
+
+    /// Whether this model declares a Schur preconditioner.
+    pub fn supports_schur(&self) -> bool {
+        self.schur_precond.is_some()
     }
 
     /// Seed a state component (by state-layout offset) from cell-centre coords.
@@ -932,16 +677,22 @@ impl StructuredModelSolver {
             for id in &per {
                 self.run(id, n, &ctx);
             }
-            // Banded GMRES on the assembled block-banded system.
+            // Banded GMRES on the assembled block-banded system (shared routine —
+            // block-Jacobi or the model-owned Schur; bit-identical to the GPU
+            // host coupled solve).
             let a = self.buffers.f32_vec("matrix_values");
             let b = self.buffers.f32_vec("rhs");
-            let op = BandedBlockOperator {
-                a: &a,
-                nx: self.grid.nx,
-                ny: self.grid.ny,
-                s: self.s,
-            };
-            let (x, _res) = banded_block_gmres(&op, &b, 60, 200, 1e-9);
+            let (x, _res) = crate::solver::banded_schur::banded_gmres(
+                &a,
+                self.grid.nx,
+                self.grid.ny,
+                self.s,
+                &b,
+                &self.precond,
+                60,
+                200,
+                1e-9,
+            );
             self.buffers.copy_into_f32("x", &x);
             for id in &upd {
                 self.run(id, n, &ctx);
@@ -1279,11 +1030,20 @@ mod tests {
         let xstar: Vec<f64> = (0..ncells * s)
             .map(|k| ((k * 37 % 11) as f64 - 5.0) * 0.1)
             .collect();
-        let op = BandedBlockOperator { a: &a, nx, ny, s };
-        let b64 = op.spmv(&xstar);
+        let b64 = crate::solver::banded_schur::spmv(&a, nx, ny, s, &xstar);
         let b: Vec<f32> = b64.iter().map(|&v| v as f32).collect();
 
-        let (x, rel_res) = banded_block_gmres(&op, &b, 40, 200, 1e-10);
+        let (x, rel_res) = crate::solver::banded_schur::banded_gmres(
+            &a,
+            nx,
+            ny,
+            s,
+            &b,
+            &crate::solver::banded_schur::BandedPrecond::BlockJacobi,
+            40,
+            200,
+            1e-10,
+        );
         assert!(rel_res < 1e-8, "GMRES residual too large: {rel_res}");
         let mut max_err = 0.0f64;
         for k in 0..ncells * s {

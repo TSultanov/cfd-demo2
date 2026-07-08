@@ -227,6 +227,10 @@ struct SolverInitRequest {
     selected_geometry: GeometryType,
     mesh_type: MeshType,
     mesh_mode: MeshMode,
+    /// STRUCTURED-only: use the model-owned SIMPLE Schur preconditioner for the
+    /// coupled banded solve instead of block-Jacobi. Applied by
+    /// `build_structured_init` via `StructuredGpuSolver::set_preconditioner`.
+    structured_schur: bool,
     min_cell_size: f64,
     max_cell_size: f64,
     growth_rate: f64,
@@ -772,6 +776,9 @@ pub struct CFDApp {
     mesh_type: MeshType,
     /// Discretisation mode: dense-Cartesian structured vs unstructured mesh.
     mesh_mode: MeshMode,
+    /// STRUCTURED-only: select the model-owned SIMPLE Schur preconditioner (vs
+    /// block-Jacobi) for the coupled banded solve.
+    structured_use_schur: bool,
     plot_field: PlotField,
     is_running: bool,
     selected_scheme: Scheme,
@@ -961,6 +968,7 @@ impl CFDApp {
             selected_geometry: GeometryType::default(),
             mesh_type: MeshType::default(),
             mesh_mode: MeshMode::default(),
+            structured_use_schur: false,
             plot_field: PlotField::VelocityMag,
             is_running: false,
             selected_scheme: Scheme::Upwind,
@@ -1346,6 +1354,7 @@ impl CFDApp {
             selected_geometry: self.selected_geometry,
             mesh_type: self.mesh_type,
             mesh_mode: self.mesh_mode,
+            structured_schur: self.structured_use_schur,
             min_cell_size: self.min_cell_size,
             max_cell_size: self.max_cell_size,
             growth_rate: self.growth_rate,
@@ -2492,6 +2501,9 @@ impl CFDApp {
             request.params.time_scheme,
         )?;
         solver.set_fluid(request.params.density as f64, request.params.viscosity as f64);
+        // Coupled-solve preconditioner: the model-owned SIMPLE Schur (if the model
+        // declares a layout) or block-Jacobi. No-op where unsupported.
+        solver.set_preconditioner(request.structured_schur);
         seed_structured_state(&mut solver, request.model_id);
         // Uniform-freestream momentum IC (compressible: rho_u = rho*u_in) so the
         // channel starts from a moving state — the stable configuration; a rest
@@ -4288,17 +4300,45 @@ impl eframe::App for CFDApp {
 
                         if structured_precond {
                             // The dense-banded matrix-free structured solve carries its
-                            // own preconditioner rather than the recipe's Krylov one:
-                            // block-Jacobi (per-cell s×s block inverse) for the coupled
-                            // U–p GMRES, degenerating to diagonal Jacobi for the scalar
-                            // SPD CG. Point-Jacobi is singular on the saddle-point
-                            // pressure diagonal and the CSR-aggregation AMG / model Schur
-                            // do not apply to the banded operator, so no selector is
-                            // shown — the choice is fixed and always valid.
-                            ui.weak(
-                                "Structured banded solve: block-Jacobi (coupled) / \
-                                 diagonal Jacobi (scalar). Fixed.",
-                            );
+                            // own preconditioner. The coupled U–p GMRES offers block-
+                            // Jacobi (robust default) or the model-owned SIMPLE Schur
+                            // (velocity-block predict + heavy-ball pressure solve, via
+                            // FGMRES) — the SAME Schur the unstructured path uses, where
+                            // the model declares a block layout (incompressible + thermal;
+                            // the density-based compressible has none). Point-Jacobi is
+                            // singular on the saddle-point pressure diagonal and the CSR
+                            // AMG does not apply to the banded operator, so those are not
+                            // offered.
+                            if model_owns_preconditioner {
+                                ui.weak("Coupled banded solve preconditioner:");
+                                if ui
+                                    .radio(!self.structured_use_schur, "Block-Jacobi")
+                                    .clicked()
+                                    && self.structured_use_schur
+                                {
+                                    self.structured_use_schur = false;
+                                    self.init_solver();
+                                }
+                                if ui
+                                    .radio(self.structured_use_schur, "Schur (SIMPLE)")
+                                    .on_hover_text(
+                                        "Model-owned SIMPLE Schur complement — the same \
+                                         saddle-point preconditioner the unstructured \
+                                         solver uses.",
+                                    )
+                                    .clicked()
+                                    && !self.structured_use_schur
+                                {
+                                    self.structured_use_schur = true;
+                                    self.init_solver();
+                                }
+                            } else {
+                                // Compressible etc.: no Schur layout — block-Jacobi only.
+                                ui.weak(
+                                    "Structured banded solve: block-Jacobi (fixed — this \
+                                     model declares no Schur layout).",
+                                );
+                            }
                         } else if model_owns_preconditioner {
                             ui.weak("Model-owned Schur: selector chooses pressure solve (Chebyshev vs AMG).");
                         } else {

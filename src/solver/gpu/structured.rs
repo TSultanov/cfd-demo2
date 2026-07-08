@@ -430,6 +430,12 @@ pub struct StructuredGpuSolver {
 
     solver: BandedGpuLinAlg,
 
+    /// The model's declared Schur block layout (`None` if the model declares no
+    /// Schur preconditioner, e.g. the density-based compressible model). Lets
+    /// `set_preconditioner` toggle the host coupled solve between block-Jacobi
+    /// and the model-owned Schur without re-reading the model.
+    schur_precond: Option<crate::solver::banded_schur::BandedPrecond>,
+
     outer_iters: usize,
     dt: f64,
     /// Model id (for the GUI's model-echo / caps) and accumulated sim time.
@@ -645,6 +651,7 @@ impl StructuredGpuSolver {
             grid_buf,
             low_mach_buf,
             solver,
+            schur_precond: crate::solver::banded_schur::schur_from_model(model),
             outer_iters: outer_iters.max(1),
             dt,
             model_id: model.id,
@@ -934,6 +941,27 @@ impl StructuredGpuSolver {
         self.dt = dt;
     }
 
+    /// Select the coupled-solve preconditioner: `true` = the model-owned SIMPLE
+    /// Schur (if the model declares a `SchurBlockLayout`), `false` = block-Jacobi.
+    /// Requesting Schur on a model without a layout (e.g. compressible) silently
+    /// keeps block-Jacobi. Returns whether Schur is now active.
+    pub fn set_preconditioner(&mut self, use_schur: bool) -> bool {
+        self.solver.precond = match (use_schur, &self.schur_precond) {
+            (true, Some(schur)) => schur.clone(),
+            _ => crate::solver::banded_schur::BandedPrecond::BlockJacobi,
+        };
+        matches!(
+            self.solver.precond,
+            crate::solver::banded_schur::BandedPrecond::Schur { .. }
+        )
+    }
+
+    /// Whether this model declares a Schur preconditioner (drives the GUI to
+    /// offer the block-Jacobi/Schur choice only where it is meaningful).
+    pub fn supports_schur(&self) -> bool {
+        self.schur_precond.is_some()
+    }
+
     /// The implicit time-step size.
     pub fn dt(&self) -> f64 {
         self.dt
@@ -987,6 +1015,10 @@ struct BandedGpuLinAlg {
     s: u32,
     ndof: u32,
     restart: usize,
+    /// Active preconditioner for the HOST coupled solve (`host_solve`):
+    /// block-Jacobi (default) or the model-owned SIMPLE Schur. The on-device
+    /// GMRES/CG paths always use the block-Jacobi GPU kernels.
+    precond: crate::solver::banded_schur::BandedPrecond,
     dims_buf: wgpu::Buffer,
     scalar_buf: wgpu::Buffer,
 
@@ -1078,6 +1110,7 @@ impl BandedGpuLinAlg {
             s,
             ndof,
             restart,
+            precond: crate::solver::banded_schur::BandedPrecond::BlockJacobi,
             dims_buf,
             scalar_buf,
             p_spmv: make(LA_SPMV, "spmv"),
@@ -1221,14 +1254,26 @@ impl BandedGpuLinAlg {
         }
     }
 
-    /// Host-side block-Jacobi-preconditioned banded GMRES (f64) — the GPU analog
-    /// path reads the assembled banded operator + rhs back, solves, and uploads
-    /// the correction. Mirrors the CPU `banded_block_gmres`.
+    /// Host-side preconditioned banded GMRES (f64) — the GPU analog path reads the
+    /// assembled banded operator + rhs back, solves via the shared
+    /// `banded_schur::banded_gmres` (block-Jacobi or the model-owned Schur, per
+    /// `self.precond`), and uploads the correction. Bit-identical to the CPU
+    /// `StructuredModelSolver` coupled solve (same shared routine).
     fn host_solve(&self, ctx: &GpuContext, mat: &wgpu::Buffer, rhs: &wgpu::Buffer, x: &wgpu::Buffer) {
         let (nx, ny, s) = (self.nx as usize, self.ny as usize, self.s as usize);
         let a = read_buffer_f32(ctx, mat, nx * ny * BAND_STRIDE * s * s);
         let b = read_buffer_f32(ctx, rhs, nx * ny * s);
-        let xh = host_banded_gmres(&a, nx, ny, s, &b, self.restart.max(1), 200, 1e-9);
+        let (xh, _res) = crate::solver::banded_schur::banded_gmres(
+            &a,
+            nx,
+            ny,
+            s,
+            &b,
+            &self.precond,
+            self.restart.max(1),
+            200,
+            1e-9,
+        );
         ctx.queue.write_buffer(x, 0, bytemuck::cast_slice(&xh));
     }
 
@@ -1464,239 +1509,6 @@ fn read_buffer_f32_via(
     drop(data);
     staging.unmap();
     out
-}
-
-// ===========================================================================
-// Host-side banded block GMRES (f64) over a read-back `matrix_values` slice.
-// The GPU assembles the operator; this solves the coupled (indefinite) system
-// in double precision. Mirrors the CPU `banded_block_gmres` exactly (bands
-// [S,W,diag,E,N]; matrix_values[p*5*s*s + 5*s*r + band*s + c]).
-// ===========================================================================
-
-#[inline]
-fn hb_block(a: &[f32], s: usize, p: usize, band: usize, r: usize, c: usize) -> f64 {
-    a[p * 5 * s * s + 5 * s * r + band * s + c] as f64
-}
-
-fn hb_spmv(a: &[f32], nx: usize, ny: usize, s: usize, x: &[f64]) -> Vec<f64> {
-    let n = nx * ny;
-    let mut y = vec![0.0f64; n * s];
-    for j in 0..ny {
-        for i in 0..nx {
-            let p = j * nx + i;
-            // (band, neighbour) pairs present; edge bands are zero (closed via RHS).
-            let mut nbrs: Vec<(usize, usize)> = vec![(2, p)];
-            if j > 0 {
-                nbrs.push((0, p - nx));
-            }
-            if i > 0 {
-                nbrs.push((1, p - 1));
-            }
-            if i + 1 < nx {
-                nbrs.push((3, p + 1));
-            }
-            if j + 1 < ny {
-                nbrs.push((4, p + nx));
-            }
-            for r in 0..s {
-                let mut acc = 0.0;
-                for &(band, q) in &nbrs {
-                    for c in 0..s {
-                        acc += hb_block(a, s, p, band, r, c) * x[q * s + c];
-                    }
-                }
-                y[p * s + r] = acc;
-            }
-        }
-    }
-    y
-}
-
-/// Invert an `s x s` matrix (row-major) via Gauss–Jordan with partial pivoting;
-/// singular blocks fall back to the (pseudo-)diagonal inverse.
-fn hb_invert(m: &[f64], s: usize) -> Vec<f64> {
-    let mut a = vec![0.0f64; s * 2 * s];
-    for r in 0..s {
-        for c in 0..s {
-            a[r * 2 * s + c] = m[r * s + c];
-        }
-        a[r * 2 * s + s + r] = 1.0;
-    }
-    for col in 0..s {
-        let mut piv = col;
-        let mut best = a[col * 2 * s + col].abs();
-        for r in (col + 1)..s {
-            let v = a[r * 2 * s + col].abs();
-            if v > best {
-                best = v;
-                piv = r;
-            }
-        }
-        if best < 1e-30 {
-            let mut out = vec![0.0f64; s * s];
-            for k in 0..s {
-                let d = m[k * s + k];
-                out[k * s + k] = if d.abs() > 1e-30 { 1.0 / d } else { 0.0 };
-            }
-            return out;
-        }
-        if piv != col {
-            for c in 0..(2 * s) {
-                a.swap(col * 2 * s + c, piv * 2 * s + c);
-            }
-        }
-        let d = a[col * 2 * s + col];
-        for c in 0..(2 * s) {
-            a[col * 2 * s + c] /= d;
-        }
-        for r in 0..s {
-            if r == col {
-                continue;
-            }
-            let f = a[r * 2 * s + col];
-            if f != 0.0 {
-                for c in 0..(2 * s) {
-                    a[r * 2 * s + c] -= f * a[col * 2 * s + c];
-                }
-            }
-        }
-    }
-    let mut out = vec![0.0f64; s * s];
-    for r in 0..s {
-        for c in 0..s {
-            out[r * s + c] = a[r * 2 * s + s + c];
-        }
-    }
-    out
-}
-
-fn hb_diag_inverses(a: &[f32], nx: usize, ny: usize, s: usize) -> Vec<Vec<f64>> {
-    (0..nx * ny)
-        .map(|p| {
-            let mut m = vec![0.0f64; s * s];
-            for r in 0..s {
-                for c in 0..s {
-                    m[r * s + c] = hb_block(a, s, p, 2, r, c);
-                }
-            }
-            hb_invert(&m, s)
-        })
-        .collect()
-}
-
-fn hb_apply_jacobi(minv: &[Vec<f64>], s: usize, r: &[f64]) -> Vec<f64> {
-    let ncells = minv.len();
-    let mut z = vec![0.0f64; ncells * s];
-    for p in 0..ncells {
-        for i in 0..s {
-            let mut acc = 0.0;
-            for k in 0..s {
-                acc += minv[p][i * s + k] * r[p * s + k];
-            }
-            z[p * s + i] = acc;
-        }
-    }
-    z
-}
-
-fn hb_norm(v: &[f64]) -> f64 {
-    v.iter().map(|&x| x * x).sum::<f64>().sqrt()
-}
-fn hb_dot(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b).map(|(&x, &y)| x * y).sum()
-}
-
-/// Restarted block-Jacobi-preconditioned GMRES on the banded block operator.
-fn host_banded_gmres(
-    a: &[f32],
-    nx: usize,
-    ny: usize,
-    s: usize,
-    b: &[f32],
-    restart: usize,
-    max_outer: usize,
-    tol: f64,
-) -> Vec<f32> {
-    let n = nx * ny * s;
-    let minv = hb_diag_inverses(a, nx, ny, s);
-    let b64: Vec<f64> = b.iter().map(|&v| v as f64).collect();
-    let bnorm = hb_norm(&b64).max(1e-30);
-    let mut x = vec![0.0f64; n];
-    let m = restart;
-
-    for _ in 0..max_outer {
-        let ax = hb_spmv(a, nx, ny, s, &x);
-        let r0: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-        let mut r = hb_apply_jacobi(&minv, s, &r0);
-        let beta = hb_norm(&r);
-        if beta / bnorm <= tol {
-            return x.iter().map(|&v| v as f32).collect();
-        }
-        let mut v: Vec<Vec<f64>> = Vec::with_capacity(m + 1);
-        v.push(r.iter().map(|&x| x / beta).collect());
-        let mut h = vec![vec![0.0f64; m]; m + 1];
-        let mut g = vec![0.0f64; m + 1];
-        g[0] = beta;
-        let mut cs = vec![0.0f64; m];
-        let mut sn = vec![0.0f64; m];
-        let mut k_used = 0;
-        for k in 0..m {
-            let av = hb_spmv(a, nx, ny, s, &v[k]);
-            let mut w = hb_apply_jacobi(&minv, s, &av);
-            for i in 0..=k {
-                h[i][k] = hb_dot(&w, &v[i]);
-                for t in 0..n {
-                    w[t] -= h[i][k] * v[i][t];
-                }
-            }
-            h[k + 1][k] = hb_norm(&w);
-            if h[k + 1][k] > 1e-14 {
-                v.push(w.iter().map(|&x| x / h[k + 1][k]).collect());
-            } else {
-                v.push(vec![0.0f64; n]);
-            }
-            for i in 0..k {
-                let temp = cs[i] * h[i][k] + sn[i] * h[i + 1][k];
-                h[i + 1][k] = -sn[i] * h[i][k] + cs[i] * h[i + 1][k];
-                h[i][k] = temp;
-            }
-            let denom = (h[k][k] * h[k][k] + h[k + 1][k] * h[k + 1][k]).sqrt();
-            if denom < 1e-300 {
-                k_used = k;
-                break;
-            }
-            cs[k] = h[k][k] / denom;
-            sn[k] = h[k + 1][k] / denom;
-            h[k][k] = cs[k] * h[k][k] + sn[k] * h[k + 1][k];
-            h[k + 1][k] = 0.0;
-            g[k + 1] = -sn[k] * g[k];
-            g[k] = cs[k] * g[k];
-            k_used = k + 1;
-            if g[k + 1].abs() / bnorm <= tol {
-                break;
-            }
-        }
-        let kk = k_used;
-        let mut y = vec![0.0f64; kk];
-        for i in (0..kk).rev() {
-            let mut sum = g[i];
-            for j in (i + 1)..kk {
-                sum -= h[i][j] * y[j];
-            }
-            y[i] = if h[i][i].abs() > 1e-300 { sum / h[i][i] } else { 0.0 };
-        }
-        for i in 0..kk {
-            for t in 0..n {
-                x[t] += y[i] * v[i][t];
-            }
-        }
-        let ax = hb_spmv(a, nx, ny, s, &x);
-        r = (0..n).map(|i| b64[i] - ax[i]).collect();
-        if hb_norm(&r) / bnorm <= tol {
-            return x.iter().map(|&v| v as f32).collect();
-        }
-    }
-    x.iter().map(|&v| v as f32).collect()
 }
 
 const LA_HEADER: &str = r#"

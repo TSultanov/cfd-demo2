@@ -268,6 +268,17 @@ pub struct Term {
     /// separate `*_ale` assembly kernels (no runtime branch). Only meaningful on
     /// implicit `Div` / `DivFlux` terms.
     pub relative_to_mesh: bool,
+    /// Explicit viscous-dissipation energy source `Phi = tau:grad(U)` (the
+    /// deviatoric strain-rate contraction that heats the fluid under shear). The
+    /// term is declared on the energy row with `field` = the velocity (a Vector2
+    /// coupled unknown): assembly reads the owner cell's velocity-gradient tensor
+    /// from `grad_state` and adds `coeff * Phi_grad * V` to the target RHS, where
+    /// `Phi_grad = 2[(du/dx)^2 + (dv/dy)^2 + 0.5(du/dy+dv/dx)^2 - (1/3)(div U)^2]`
+    /// (unit Velocity^2/Length^2) and `coeff` carries the `mu/cp` scaling. Always
+    /// >= 0 (it can only heat). Like `transpose_dev2` it consumes `grad_state`
+    /// cell gradients, so declaring it forces the gradients pipeline on. Only
+    /// meaningful on explicit `Source` terms whose `field` is a Vector2 velocity.
+    pub viscous_dissipation: bool,
 }
 
 impl Term {
@@ -291,6 +302,7 @@ impl Term {
             static_diag: false,
             linearize_pressure_flux: None,
             relative_to_mesh: false,
+            viscous_dissipation: false,
         }
     }
 
@@ -316,6 +328,13 @@ impl Term {
     /// `transpose_dev2` field docs).
     pub fn with_transpose_dev2(mut self) -> Self {
         self.transpose_dev2 = true;
+        self
+    }
+
+    /// Declare the explicit viscous-dissipation energy source (see
+    /// `viscous_dissipation` field docs).
+    pub fn with_viscous_dissipation(mut self) -> Self {
+        self.viscous_dissipation = true;
         self
     }
 
@@ -418,6 +437,17 @@ impl Term {
                     }
                     // Implicit "source coefficient": S_p * phi * V.
                     Discretization::Implicit => Ok(coeff_unit * self.field.unit() * si::VOLUME),
+                    // Viscous-dissipation source: `coeff * Phi_grad * V`, where the
+                    // assembly-synthesized `Phi_grad` has unit `(field/length)^2`
+                    // (squared velocity gradient of the referenced velocity field).
+                    // The extra `field^2 / length^2` factor over an ordinary explicit
+                    // source is what the codegen fills in from `grad_state`.
+                    Discretization::Explicit if self.viscous_dissipation => Ok(coeff_unit
+                        * self.field.unit()
+                        * self.field.unit()
+                        / si::LENGTH
+                        / si::LENGTH
+                        * si::VOLUME),
                     // Explicit "source term": S_u (independent of unknown state).
                     Discretization::Explicit => Ok(coeff_unit * si::VOLUME),
                 }

@@ -66,6 +66,11 @@ pub struct DiscreteOp {
     /// models). Gates the `mesh_fluxes` storage binding in the assembly
     /// kernels. See `Term::relative_to_mesh`.
     pub relative_to_mesh: bool,
+    /// Explicit viscous-dissipation energy source `Phi = tau:grad(U)`: assembly
+    /// reads the owner cell's velocity-gradient tensor from `grad_state` and adds
+    /// `coeff * Phi_grad * V` to the target RHS (see `Term::viscous_dissipation`).
+    /// Consumes grad_state, so it forces the gradients pipeline on.
+    pub viscous_dissipation: bool,
     pub field: FieldRef,
     pub flux: Option<FluxRef>,
     pub coeff: Option<Coefficient>,
@@ -150,6 +155,7 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
         static_diag: term.static_diag,
         linearize_pressure_flux: term.linearize_pressure_flux.clone(),
         relative_to_mesh: term.relative_to_mesh,
+        viscous_dissipation: term.viscous_dissipation,
         field: term.field,
         flux: term.flux,
         coeff: term.coeff.clone(),

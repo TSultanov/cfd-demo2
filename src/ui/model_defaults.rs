@@ -274,16 +274,22 @@ pub const ALLMACH_THERMAL_NOZZLE: ModelGuiDefaults = ModelGuiDefaults {
     preconditioner: PreconditionerType::Jacobi,
     alpha_u: 0.7,
     alpha_p: 0.3,
-    outer_iters: 8,
+    outer_iters: 10,
     outer_auto_converge: true,
     // Conservative acoustic CFL and a tiny seed dt: at c≈347 m/s the throughflow is
     // O(300 m/s), so the acoustic-aware adaptive dt settles to O(h/c); the small seed
-    // keeps step 0 in-bounds before it adapts (a 0.02 seed would blow up step 0).
-    target_cfl: 0.4,
+    // keeps step 0 in-bounds before it adapts (a 0.02 seed would blow up step 0). A
+    // gentle CFL keeps the from-rest acoustic transient from over-expanding the throat.
+    target_cfl: 0.25,
     timestep: 1e-5,
     adaptive_dt: true,
-    dual_time: false,
-    dtau: 1e-5,
+    // Pseudo-transient continuation ON: the from-rest start is a violent acoustic
+    // transient (the pressure drop slams the throat) and under the LOCAL sound speed a
+    // momentary over-expansion drives a cold spot whose `psi = psi_ref*t_ref/T` blows up
+    // and freezes the flow. A dual-time (pseudo-time) derivative damps that overshoot so
+    // the nozzle marches to the steady supersonic CD state instead of crashing.
+    dual_time: true,
+    dtau: 1e-3,
     low_mach_model: GpuLowMachPrecondModel::Off,
     low_mach_theta_floor: 1e-6,
     low_mach_pressure_coupling_alpha: 1.0,
@@ -291,9 +297,9 @@ pub const ALLMACH_THERMAL_NOZZLE: ModelGuiDefaults = ModelGuiDefaults {
     // The flow develops entirely from the pressure drop (inlet U is zero-gradient, see
     // `apply_pressure_inlet_nozzle_bcs`); this value only sets the acoustic-damping
     // preconditioner floor and the step-0 dt while the flow is still at rest. It
-    // deliberately UNDER-estimates the developed throughflow (~660–820 m/s at 1 MPa): a
-    // lower scale means a stronger pseudo-compressibility floor, which damps the
-    // from-rest acoustic transient.
+    // deliberately UNDER-estimates the developed throughflow (~300–580 m/s at 0.3 MPa,
+    // throat to supersonic exit): a lower scale means a stronger pseudo-compressibility
+    // floor, which damps the from-rest acoustic transient.
     inlet_velocity: 313.0,
     // Velocity-inlet fallback back-pressure (gauge); the default driving is the
     // pressure inlet below.
@@ -306,12 +312,14 @@ pub const ALLMACH_THERMAL_NOZZLE: ModelGuiDefaults = ModelGuiDefaults {
     // well-posed at the supersonic exit by the pressure-flux Newton linearization;
     // without it this real-c drive ran the exit to vacuum.
     //
-    // `inlet_pressure` = 1 MPa gauge (~14 bar absolute), Pascals — a rocket-chamber
-    // pressure. The large pressure ratio forces the throat to choke, so the nozzle
-    // reaches its supersonic branch (M_throat≈1.1, M_exit≈1.9) even developing from
-    // rest (u=0, flat gauge p=0), no seeded freestream.
+    // `inlet_pressure` = 0.3 MPa gauge (~4 bar absolute), Pascals. The pressure ratio
+    // still comfortably exceeds the ~1.9 choking threshold (so the throat chokes and the
+    // diverging section runs supersonic), but it is FAR gentler than the 1 MPa rocket
+    // slam that over-expanded the throat to a near-vacuum cold spot from rest. The exit
+    // Mach is set by the AREA RATIO (isentropic area–Mach), not the pressure, so a
+    // gentler ratio reaches the SAME supersonic branch while developing cleanly from rest.
     pressure_inlet: true,
-    inlet_pressure: 1.0e6,
+    inlet_pressure: 3.0e5,
 };
 
 /// GUI solver defaults for `model_id`.

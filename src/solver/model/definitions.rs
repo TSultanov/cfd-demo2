@@ -657,7 +657,8 @@ pub use incompressible_momentum::{
 pub use allmach_pressure::{
     allmach_pressure_ale_mms_model, allmach_pressure_ale_model, allmach_pressure_mms_model,
     allmach_pressure_model, allmach_pressure_system, allmach_thermal_ale_mms_model,
-    allmach_thermal_ale_model, allmach_thermal_mms_model, allmach_thermal_model,
+    allmach_thermal_ale_model, allmach_thermal_compressible_mms_ale_model,
+    allmach_thermal_compressible_mms_model, allmach_thermal_mms_model, allmach_thermal_model,
     apply_pressure_inlet_nozzle_bcs,
     AllMachPressureFields, ALLMACH_GAMMA, ALLMACH_K_OVER_CP,
     ALLMACH_MMS_SOURCE_P_FIELD, ALLMACH_MMS_SOURCE_T_FIELD, ALLMACH_MMS_SOURCE_U_FIELD,
@@ -686,6 +687,11 @@ pub fn all_models() -> Result<Vec<ModelSpec>, String> {
         allmach_pressure_mms_model()?,
         allmach_thermal_model()?,
         allmach_thermal_mms_model()?,
+        // Compressible thermal MMS: kept-physics + manufactured sources (PSI>0 steady
+        // order test of the real-EOS/compression/viscous-dissipation operator).
+        allmach_thermal_compressible_mms_model()?,
+        // ALE variant (mesh-relative convection; byte-identical to static at zero flux).
+        allmach_thermal_compressible_mms_ale_model()?,
         // ALE (moving-mesh) variants: same physics with mesh-relative convection;
         // own ids => own generated kernels, so static models stay byte-identical.
         allmach_pressure_ale_model()?,

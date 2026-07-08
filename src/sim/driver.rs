@@ -51,6 +51,13 @@ pub struct SolverDriver {
     /// Between refreshes `rho` lags `p`; that is a bounded low-Mach approximation — the
     /// stabilization is the implicit `ddt(psi,p)` diagonal, not the density coupling.
     allmach: bool,
+    /// The all-Mach model is the THERMAL variant (`allmach_thermal{,_ale}`): it
+    /// recovers `rho`, the LOCAL `psi = psi_ref*t_ref/T` and `psi_precond` on-device
+    /// each outer iteration (see the PrimitiveDerivations in `allmach_pressure.rs`).
+    /// The host `psi_precond` readback refresh is therefore skipped for thermal (it
+    /// would clobber the local device value with a constant-reference one); the
+    /// non-thermal barotropic model has no on-device recovery and still uses it.
+    thermal: bool,
     /// Last observed max velocity (from a readback); feeds the adaptive timestep.
     prev_max_vel: f64,
 }
@@ -411,8 +418,27 @@ impl SolverDriver {
                         .set_field_scalar("rho_t_ref", &vec![params.density as f64 * t_ref; n_cells]);
                     let _ = solver.set_field_scalar("T", &vec![t_ref; n_cells]);
                     // Reference-temperature field for the REAL T-varying compressibility in
-                    // the density recovery (gamma*psi*t_ref/T). Constant = T_ref.
+                    // the density recovery (gamma*psi_ref*t_ref/T). Constant = T_ref.
                     let _ = solver.set_field_scalar("t_ref", &vec![t_ref; n_cells]);
+                    // Reference compressibility (= 1/c_ref^2): the CONSTANT the ideal-gas
+                    // EOS coefficients read, decoupled from the local `psi`. Seeded = psi
+                    // so at the reference temperature the model is byte-unchanged.
+                    let _ = solver.set_field_scalar("psi_ref", &vec![psi; n_cells]);
+                    // Preconditioner inputs for the on-device psi_precond recovery:
+                    // u_ref = k*max(U_inlet, floor) (the pseudo-acoustic velocity floor)
+                    // and the 0/1 enable mask (off when compressibility is off, so
+                    // psi_precond==0). The `max(.,floor)` is the SAME preconditioner floor
+                    // the host `allmach_psi_precond` applies for the barotropic path — it
+                    // both stops the slow-inlet outlet divergence and (raised toward ~1.0)
+                    // cleans the standing pressure mode (see `allmach_precond_uref_target`).
+                    let u_ref = ALLMACH_PRECOND_MACH_K
+                        * (params.inlet_velocity.abs() as f64)
+                            .max(allmach_precond_uref_target(params.allmach_precond_uref_min as f64));
+                    let _ = solver.set_field_scalar("u_ref", &vec![u_ref; n_cells]);
+                    let _ = solver.set_field_scalar(
+                        "precond_mask",
+                        &vec![if psi > 0.0 { 1.0 } else { 0.0 }; n_cells],
+                    );
                     // EOS density floor = psi * absolute-pressure floor (rho = psi*P_abs),
                     // so the on-device recovery clamps rho positive against a transient
                     // gauge-pressure undershoot through vacuum. Constant field; refreshed
@@ -442,6 +468,7 @@ impl SolverDriver {
                 supports_sound_speed,
                 compressible,
                 allmach,
+                thermal,
                 prev_max_vel: 0.0,
             },
             cached_u,
@@ -539,6 +566,32 @@ impl SolverDriver {
             let _ = solver.set_field_scalar_current(
                 "rho_floor",
                 &vec![psi * ALLMACH_ABS_PRESSURE_FLOOR; n],
+            );
+            // Keep the reference compressibility in step with the slider. Thermal only
+            // (a no-op where the `psi_ref` field is absent). On the thermal model the
+            // device recovers the LOCAL psi/psi_precond from this reference each Update,
+            // so the constant psi/psi_precond written above are just a one-step transient
+            // until the next recovery (and remain the live values for the non-thermal
+            // model, which has no on-device recovery).
+            let _ = solver.set_field_scalar_current("psi_ref", &vec![psi; n]);
+            // Preconditioner inputs for the on-device psi_precond recovery (thermal
+            // only; no-op where absent): u_ref tracks the inlet-velocity slider FLOORED by
+            // the preconditioner floor (same `max(.,floor)` as the host barotropic path and
+            // the `Preconditioner floor` GUI slider), and the 0/1 mask disables the acoustic
+            // preconditioner when compressibility is off.
+            let _ = solver.set_field_scalar_current(
+                "u_ref",
+                &vec![
+                    ALLMACH_PRECOND_MACH_K
+                        * (params.inlet_velocity.abs() as f64).max(allmach_precond_uref_target(
+                            params.allmach_precond_uref_min as f64,
+                        ));
+                    n
+                ],
+            );
+            let _ = solver.set_field_scalar_current(
+                "precond_mask",
+                &vec![if psi > 0.0 { 1.0 } else { 0.0 }; n],
             );
             if params.pressure_inlet {
                 // Pressure-inlet nozzle: pin the INLET gauge pressure (the gauge anchor
@@ -717,14 +770,22 @@ impl SolverDriver {
             // Refresh the preconditioned pseudo-compressibility from the live velocity
             // (one-snapshot lag, same discipline + correctness argument as `rho`: a
             // current-time coefficient never read from BDF history). Tracks the wake so
-            // the pseudo-Mach stays ~<=1 as the flow develops.
-            let psi_precond = allmach_psi_precond(
-                &u,
-                psi,
-                self.params.inlet_velocity.abs() as f64,
-                allmach_precond_uref_target(self.params.allmach_precond_uref_min as f64),
-            );
-            let _ = self.solver.set_field_scalar_current("psi_precond", &psi_precond);
+            // the pseudo-Mach stays ~<=1 as the flow develops. THERMAL ONLY: skip this —
+            // the thermal model recovers `psi_precond` on-device from the LOCAL psi each
+            // Update (the driver seeds its `u_ref` = k*max(U_inlet, floor) so the floor
+            // applies there too), so a host write here (built from the constant reference
+            // psi) would clobber the local sound-speed preconditioner. The non-thermal
+            // barotropic model has no on-device recovery and still needs the host refresh
+            // — with the preconditioner floor applied.
+            if !self.thermal {
+                let psi_precond = allmach_psi_precond(
+                    &u,
+                    psi,
+                    self.params.inlet_velocity.abs() as f64,
+                    allmach_precond_uref_target(self.params.allmach_precond_uref_min as f64),
+                );
+                let _ = self.solver.set_field_scalar_current("psi_precond", &psi_precond);
+            }
             Some((lo, hi))
         } else if self.compressible {
             let rho = pollster::block_on(self.solver.get_rho());

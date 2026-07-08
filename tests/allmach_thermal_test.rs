@@ -64,6 +64,11 @@ fn build_thermal(fluid: &Fluid, mesh: &Mesh, psi: f64, t_init: &[f64]) -> Unifie
     let mut solver = driver.into_solver();
     let rho_ref = fluid.density as f64;
     solver.set_field_scalar("psi", &vec![psi; n]).expect("psi");
+    // The reference compressibility drives the EOS coefficients (rho recovery, 1/cp);
+    // this raw-solver test pins the sound speed, so seed psi_ref = psi too.
+    solver
+        .set_field_scalar("psi_ref", &vec![psi; n])
+        .expect("psi_ref");
     // Pressure-row ddt reads the decoupled `psi_precond` (preconditioning is a driver-only
     // transient device); this raw-solver test pins the compressibility, so seed it = psi.
     solver

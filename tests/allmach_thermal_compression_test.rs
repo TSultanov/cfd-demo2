@@ -5,14 +5,20 @@
 //! domain has NO outlet — injected mass accumulates and the gauge pressure rises
 //! (compression). Crucially:
 //!   * the inlet injects gas at exactly `T_ref` (Dirichlet T inlet), and
-//!   * the walls are adiabatic (zero-gradient T), and
-//!   * there is no viscous-heating or other energy source modelled,
-//! so the ONLY mechanism that can lift the bulk temperature above `T_ref` is the
-//! compression-heating term `-(1/cp)*Dp/Dt` newly added to the energy equation.
+//!   * the walls are adiabatic (zero-gradient T).
+//! The bulk temperature is lifted above `T_ref` by the two positive energy
+//! sources now in the model: the compression-heating term `-(1/cp)*Dp/Dt` and the
+//! viscous-dissipation term `Phi = tau:grad(U)` (always >= 0). Compression is the
+//! dominant mechanism in this filling box (the near-quiescent gas has small shear
+//! but a large `dp/dt`), so a WRONG compression sign — which would push T *below*
+//! `T_ref` — is not masked by the small, always-positive `Phi`.
 //!
 //! Therefore `max(T) > T_ref` (a clear local rise) and `mean(T) > T_ref` (net
-//! warming) jointly certify both the PRESENCE of the term and its SIGN: a positive
-//! `dp/dt` must drive `dT/dt > 0`. A wrong sign would instead push T *below* T_ref.
+//! warming) certify that the combined heating is positive and, given `Phi >= 0`,
+//! that the compression sign is correct: a positive `dp/dt` drives `dT/dt > 0`.
+//! The per-term SIGN/magnitude of each source is order-verified independently by
+//! the compressible MMS suite (steady: `Phi` + `U.grad(p)`; transient: `dp/dt`),
+//! and `Phi` alone by the viscous-dissipation isolation gate.
 
 #![cfg(all(feature = "dev-tests", feature = "ui"))]
 
@@ -69,6 +75,11 @@ fn build_closed_box(fluid: &Fluid, mesh: &Mesh, psi: f64, inlet_v: f64) -> Unifi
     let mut solver = driver.into_solver();
     let rho_ref = fluid.density as f64;
     solver.set_field_scalar("psi", &vec![psi; n]).expect("psi");
+    // The reference compressibility drives the EOS coefficients (rho recovery, 1/cp);
+    // this raw-solver test pins the sound speed, so seed psi_ref = psi too.
+    solver
+        .set_field_scalar("psi_ref", &vec![psi; n])
+        .expect("psi_ref");
     // Pressure-row ddt reads the decoupled `psi_precond` (preconditioning is a driver-only
     // transient device); this raw-solver test pins the compressibility, so seed it = psi.
     solver
@@ -152,5 +163,67 @@ fn compression_heating_raises_temperature() {
         mean_t > ALLMACH_T_REF,
         "net temperature did NOT rise under compression — sign likely wrong: \
          mean T = {mean_t:.5} (T_ref={ALLMACH_T_REF})"
+    );
+}
+
+/// Isolation gate for the viscous-dissipation term `Phi = tau:grad(U)`.
+///
+/// Same closed filling box, run TWICE at different viscosities. Compression
+/// heating `-(1/cp)*Dp/Dt` is INDEPENDENT of `mu`; viscous dissipation
+/// `Phi = mu * 2[(du/dx)^2 + ... ] >= 0` scales with `mu`. The inlet velocity is a
+/// fixed Dirichlet condition, so the inlet shear layer (hence `grad U`) is anchored
+/// regardless of `mu` — a larger `mu` therefore injects strictly more `Phi` heat.
+/// `max T(high mu) > max T(base mu)` isolates `Phi`'s PRESENCE and positive
+/// (heating) SIGN from the mu-independent compression heating.
+#[test]
+fn viscous_dissipation_raises_temperature_with_viscosity() {
+    let air = air();
+    let mut air_hi = air.clone();
+    air_hi.viscosity = air.viscosity * 100.0;
+
+    let mesh = closed_box_mesh(24, 24, 1.0, 1.0);
+    let psi = 50.0;
+    let inlet_v = 0.1;
+
+    let run = |fluid: &Fluid| -> (f64, f64) {
+        let mut solver = build_closed_box(fluid, &mesh, psi, inlet_v);
+        let mut diverged = false;
+        for _ in 0..60 {
+            if solver.step_with_stats().is_err() {
+                diverged = true;
+                break;
+            }
+        }
+        assert!(!diverged, "closed-box viscous solve diverged");
+        let t = pollster::block_on(solver.get_field_scalar("T")).expect("T");
+        assert!(
+            t.iter().all(|v| v.is_finite() && *v > 0.0),
+            "T non-finite/non-positive"
+        );
+        let max_t = t.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+        (max_t, mean(&t))
+    };
+
+    let (max_base, mean_base) = run(&air);
+    let (max_hi, mean_hi) = run(&air_hi);
+
+    println!(
+        "[viscous-iso] base(mu={:.3e}): maxT={max_base:.6} meanT={mean_base:.6}  \
+         hi(mu={:.3e}): maxT={max_hi:.6} meanT={mean_hi:.6}  d(maxT)={:.3e}",
+        air.viscosity,
+        air_hi.viscosity,
+        max_hi - max_base
+    );
+
+    // Phi ∝ mu and Phi >= 0, compression heating is mu-independent => a 100x
+    // viscosity increase must add heat at the peak (the anchored inlet shear).
+    assert!(
+        max_hi > max_base + 1e-5,
+        "viscous dissipation added no heat: max T {max_base:.6} -> {max_hi:.6} under 100x mu \
+         (Phi missing or wrong sign?)"
+    );
+    assert!(
+        mean_hi > mean_base,
+        "mean T did not rise with viscosity: {mean_base:.6} -> {mean_hi:.6}"
     );
 }

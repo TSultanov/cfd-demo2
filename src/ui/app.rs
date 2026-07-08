@@ -1,6 +1,7 @@
 use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_cvt_mesh, generate_delaunay_mesh,
-    generate_structured_nozzle_mesh, generate_voronoi_mesh, BackwardsStep, BoundarySides,
+    generate_structured_nozzle_mesh, generate_structured_symmetric_nozzle_mesh,
+    generate_voronoi_mesh, BackwardsStep, BoundarySides,
     BoundaryType, ChannelWithObstacle, LloydConfig, Mesh, Nozzle,
 };
 use crate::solver::model::{
@@ -1549,7 +1550,11 @@ impl CFDApp {
                         let ny = ((height / max_cell_size).round() as usize).clamp(24, 192);
 
                         let gen_start = std::time::Instant::now();
-                        let mesh = generate_structured_nozzle_mesh(
+                        // Symmetric (both walls curved) CD nozzle — the iconic bell
+                        // shape with a clean symmetric core jet (no asymmetric
+                        // flat-bottom boundary layer). Same area ratio / throat as the
+                        // flat-bottom profile.
+                        let mesh = generate_structured_symmetric_nozzle_mesh(
                             nx,
                             ny,
                             length,

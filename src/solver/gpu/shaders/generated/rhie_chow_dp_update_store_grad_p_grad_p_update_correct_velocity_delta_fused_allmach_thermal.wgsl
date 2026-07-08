@@ -40,8 +40,8 @@ struct Constants {
 @compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.y * constants.stride_x + global_id.x;
-    if (idx >= (arrayLength(&state) / 18u)) { return; }
-    let base = idx * 18u;
+    if (idx >= (arrayLength(&state) / 21u)) { return; }
+    let base = idx * 21u;
     // synthesized by fusion rule: rhie_chow:dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1
     // begin fused segment: dp_update_from_diag
     let rho = max(constants.density, 0.000000000001);
@@ -93,7 +93,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         let k2_lambda_other = 1.0 - k2_lambda;
         let k2__unused_boundary_type = k2_boundary_type;
-        k2_grad_acc_p += k2_normal_vec * (state[base + 2u] * k2_lambda + select(state[k2_other_idx * 18u + 2u], select(select(state[base + 2u], bc_value[k2_face_idx * 4u + 2u], bc_kind[k2_face_idx * 4u + 2u] == 1u), state[base + 2u] + bc_value[k2_face_idx * 4u + 2u] * k2_d_own, bc_kind[k2_face_idx * 4u + 2u] == 2u), k2_is_boundary) * k2_lambda_other) * k2_area;
+        k2_grad_acc_p += k2_normal_vec * (state[base + 2u] * k2_lambda + select(state[k2_other_idx * 21u + 2u], select(select(state[base + 2u], bc_value[k2_face_idx * 4u + 2u], bc_kind[k2_face_idx * 4u + 2u] == 1u), state[base + 2u] + bc_value[k2_face_idx * 4u + 2u] * k2_d_own, bc_kind[k2_face_idx * 4u + 2u] == 2u), k2_is_boundary) * k2_lambda_other) * k2_area;
     }
     let k2_grad_out_p: vec2<f32> = k2_grad_acc_p / max(k2_vol, 0.000000000001);
     state[base + 4u] = k2_grad_out_p.x;

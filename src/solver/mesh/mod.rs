@@ -15,8 +15,8 @@ pub use structs::{BoundaryType, Mesh};
 pub use structured::{
     generate_graded_rect_mesh, generate_structured_backwards_step_mesh,
     generate_structured_nozzle_mesh, generate_structured_rect_mesh,
-    generate_structured_rect_mesh_periodic, generate_structured_trapezoid_mesh, AxisGrading,
-    BoundarySides,
+    generate_structured_rect_mesh_periodic, generate_structured_symmetric_nozzle_mesh,
+    generate_structured_trapezoid_mesh, AxisGrading, BoundarySides,
 };
 
 #[cfg(feature = "meshgen")]

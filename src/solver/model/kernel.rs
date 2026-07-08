@@ -479,7 +479,11 @@ pub fn model_has_neighbor_grad_consumers(model: &crate::solver::model::ModelSpec
         .system
         .equations()
         .iter()
-        .any(|eq| eq.terms().iter().any(|t| t.transpose_dev2))
+        .any(|eq| {
+            eq.terms()
+                .iter()
+                .any(|t| t.transpose_dev2 || t.viscous_dissipation)
+        })
 }
 
 fn rule_enabled(rule: &ModelKernelFusionRule, ctx: &KernelFusionContext<'_>) -> bool {
@@ -755,6 +759,9 @@ pub(crate) fn generate_packed_state_gradients_kernel_program(
                 .scheme
                 .map_or(false, |s| s != crate::solver::scheme::Scheme::Upwind))
                 || t.transpose_dev2
+                // Viscous dissipation reads the cell velocity-gradient tensor from
+                // grad_state too; under the Upwind guard it would read zeros.
+                || t.viscous_dissipation
         })
     });
     // grad_state is keyed by STATE OFFSET (matching the assembly's

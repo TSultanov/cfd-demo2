@@ -410,6 +410,11 @@ pub struct StructuredModelSolver {
     outer_iters: usize,
     dt: f64,
     threads: usize,
+    /// Kernel engine: the interpreter (default, correctness oracle) or the
+    /// compiled-Rust transpiled kernels (speed path; `generated::lookup_structured`
+    /// with per-kernel interpreter fallback — same contract as the unstructured
+    /// path). Set by the GUI's CPU-Transpiled backend selection.
+    engine: crate::solver::cpu::CpuEngine,
     /// Active coupled-solve preconditioner (shared banded routine): block-Jacobi,
     /// the model-owned Schur, or Schur + AMG pressure solve.
     precond: crate::solver::banded_schur::BandedPrecond,
@@ -546,11 +551,21 @@ impl StructuredModelSolver {
             outer_iters: outer_iters.max(1),
             dt,
             threads: 1,
+            engine: crate::solver::cpu::CpuEngine::Interpreter,
             precond: crate::solver::banded_schur::BandedPrecond::BlockJacobi,
             schur_layout: crate::solver::banded_schur::schur_layout_from_model(model),
             model_id: model.id,
             time: 0.0,
         })
+    }
+
+    /// Select the kernel engine (interpreter vs compiled-Rust transpiled) and the
+    /// worker-thread count for the per-cell kernel passes. Transpiled runs the
+    /// `generated::lookup_structured` kernels where available (interpreter
+    /// fallback otherwise); the banded linear solve is unaffected.
+    pub fn set_engine(&mut self, engine: crate::solver::cpu::CpuEngine, threads: usize) {
+        self.engine = engine;
+        self.threads = threads.max(1);
     }
 
     /// Select the coupled-solve preconditioner (block-Jacobi / Schur / Schur+AMG).
@@ -765,6 +780,25 @@ impl StructuredModelSolver {
     }
 
     fn run(&self, id: &str, n: usize, ctx: &Ctx) {
+        // Transpiled (compiled-Rust) engine: run the structured transpiled kernel
+        // if one was generated for this (model, kernel), passing the dense-grid
+        // geometry as the extra `grid` param; otherwise fall through to the
+        // interpreter (the correctness oracle). Same contract as the unstructured
+        // `CpuSolver::run_kernel`.
+        if self.engine == crate::solver::cpu::CpuEngine::Transpiled {
+            if let Some(f) = crate::solver::cpu::generated::lookup_structured(self.model_id, id) {
+                let grid = crate::solver::cpu::transpile_rt::StructuredGridRt {
+                    nx: self.grid.nx as u32,
+                    ny: self.grid.ny as u32,
+                    dx: self.grid.dx as f32,
+                    dy: self.grid.dy as f32,
+                };
+                crate::solver::cpu::parallel::parallel_ranges(n, self.threads, |start, end| {
+                    f(&self.buffers, start as u32, end as u32, &self.constants, &grid);
+                });
+                return;
+            }
+        }
         let stmts = self
             .kernels
             .get(id)

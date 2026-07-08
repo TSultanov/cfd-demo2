@@ -1354,14 +1354,13 @@ fn emit_transpiled_cpu_kernels(
     // correctness oracle; transpiled kernels are a speed path.
     let mut fns = String::new();
     let mut entries: Vec<(String, String, String)> = Vec::new();
+    // Structured kernels take the extra `grid: &StructuredGridRt` param, so they
+    // are collected separately behind `lookup_structured` (the StructuredModelSolver
+    // calls that with its grid; the unstructured `lookup` ABI is untouched).
+    let mut struct_entries: Vec<(String, String, String)> = Vec::new();
     for model in models {
-        // Structured (`TopologyMode::Structured2D`) kernels reference the `grid`
-        // uniform and `Vector2` constructor, which the Rust transpiler prelude
-        // does not yet provide; run them through the interpreter (the CPU
-        // correctness oracle) instead of the compiled-Rust speed path.
-        if model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D {
-            continue;
-        }
+        let structured =
+            model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D;
         for module in &model.modules {
             let module: &dyn ModelModule = module;
             for spec in module.kernel_generators() {
@@ -1375,11 +1374,20 @@ fn emit_transpiled_cpu_kernels(
                         sanitize_ident(model.id),
                         sanitize_ident(spec.id.as_str())
                     );
-                    if entries.iter().any(|(_, _, f)| f == &fn_name) {
+                    let dup = entries.iter().chain(&struct_entries).any(|(_, _, f)| f == &fn_name);
+                    if dup {
                         continue;
                     }
                     let emitted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        cfd2_codegen::solver::codegen::rust_emit::emit_kernel_fn(&fn_name, &program)
+                        if structured {
+                            cfd2_codegen::solver::codegen::rust_emit::emit_kernel_fn_structured(
+                                &fn_name, &program,
+                            )
+                        } else {
+                            cfd2_codegen::solver::codegen::rust_emit::emit_kernel_fn(
+                                &fn_name, &program,
+                            )
+                        }
                     }));
                     let Ok(src) = emitted else {
                         // Emitter panicked on an unsupported construct; skip
@@ -1387,19 +1395,21 @@ fn emit_transpiled_cpu_kernels(
                         continue;
                     };
                     // Skip kernels that reference uniforms not yet threaded into
-                    // the transpiled function signature (only `constants` is
-                    // available); e.g. `low_mach_params` in the compressible KT
-                    // flux. These fall back to the interpreter.
+                    // the transpiled function signature (constants + the structured
+                    // grid are available); e.g. `low_mach_params` in the compressible
+                    // KT flux and the all-Mach/thermal structured kernels. These
+                    // fall back to the interpreter.
                     if src.contains("low_mach_params") {
                         continue;
                     }
                     fns.push_str(&src);
                     fns.push('\n');
-                    entries.push((
-                        model.id.to_string(),
-                        spec.id.as_str().to_string(),
-                        fn_name,
-                    ));
+                    let entry = (model.id.to_string(), spec.id.as_str().to_string(), fn_name);
+                    if structured {
+                        struct_entries.push(entry);
+                    } else {
+                        entries.push(entry);
+                    }
                 }
             }
         }
@@ -1415,6 +1425,20 @@ fn emit_transpiled_cpu_kernels(
     for (m, k, f) in &entries {
         out.push_str(&format!(
             "        ({m:?}, {k:?}) => Some({f} as TranspiledKernel),\n"
+        ));
+    }
+    out.push_str("        _ => None,\n    }\n}\n");
+    // Structured variant: the extra `grid` param (see rust_emit::emit_kernel_fn_structured).
+    out.push_str(
+        "\n/// Structured (`TopologyMode::Structured2D`) chunk-range entry point —\n/// the same shape plus the dense-grid geometry param.\npub type TranspiledStructuredKernel = fn(&Buffers, u32, u32, &GpuConstants, &StructuredGridRt);\n",
+    );
+    out.push_str(
+        "pub fn lookup_structured(model_id: &str, kernel_id: &str) -> Option<TranspiledStructuredKernel> {\n",
+    );
+    out.push_str("    match (model_id, kernel_id) {\n");
+    for (m, k, f) in &struct_entries {
+        out.push_str(&format!(
+            "        ({m:?}, {k:?}) => Some({f} as TranspiledStructuredKernel),\n"
         ));
     }
     out.push_str("        _ => None,\n    }\n}\n");

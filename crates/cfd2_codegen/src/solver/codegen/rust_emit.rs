@@ -60,13 +60,27 @@ impl Tx {
     }
 }
 
-/// Emit a complete Rust function for `program`.
+/// Emit a complete Rust function for `program` (unstructured signature
+/// `(bufs, start, end, constants)`).
 pub fn emit_kernel_fn(fn_name: &str, program: &KernelProgram) -> String {
+    emit_kernel_fn_inner(fn_name, program, false)
+}
+
+/// Emit a STRUCTURED (`TopologyMode::Structured2D`) kernel: the same body plus a
+/// trailing `grid: &StructuredGridRt` param. Structured kernels read the dense
+/// grid geometry as `grid.nx/ny/dx/dy`, which resolves against the param by the
+/// same name-coincidence `constants.*` uses — no field-access special-casing.
+pub fn emit_kernel_fn_structured(fn_name: &str, program: &KernelProgram) -> String {
+    emit_kernel_fn_inner(fn_name, program, true)
+}
+
+fn emit_kernel_fn_inner(fn_name: &str, program: &KernelProgram, with_grid: bool) -> String {
     let tx = Tx::from_program(program);
     let mut s = String::new();
     s.push_str("#[allow(unused_variables, unused_mut, unused_parens, clippy::all)]\n");
+    let grid_param = if with_grid { ", grid: &StructuredGridRt" } else { "" };
     s.push_str(&format!(
-        "pub fn {fn_name}(bufs: &Buffers, start: u32, end: u32, constants: &GpuConstants) {{\n"
+        "pub fn {fn_name}(bufs: &Buffers, start: u32, end: u32, constants: &GpuConstants{grid_param}) {{\n"
     ));
     // Resolve each buffer handle once PER CHUNK, not per index: `bufs.atom` is
     // a HashMap<String, _> lookup that dominates otherwise. The dispatch loop
@@ -235,6 +249,16 @@ fn emit_call(callee: &Expr, args: &[Expr], tx: &Tx, out: &mut String) {
         "vec3<f32>" => format!("Vec3::new({}, {}, {})", a[0], a[1], a[2]),
         "vec4<f32>" if args.len() == 1 => format!("Vec4::splat({})", a[0]),
         "vec4<f32>" => format!("Vec4::new({}, {}, {}, {})", a[0], a[1], a[2], a[3]),
+        // The codegen's named vector constructors (`Vector2(a,b)` etc., used by
+        // the structured grid geometry + grad_state elements) alias the `vecN`
+        // constructors — the interpreter treats them identically (interpreter.rs
+        // `"vec2<f32>" | "Vector2"`), so emit the same `VecN::new/splat`.
+        "Vector2" if args.len() == 1 => format!("Vec2::splat({})", a[0]),
+        "Vector2" => format!("Vec2::new({}, {})", a[0], a[1]),
+        "Vector3" if args.len() == 1 => format!("Vec3::splat({})", a[0]),
+        "Vector3" => format!("Vec3::new({}, {}, {})", a[0], a[1], a[2]),
+        "Vector4" if args.len() == 1 => format!("Vec4::splat({})", a[0]),
+        "Vector4" => format!("Vec4::new({}, {}, {}, {})", a[0], a[1], a[2], a[3]),
         "f32" => format!("(({}) as f32)", a[0]),
         "u32" => format!("(({}) as u32)", a[0]),
         "i32" => format!("(({}) as i32)", a[0]),

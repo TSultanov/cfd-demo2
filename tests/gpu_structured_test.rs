@@ -1423,3 +1423,53 @@ fn cpu_structured_gui_accessors_work() {
     assert!(top_ux > 0.1, "CPU near-lid velocity did not develop ({top_ux})");
     println!("[cpu-structured] GUI accessors ok: umax={umax:.4}, top_ux={top_ux:.4}, stride={stride}");
 }
+
+/// TRANSPILER PARITY: the compiled-Rust (transpiled) structured kernels must
+/// produce the SAME result as the interpreter (the correctness oracle) — they run
+/// the identical Structured2D codegen IR. Drives a lid cavity both ways and
+/// asserts bit-close velocity + pressure. This proves the transpiled path (grid
+/// param + Vector2 constructor) is not just compilable but numerically correct.
+#[test]
+fn cpu_structured_transpiled_matches_interpreter() {
+    use cfd2::solver::cpu::CpuEngine;
+    let (nx, ny) = (16usize, 16usize);
+    let model = incompressible_momentum_structured_model().unwrap();
+    let bc = |edge: Edge| {
+        let uw = if matches!(edge, Edge::Top) { 1.0f32 } else { 0.0 };
+        let bt = if matches!(edge, Edge::Top) { 5 } else { 3 };
+        (
+            bt,
+            vec![
+                BcComp { kind: 1, value: uw },
+                BcComp { kind: 1, value: 0.0 },
+                BcComp { kind: 2, value: 0.0 },
+            ],
+        )
+    };
+    let run = |engine: CpuEngine| -> (Vec<f64>, Vec<f64>, Vec<f64>) {
+        let mut s =
+            StructuredModelSolver::new(StructuredGrid::new(nx, ny, 1.0, 1.0), &model, 0.05, 3).unwrap();
+        s.set_engine(engine, 1);
+        s.set_fluid(1.0, 0.01);
+        s.set_boundaries(|e, _x, _y| bc(e));
+        for _ in 0..12 {
+            s.step();
+        }
+        (s.state_field(0), s.state_field(1), s.state_field(2))
+    };
+    let (iu, iv, ip) = run(CpuEngine::Interpreter);
+    let (tu, tv, tp) = run(CpuEngine::Transpiled);
+    let mut max_d = 0.0f64;
+    let mut umax = 0.0f64;
+    for i in 0..iu.len() {
+        assert!(tu[i].is_finite() && tv[i].is_finite() && tp[i].is_finite(), "transpiled diverged");
+        max_d = max_d
+            .max((iu[i] - tu[i]).abs())
+            .max((iv[i] - tv[i]).abs())
+            .max((ip[i] - tp[i]).abs());
+        umax = umax.max(iu[i].hypot(iv[i]));
+    }
+    println!("[cpu-structured] transpiled vs interpreter: umax={umax:.4} max|Δ|={max_d:e}");
+    assert!(umax > 0.05, "lid flow must develop (umax={umax})");
+    assert!(max_d < 1e-5, "transpiled kernels disagree with interpreter: {max_d}");
+}

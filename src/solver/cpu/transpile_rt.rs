@@ -10,6 +10,18 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 const ORD: Ordering = Ordering::Relaxed;
 
+/// The dense-grid geometry a transpiled STRUCTURED kernel reads as
+/// `grid.nx/ny/dx/dy` (the CPU analogue of the WGSL `SGrid` uniform). Passed by
+/// `StructuredModelSolver` as the extra `grid` param the structured transpiled
+/// kernels take.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct StructuredGridRt {
+    pub nx: u32,
+    pub ny: u32,
+    pub dx: f32,
+    pub dy: f32,
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Vec2 {
     pub x: f32,

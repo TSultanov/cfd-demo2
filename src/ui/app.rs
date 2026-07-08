@@ -2583,13 +2583,29 @@ impl CFDApp {
         let precond = request.structured_precond;
         let solver_start = std::time::Instant::now();
 
-        // The CPU interpreter runs the SAME Structured2D codegen IR the GPU lowers
-        // (the transpiled CPU backends have no structured kernels), bridged to the
-        // GPU-direct renderer by uploading its packed state to a viz buffer. The
-        // seeding + BCs are backend-generic (StructuredSeed).
-        let (mode, cached_u, cached_p) = if request.backend == BackendChoice::CpuInterpreter {
+        // The CPU backends run the SAME Structured2D codegen IR the GPU lowers,
+        // bridged to the GPU-direct renderer by uploading the packed state to a
+        // viz buffer. The interpreter is the correctness oracle; the transpiled
+        // engine runs the compiled-Rust structured kernels (generated::
+        // lookup_structured, per-kernel interpreter fallback). The seeding + BCs
+        // are backend-generic (StructuredSeed).
+        let (mode, cached_u, cached_p) = if request.backend.is_cpu() {
             let mut cpu =
                 StructuredModelSolver::with_config(grid, &model, dt, outer, scheme, time_scheme)?;
+            let engine = if request.backend == BackendChoice::CpuInterpreter {
+                crate::solver::cpu::CpuEngine::Interpreter
+            } else {
+                // CpuTranspiled / CpuTranspiledSimd — the SIMD variant only affects
+                // the unstructured linear solve; the structured banded solve is the
+                // shared host routine, so both map to the transpiled kernel engine.
+                crate::solver::cpu::CpuEngine::Transpiled
+            };
+            let threads = std::env::var("CFD2_CPU_THREADS")
+                .ok()
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(1)
+                .max(1);
+            cpu.set_engine(engine, threads);
             cpu.set_fluid(density, viscosity);
             cpu.set_preconditioner(precond);
             seed_structured_state(&mut cpu, request.model_id);
@@ -4649,25 +4665,14 @@ impl eframe::App for CFDApp {
                         egui::ComboBox::from_label("Compute Backend")
                             .selected_text(self.backend.label())
                             .show_ui(ui, |ui| {
-                                // Structured runs on the GPU or the CPU INTERPRETER
-                                // (which executes the same Structured2D codegen IR the
-                                // GPU lowers). The transpiled CPU backends have no
-                                // structured kernels (build.rs skips them), so they
-                                // stay disabled in structured mode.
-                                let structured = self.mesh_mode == MeshMode::Structured2D;
+                                // Structured runs on the GPU or ANY CPU backend: the
+                                // interpreter and the transpiled (compiled-Rust)
+                                // kernels both execute the same Structured2D codegen
+                                // IR the GPU lowers. (The SIMD-linear variant only
+                                // affects the unstructured solve; on structured it is
+                                // the same transpiled kernels + shared banded solve.)
                                 for choice in BackendChoice::ALL {
-                                    let ok = !structured
-                                        || matches!(
-                                            choice,
-                                            BackendChoice::Gpu | BackendChoice::CpuInterpreter
-                                        );
-                                    ui.add_enabled_ui(ok, |ui| {
-                                        ui.selectable_value(
-                                            &mut self.backend,
-                                            choice,
-                                            choice.label(),
-                                        );
-                                    });
+                                    ui.selectable_value(&mut self.backend, choice, choice.label());
                                 }
                             })
                             .response

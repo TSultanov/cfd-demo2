@@ -303,7 +303,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let k1_dev2_U_U_mu = select(constants.viscosity, constants.viscosity * k1_lambda_f + constants.viscosity * (1.0 - k1_lambda_f), !k1_is_boundary);
         k1_rhs_0 += k1_dev2_U_U_mu * k1_area * (k1_normal.x * k1_dev2_U_U_gx.x + k1_normal.y * k1_dev2_U_U_gy.x - 0.6666667 * k1_dev2_U_U_div * k1_normal.x);
         k1_rhs_1 += k1_dev2_U_U_mu * k1_area * (k1_normal.x * k1_dev2_U_U_gx.y + k1_normal.y * k1_dev2_U_U_gy.y - 0.6666667 * k1_dev2_U_U_div * k1_normal.y);
-        var k1_phi_0: f32 = fluxes[k1_face_idx * 3u + 0u] - 0.5 * (state[idx * 12u + 11u] + state[k1_other_idx * 12u + 11u]) * mesh_fluxes[k1_face_idx];
+        var k1_phi_0: f32 = fluxes[k1_face_idx * 3u + 0u] - (state[k1_other_idx * 12u + 11u] + k1_lambda_f * (state[idx * 12u + 11u] - state[k1_other_idx * 12u + 11u])) * mesh_fluxes[k1_face_idx];
         if (k1_owner != idx) {
             k1_phi_0 -= k1_phi_0 * 2.0;
         }
@@ -344,7 +344,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 k1_diag_0 += k1_phi_0;
             }
         }
-        var k1_phi_1: f32 = fluxes[k1_face_idx * 3u + 1u] - 0.5 * (state[idx * 12u + 11u] + state[k1_other_idx * 12u + 11u]) * mesh_fluxes[k1_face_idx];
+        var k1_phi_1: f32 = fluxes[k1_face_idx * 3u + 1u] - (state[k1_other_idx * 12u + 11u] + k1_lambda_f * (state[idx * 12u + 11u] - state[k1_other_idx * 12u + 11u])) * mesh_fluxes[k1_face_idx];
         if (k1_owner != idx) {
             k1_phi_1 -= k1_phi_1 * 2.0;
         }
@@ -409,7 +409,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        var k1_phi_2: f32 = fluxes[k1_face_idx * 3u + 2u] - 0.5 * (state[idx * 12u + 11u] + state[k1_other_idx * 12u + 11u]) * mesh_fluxes[k1_face_idx];
+        var k1_phi_2: f32 = fluxes[k1_face_idx * 3u + 2u] - (state[k1_other_idx * 12u + 11u] + k1_lambda_f * (state[idx * 12u + 11u] - state[k1_other_idx * 12u + 11u])) * mesh_fluxes[k1_face_idx];
         if (k1_owner != idx) {
             k1_phi_2 -= k1_phi_2 * 2.0;
         }

@@ -779,6 +779,11 @@ pub struct CFDApp {
     /// STRUCTURED-only: coupled banded-solve preconditioner (block-Jacobi / Schur
     /// / Schur+AMG).
     structured_precond: crate::solver::banded_schur::CoupledPrecondKind,
+    /// STRUCTURED-only: per-cell "is this cell inside the immersed obstacle?"
+    /// (one entry per `cached_cells` polygon, cell-order). The dense grid never
+    /// cuts the obstacle out, so the solid region is drawn as a grey overlay so
+    /// the geometry is visible. Empty for the unstructured (cut-cell) path.
+    structured_solid_mask: Vec<bool>,
     plot_field: PlotField,
     is_running: bool,
     selected_scheme: Scheme,
@@ -969,6 +974,7 @@ impl CFDApp {
             mesh_type: MeshType::default(),
             mesh_mode: MeshMode::default(),
             structured_precond: crate::solver::banded_schur::CoupledPrecondKind::BlockJacobi,
+            structured_solid_mask: Vec::new(),
             plot_field: PlotField::VelocityMag,
             is_running: false,
             selected_scheme: Scheme::Upwind,
@@ -2108,6 +2114,24 @@ impl CFDApp {
 
         self.model_caps = model_caps;
         self.cached_cells = cached_cells;
+        // In structured mode the immersed obstacle is a Brinkman mask, not a cut
+        // cell, so cache which cells fall inside the selected geometry's solid so
+        // the renderer can draw the obstacle as an overlay (the mesh is a full
+        // rectangle). Domain is the 3×1 channel `build_structured_init` uses.
+        self.structured_solid_mask = if self.mesh_mode == MeshMode::Structured2D {
+            let (lx, ly) = (3.0_f64, 1.0_f64);
+            let geom = self.selected_geometry;
+            self.cached_cells
+                .iter()
+                .map(|poly| {
+                    let n = poly.len().max(1) as f64;
+                    let (cx, cy) = poly.iter().fold((0.0, 0.0), |(ax, ay), p| (ax + p[0], ay + p[1]));
+                    structured_geometry_is_solid(geom, cx / n, cy / n, lx, ly)
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         self.actual_min_cell_size = actual_min_cell_size;
         self.cached_u = cached_u;
         self.cached_p = cached_p;
@@ -3112,6 +3136,38 @@ impl CFDApp {
                             );
 
                             ui.painter().add(cb);
+
+                            // Immersed-obstacle overlay: the dense grid is not cut, so
+                            // draw the solid cells as a grey overlay so the geometry is
+                            // visible. Map domain → screen with the SAME fit the shader
+                            // uses (centre the mesh in `rect` at `s` px per domain unit;
+                            // screen-y is flipped vs domain-y).
+                            if !self.structured_solid_mask.is_empty() {
+                                let center = rect.center();
+                                let painter = ui.painter_at(rect);
+                                let grey = egui::Color32::from_rgba_unmultiplied(90, 90, 90, 220);
+                                for (i, poly) in cells.iter().enumerate() {
+                                    if !self.structured_solid_mask.get(i).copied().unwrap_or(false) {
+                                        continue;
+                                    }
+                                    let pts: Vec<egui::Pos2> = poly
+                                        .iter()
+                                        .map(|p| {
+                                            egui::pos2(
+                                                center.x + (p[0] as f32 - mesh_center_x as f32) * s,
+                                                center.y - (p[1] as f32 - mesh_center_y as f32) * s,
+                                            )
+                                        })
+                                        .collect();
+                                    if pts.len() >= 3 {
+                                        painter.add(egui::Shape::convex_polygon(
+                                            pts,
+                                            grey,
+                                            egui::Stroke::NONE,
+                                        ));
+                                    }
+                                }
+                            }
                         }
                     }
                     RenderMode::EguiPlot => {
@@ -3126,11 +3182,18 @@ impl CFDApp {
                             return;
                         };
 
+                        let solid = &self.structured_solid_mask;
                         Plot::new("cfd_plot").data_aspect(1.0).show(ui, |plot_ui| {
                             for (i, polygon_points) in cells.iter().enumerate() {
-                                let val = vals.get(i).copied().unwrap_or_default();
-                                let t = (val - min_val as f64) / (max_val - min_val) as f64;
-                                let color = get_color(t);
+                                // Immersed-obstacle cells render as opaque grey so the
+                                // geometry is visible on the (uncut) dense grid.
+                                let color = if solid.get(i).copied().unwrap_or(false) {
+                                    egui::Color32::from_gray(90)
+                                } else {
+                                    let val = vals.get(i).copied().unwrap_or_default();
+                                    let t = (val - min_val as f64) / (max_val - min_val) as f64;
+                                    get_color(t)
+                                };
 
                                 plot_ui.polygon(
                                     Polygon::new("", PlotPoints::new(polygon_points.clone()))

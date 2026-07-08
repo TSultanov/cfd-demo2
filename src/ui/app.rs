@@ -1151,6 +1151,17 @@ impl CFDApp {
         self.selected_scheme = d.advection_scheme;
         self.time_scheme = d.time_scheme;
         self.selected_preconditioner = d.preconditioner;
+        // STRUCTURED coupled preconditioner default, per model: the pure-
+        // incompressible saddle needs AMG (h-independent) — block-Jacobi stalls
+        // on the elliptic pressure Poisson (channel 285 → 31 ms/step, beating the
+        // unstructured solver), while the all-Mach/thermal + compressible models
+        // (whose psi_precond stabilizes the pressure diagonal) are faster on plain
+        // block-Jacobi. The user can still override via the radio.
+        self.structured_precond = if self.model_id == "incompressible_momentum_structured" {
+            crate::solver::banded_schur::CoupledPrecondKind::SchurAmg
+        } else {
+            crate::solver::banded_schur::CoupledPrecondKind::BlockJacobi
+        };
         self.alpha_u = d.alpha_u;
         self.alpha_p = d.alpha_p;
         self.outer_iters = d.outer_iters;

@@ -652,3 +652,102 @@ fn gpu_structured_gui_accessors_work() {
     }
     println!("[gpu-structured] GUI accessors ok: umax={umax:.4}");
 }
+
+/// PARITY: the advection scheme is honoured by the structured solver — Upwind and
+/// VanLeer-limited SOU must produce DIFFERENT lid-cavity fields (as they do on the
+/// unstructured path), proving the scheme is not baked to Upwind.
+#[test]
+fn gpu_structured_advection_scheme_takes_effect() {
+    use cfd2::solver::scheme::Scheme;
+    use cfd2::solver::TimeScheme;
+    let (nx, ny) = (20usize, 20usize);
+    let model = incompressible_momentum_structured_model().unwrap();
+    let run = |scheme: Scheme| -> Vec<f64> {
+        let ctx = pollster::block_on(cfd2::solver::gpu::context::GpuContext::new(None, None)).unwrap();
+        let mut s = StructuredGpuSolver::with_config(
+            ctx,
+            StructuredGrid::new(nx, ny, 1.0, 1.0),
+            &model,
+            0.05,
+            3,
+            scheme,
+            TimeScheme::Euler,
+        )
+        .unwrap();
+        s.set_fluid(1.0, 0.005); // Re=200 — convection-dominated enough to see the scheme
+        s.set_boundaries(|edge, _x, _y| {
+            let uw = if matches!(edge, Edge::Top) { 1.0f32 } else { 0.0 };
+            let bt = if matches!(edge, Edge::Top) { 5 } else { 3 };
+            (
+                bt,
+                vec![
+                    BcComp { kind: 1, value: uw },
+                    BcComp { kind: 1, value: 0.0 },
+                    BcComp { kind: 2, value: 0.0 },
+                ],
+            )
+        });
+        for _ in 0..25 {
+            s.step();
+        }
+        s.state_field(0)
+    };
+    let up = run(Scheme::Upwind);
+    let vl = run(Scheme::SecondOrderUpwindVanLeer);
+    let mut max_d = 0.0f64;
+    for (a, b) in up.iter().zip(&vl) {
+        assert!(a.is_finite() && b.is_finite());
+        max_d = max_d.max((a - b).abs());
+    }
+    println!("[gpu-structured] scheme Upwind vs VanLeer max|Δ|={max_d:e}");
+    assert!(max_d > 1e-3, "advection scheme had no effect (baked?) max|Δ|={max_d}");
+}
+
+/// PARITY: BDF2 time integration is honoured — a BDF2 run differs from Euler on the
+/// same transient (the structured assembly's `time_scheme==1` branch is live).
+#[test]
+fn gpu_structured_bdf2_takes_effect() {
+    use cfd2::solver::scheme::Scheme;
+    use cfd2::solver::TimeScheme;
+    let (nx, ny) = (16usize, 16usize);
+    let model = incompressible_momentum_structured_model().unwrap();
+    let run = |ts: TimeScheme| -> Vec<f64> {
+        let ctx = pollster::block_on(cfd2::solver::gpu::context::GpuContext::new(None, None)).unwrap();
+        let mut s = StructuredGpuSolver::with_config(
+            ctx,
+            StructuredGrid::new(nx, ny, 1.0, 1.0),
+            &model,
+            0.02, // small dt so the transient (not steady) is resolved — where BDF2 differs
+            2,
+            Scheme::Upwind,
+            ts,
+        )
+        .unwrap();
+        s.set_fluid(1.0, 0.01);
+        s.set_boundaries(|edge, _x, _y| {
+            let uw = if matches!(edge, Edge::Top) { 1.0f32 } else { 0.0 };
+            let bt = if matches!(edge, Edge::Top) { 5 } else { 3 };
+            (
+                bt,
+                vec![
+                    BcComp { kind: 1, value: uw },
+                    BcComp { kind: 1, value: 0.0 },
+                    BcComp { kind: 2, value: 0.0 },
+                ],
+            )
+        });
+        for _ in 0..8 {
+            s.step();
+        }
+        s.state_field(0)
+    };
+    let euler = run(TimeScheme::Euler);
+    let bdf2 = run(TimeScheme::BDF2);
+    let mut max_d = 0.0f64;
+    for (a, b) in euler.iter().zip(&bdf2) {
+        assert!(a.is_finite() && b.is_finite());
+        max_d = max_d.max((a - b).abs());
+    }
+    println!("[gpu-structured] Euler vs BDF2 max|Δ|={max_d:e}");
+    assert!(max_d > 1e-5, "time scheme had no effect max|Δ|={max_d}");
+}

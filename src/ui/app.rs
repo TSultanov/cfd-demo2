@@ -2479,7 +2479,17 @@ impl CFDApp {
             Some(device),
             Some(queue),
         ))?;
-        let mut solver = StructuredGpuSolver::with_context(ctx, grid, &model, dt, outer)?;
+        // Honour the selected advection + time-integration schemes (structured
+        // kernels read them at runtime — full parity with the unstructured path).
+        let mut solver = StructuredGpuSolver::with_config(
+            ctx,
+            grid,
+            &model,
+            dt,
+            outer,
+            request.params.advection_scheme,
+            request.params.time_scheme,
+        )?;
         solver.set_fluid(request.params.density as f64, request.params.viscosity as f64);
         seed_structured_state(&mut solver, request.model_id);
         setup_structured_bcs(&mut solver, request.model_id, request.params.inlet_velocity as f64, s);
@@ -2861,8 +2871,14 @@ impl CFDApp {
         self.sync_worker_params();
     }
 
-    fn update_gpu_scheme(&self) {
-        self.sync_worker_params();
+    fn update_gpu_scheme(&mut self) {
+        // The structured solver bakes the scheme into its recipe at construction —
+        // a change rebuilds; the unstructured solver applies it live.
+        if self.mesh_mode == MeshMode::Structured2D {
+            self.init_solver();
+        } else {
+            self.sync_worker_params();
+        }
     }
 
     fn update_gpu_alpha_u(&self) {
@@ -2873,8 +2889,12 @@ impl CFDApp {
         self.sync_worker_params();
     }
 
-    fn update_gpu_time_scheme(&self) {
-        self.sync_worker_params();
+    fn update_gpu_time_scheme(&mut self) {
+        if self.mesh_mode == MeshMode::Structured2D {
+            self.init_solver();
+        } else {
+            self.sync_worker_params();
+        }
     }
 
     fn update_gpu_outer_iters(&self) {
@@ -4168,9 +4188,6 @@ impl eframe::App for CFDApp {
                             );
                         }
 
-                        // The structured banded solver runs a fixed Upwind scheme —
-                        // the advection-scheme choice is inert there.
-                        if self.mesh_mode != MeshMode::Structured2D {
                         ui.separator();
                         ui.label("Advection Scheme");
                         if ui
@@ -4241,7 +4258,6 @@ impl eframe::App for CFDApp {
                         if self.model_caps.supports_eos_tuning {
                             ui.label("Compressible solver uses this for KT flux reconstruction + deferred-correction advection.");
                         }
-                        } // end if !structured (Advection Scheme)
 
                         ui.separator();
                         ui.label("Preconditioner");

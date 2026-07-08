@@ -450,7 +450,8 @@ impl StructuredGpuSolver {
         Self::with_context(ctx, grid, model, dt, outer_iters)
     }
 
-    /// Build against an existing device/queue.
+    /// Build against an existing device/queue with the default schemes
+    /// (Upwind / backward-Euler).
     pub fn with_context(
         ctx: GpuContext,
         grid: StructuredGrid,
@@ -458,14 +459,37 @@ impl StructuredGpuSolver {
         dt: f64,
         outer_iters: usize,
     ) -> Result<Self, String> {
+        Self::with_config(
+            ctx,
+            grid,
+            model,
+            dt,
+            outer_iters,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+        )
+    }
+
+    /// Build against an existing device/queue with an explicit advection scheme
+    /// and time-integration scheme. Both are honoured at RUNTIME by the codegen
+    /// structured kernels (`constants.scheme` selects the deferred-correction
+    /// reconstruction; `constants.time_scheme==1` is BDF2) — no kernel change.
+    pub fn with_config(
+        ctx: GpuContext,
+        grid: StructuredGrid,
+        model: &ModelSpec,
+        dt: f64,
+        outer_iters: usize,
+        scheme: Scheme,
+        time_scheme: TimeScheme,
+    ) -> Result<Self, String> {
         if model.system.topology() != cfd2_ir::equation::TopologyMode::Structured2D {
             return Err("StructuredGpuSolver requires a Structured2D model".to_string());
         }
-        let scheme = Scheme::Upwind;
         let recipe = SolverRecipe::from_model(
             model,
             scheme,
-            TimeScheme::Euler,
+            time_scheme,
             PreconditionerType::Jacobi,
             SteppingMode::Coupled,
         )?;
@@ -559,11 +583,13 @@ impl StructuredGpuSolver {
             storage_buffer(dev, "face_boundary", n * 4),
         );
 
+        // `recipe.initial_constants` already carries the advection `scheme` and
+        // `time_scheme` (from `from_model`); keep them so the runtime kernels honour
+        // the requested schemes. Only the per-run knobs are overridden here.
         let mut constants = recipe.initial_constants;
         constants.dt = dt as f32;
         constants.dt_old = dt as f32;
         constants.dtau = 0.0;
-        constants.time_scheme = 0; // Euler
         constants.stride_x = grid.nx as u32;
         let constants_buf = dev.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("constants"),

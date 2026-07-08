@@ -468,7 +468,20 @@ fn heavy_ball_pressure(sd: &SchurData, nx: usize, ny: usize, g: &[f64]) -> Vec<f
     best
 }
 
-fn apply(built: &Built, a: &[f32], nx: usize, ny: usize, s: usize, r: &[f64], threads: usize) -> Vec<f64> {
+/// `pre_pressure`, when supplied, is the inner `A_pp` pressure solve prepared ONCE
+/// per outer solve (an AMG V-cycle over a hierarchy assembled a single time) —
+/// the Schur branch calls it instead of re-assembling / heavy-ball per apply.
+#[allow(clippy::type_complexity)]
+fn apply(
+    built: &Built,
+    a: &[f32],
+    nx: usize,
+    ny: usize,
+    s: usize,
+    r: &[f64],
+    threads: usize,
+    pre_pressure: Option<&dyn Fn(&[f64]) -> Vec<f64>>,
+) -> Vec<f64> {
     match built {
         Built::BlockJacobi { minv } => {
             let ncells = nx * ny;
@@ -513,26 +526,14 @@ fn apply(built: &Built, a: &[f32], nx: usize, ny: usize, s: usize, r: &[f64], th
                 }
             }
 
-            // 3. inner pressure solve  Ŝ psol = g_p   (Ŝ = A_pp): one AMG V-cycle
-            //    if requested (and available), else the safeguarded heavy-ball.
-            #[cfg(feature = "cpu")]
-            let psol = if let Some(ap) = &sd.amg {
-                // Galerkin-assemble the (hierarchy-borrowing) solver from the
-                // current A_pp values, then one V(1,1) cycle from x0 = 0.
-                let solver = crate::solver::cpu::amg::AmgSolver::assemble(
-                    &ap.hier,
-                    &ap.csr_values,
-                    1,
-                    false,
-                );
-                let mut psol = vec![0.0f64; ncells];
-                solver.vcycle(&gp, &mut psol);
-                psol
+            // 3. inner pressure solve  Ŝ psol = g_p   (Ŝ = A_pp): the pre-built
+            //    AMG V-cycle if supplied (assembled ONCE per outer solve), else
+            //    the safeguarded heavy-ball.
+            let psol = if let Some(psolve) = pre_pressure {
+                psolve(&gp)
             } else {
                 heavy_ball_pressure(sd, nx, ny, &gp)
             };
-            #[cfg(not(feature = "cpu"))]
-            let psol = heavy_ball_pressure(sd, nx, ny, &gp);
 
             // 4. velocity correct  z_u -= diag(A_uu)⁻¹ A_up psol ;  z_p = psol.
             for j in 0..ny {
@@ -619,7 +620,7 @@ pub fn banded_gmres_t(
         // r0 = M^{-1}(b - A x)
         let ax = spmv_t(a, nx, ny, s, &x, threads);
         let r0: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-        let r = apply(&built, a, nx, ny, s, &r0, threads);
+        let r = apply(&built, a, nx, ny, s, &r0, threads, None);
         let beta = pnorm(threads, &r);
         if beta / bnorm <= tol {
             return (x.iter().map(|&v| v as f32).collect(), beta / bnorm);
@@ -638,7 +639,7 @@ pub fn banded_gmres_t(
         for k in 0..m {
             // w = M^{-1} A v_k
             let av = spmv_t(a, nx, ny, s, &v[k], threads);
-            let mut w = apply(&built, a, nx, ny, s, &av, threads);
+            let mut w = apply(&built, a, nx, ny, s, &av, threads, None);
             for i in 0..=k {
                 h[i][k] = pdot(threads, &w, &v[i]);
                 axpy(&mut w, -h[i][k], &v[i]);
@@ -724,6 +725,36 @@ fn banded_fgmres(
     let bnorm = pnorm(threads, &b64).max(1e-30);
     let mut x = vec![0.0f64; n];
 
+    // Assemble the AMG pressure solver ONCE for this outer solve (A_pp is fixed
+    // within it), then reuse its V-cycle across every preconditioner apply — the
+    // per-apply Galerkin re-assembly was catastrophic at scale. `psolve` is the
+    // pressure inner-solve closure the Schur apply consumes (heavy-ball when None).
+    let ncells = nx * ny;
+    #[cfg(feature = "cpu")]
+    let amg_solver = match built {
+        Built::Schur(sd) => sd
+            .amg
+            .as_ref()
+            .map(|ap| crate::solver::cpu::amg::AmgSolver::assemble(&ap.hier, &ap.csr_values, threads, false)),
+        _ => None,
+    };
+    #[cfg(feature = "cpu")]
+    let psolve_owned = amg_solver.as_ref().map(|solver| {
+        move |gp: &[f64]| -> Vec<f64> {
+            let mut o = vec![0.0f64; ncells];
+            solver.vcycle(gp, &mut o);
+            o
+        }
+    });
+    #[cfg(feature = "cpu")]
+    let psolve: Option<&dyn Fn(&[f64]) -> Vec<f64>> =
+        psolve_owned.as_ref().map(|f| f as &dyn Fn(&[f64]) -> Vec<f64>);
+    #[cfg(not(feature = "cpu"))]
+    let psolve: Option<&dyn Fn(&[f64]) -> Vec<f64>> = {
+        let _ = ncells;
+        None
+    };
+
     for _outer in 0..max_outer {
         // Right-preconditioned: the Arnoldi space is built on the UNpreconditioned
         // residual r0 = b - A x.
@@ -747,7 +778,7 @@ fn banded_fgmres(
 
         for k in 0..m {
             // z_k = M^{-1} v_k ; w = A z_k.
-            let zk = apply(built, a, nx, ny, s, &v[k], threads);
+            let zk = apply(built, a, nx, ny, s, &v[k], threads, psolve);
             let mut w = spmv_t(a, nx, ny, s, &zk, threads);
             z.push(zk);
             for i in 0..=k {

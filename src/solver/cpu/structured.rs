@@ -410,12 +410,12 @@ pub struct StructuredModelSolver {
     outer_iters: usize,
     dt: f64,
     threads: usize,
-    /// Active coupled-solve preconditioner (shared banded routine): block-Jacobi
-    /// or the model-owned Schur.
+    /// Active coupled-solve preconditioner (shared banded routine): block-Jacobi,
+    /// the model-owned Schur, or Schur + AMG pressure solve.
     precond: crate::solver::banded_schur::BandedPrecond,
     /// The model's declared Schur layout (`None` if it declares none), so
-    /// `set_preconditioner` can toggle without re-reading the model.
-    schur_precond: Option<crate::solver::banded_schur::BandedPrecond>,
+    /// `set_preconditioner` can rebuild for any kind without re-reading the model.
+    schur_layout: Option<crate::solver::banded_schur::SchurLayout>,
 }
 
 impl StructuredModelSolver {
@@ -544,24 +544,29 @@ impl StructuredModelSolver {
             dt,
             threads: 1,
             precond: crate::solver::banded_schur::BandedPrecond::BlockJacobi,
-            schur_precond: crate::solver::banded_schur::schur_from_model(model),
+            schur_layout: crate::solver::banded_schur::schur_layout_from_model(model),
         })
     }
 
-    /// Select the coupled-solve preconditioner: `true` = the model-owned SIMPLE
-    /// Schur (if declared), `false` = block-Jacobi. Returns whether Schur is now
-    /// active. Mirrors [`crate::solver::gpu::structured::StructuredGpuSolver::set_preconditioner`].
-    pub fn set_preconditioner(&mut self, use_schur: bool) -> bool {
-        self.precond = match (use_schur, &self.schur_precond) {
-            (true, Some(schur)) => schur.clone(),
-            _ => crate::solver::banded_schur::BandedPrecond::BlockJacobi,
+    /// Select the coupled-solve preconditioner (block-Jacobi / Schur / Schur+AMG).
+    /// A Schur variant on a model without a layout keeps block-Jacobi. Returns the
+    /// EFFECTIVE kind. Mirrors the GPU `StructuredGpuSolver::set_preconditioner`.
+    pub fn set_preconditioner(
+        &mut self,
+        kind: crate::solver::banded_schur::CoupledPrecondKind,
+    ) -> crate::solver::banded_schur::CoupledPrecondKind {
+        use crate::solver::banded_schur::{BandedPrecond, CoupledPrecondKind as K};
+        self.precond = match (kind, &self.schur_layout) {
+            (K::Schur, Some(l)) => BandedPrecond::schur(l, false),
+            (K::SchurAmg, Some(l)) => BandedPrecond::schur(l, true),
+            _ => BandedPrecond::BlockJacobi,
         };
-        matches!(self.precond, crate::solver::banded_schur::BandedPrecond::Schur { .. })
+        crate::solver::banded_schur::kind_of(&self.precond)
     }
 
     /// Whether this model declares a Schur preconditioner.
     pub fn supports_schur(&self) -> bool {
-        self.schur_precond.is_some()
+        self.schur_layout.is_some()
     }
 
     /// Seed a state component (by state-layout offset) from cell-centre coords.

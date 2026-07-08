@@ -32,8 +32,23 @@ pub enum BandedPrecond {
     /// unknown ranks within the per-cell block (coupled-system block indices, as
     /// the model's `SchurBlockLayout` declares them). `omega`==1.0 auto-selects
     /// the heavy-ball weight 1.95 (symmetric pressure block); other values are
-    /// used verbatim. `sweeps_cap` caps the inner pressure sweeps.
-    Schur { u_idx: Vec<usize>, p: usize, omega: f32, sweeps_cap: u32 },
+    /// used verbatim. `sweeps_cap` caps the inner pressure sweeps. `pressure_amg`
+    /// selects the inner `A_pp` (pressure-Poisson) solve: `false` = the
+    /// safeguarded heavy-ball smoother, `true` = an algebraic-multigrid V-cycle
+    /// (the SAME `cpu::amg` the unstructured Schur uses; requires the `cpu`
+    /// feature, else falls back to heavy-ball) — the structured analogue of the
+    /// unstructured "Chebyshev vs AMG pressure solve" selector.
+    Schur { u_idx: Vec<usize>, p: usize, omega: f32, sweeps_cap: u32, pressure_amg: bool },
+}
+
+/// The coupled-solve preconditioner choice the structured solvers expose (drives
+/// the GUI radio + `set_preconditioner`). Mirrors the unstructured menu: block-
+/// Jacobi, the model-owned SIMPLE Schur, or Schur with an AMG pressure solve.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CoupledPrecondKind {
+    BlockJacobi,
+    Schur,
+    SchurAmg,
 }
 
 /// `matrix_values[p*5*s*s + 5*s*r + band*s + c]` as f64.
@@ -186,6 +201,22 @@ struct SchurData {
     p_diag_inv: Vec<f64>,
     omega: f64,
     sweeps: usize,
+    /// AMG aggregation hierarchy + finest-CSR values over the `A_pp` pressure
+    /// Poisson (the inner solve when the caller requested `pressure_amg`; `None`
+    /// = heavy-ball). Built once per `banded_gmres` call from the current `A_pp`;
+    /// the (borrowing) `AmgSolver` is Galerkin-assembled per apply. `cpu` only.
+    #[cfg(feature = "cpu")]
+    amg: Option<AmgPressure>,
+}
+
+/// The AMG pieces needed to run V-cycles on `A_pp`: the aggregation hierarchy
+/// (pattern) and the finest-level CSR values (in the row-major stencil order
+/// [`build_pressure_amg`] emits), from which each apply Galerkin-assembles an
+/// `AmgSolver`.
+#[cfg(feature = "cpu")]
+struct AmgPressure {
+    hier: crate::solver::cpu::amg::AmgHierarchy,
+    csr_values: Vec<f32>,
 }
 
 /// The inner heavy-ball sweep count: `min(20 + √n/8, sweeps_cap)` (mirrors
@@ -225,7 +256,7 @@ fn build(a: &[f32], nx: usize, ny: usize, s: usize, prec: &BandedPrecond) -> Bui
             }
             Built::BlockJacobi { minv }
         }
-        BandedPrecond::Schur { u_idx, p: pp, omega, sweeps_cap } => {
+        BandedPrecond::Schur { u_idx, p: pp, omega, sweeps_cap, pressure_amg } => {
             let u_len = u_idx.len();
             let mut diag_u_inv = vec![0.0f64; ncells * u_len];
             let mut a_pp = vec![0.0f64; ncells * 5];
@@ -241,6 +272,14 @@ fn build(a: &[f32], nx: usize, ny: usize, s: usize, prec: &BandedPrecond) -> Bui
                 let dp = a_pp[cell * 5 + BAND_DIAG];
                 p_diag_inv[cell] = if dp.abs() > 1e-30 { 1.0 / dp } else { 0.0 };
             }
+            #[cfg(feature = "cpu")]
+            let amg = if *pressure_amg {
+                Some(build_pressure_amg(&a_pp, nx, ny))
+            } else {
+                None
+            };
+            #[cfg(not(feature = "cpu"))]
+            let _ = pressure_amg;
             Built::Schur(SchurData {
                 u_idx: u_idx.clone(),
                 p: *pp,
@@ -250,9 +289,38 @@ fn build(a: &[f32], nx: usize, ny: usize, s: usize, prec: &BandedPrecond) -> Bui
                 p_diag_inv,
                 omega: heavy_ball_omega(*omega),
                 sweeps: default_pressure_sweeps(ncells, *sweeps_cap),
+                #[cfg(feature = "cpu")]
+                amg,
             })
         }
     }
+}
+
+/// Assemble an [`AmgHierarchy`] over the scalar `A_pp` pressure-Poisson operator.
+/// Converts the 5-band operator (`a_pp[cell*5 + band]`, bands `[S,W,diag,E,N]`)
+/// into a CSR (per row: self + in-grid neighbours) and hands it to the SAME
+/// aggregation AMG the unstructured Schur uses. Built fresh each solve (`A_pp`
+/// changes every outer iteration; the grids are modest, so the O(nnz) build is
+/// cheap relative to the FGMRES iterations).
+#[cfg(feature = "cpu")]
+fn build_pressure_amg(a_pp: &[f64], nx: usize, ny: usize) -> AmgPressure {
+    let ncells = nx * ny;
+    let mut row_offsets = Vec::with_capacity(ncells + 1);
+    let mut col_indices: Vec<u32> = Vec::with_capacity(ncells * 5);
+    let mut values: Vec<f32> = Vec::with_capacity(ncells * 5);
+    row_offsets.push(0u32);
+    for j in 0..ny {
+        for i in 0..nx {
+            let cell = j * nx + i;
+            for &(band, q) in neighbors(i, j, nx, ny).iter() {
+                col_indices.push(q as u32);
+                values.push(a_pp[cell * 5 + band] as f32);
+            }
+            row_offsets.push(col_indices.len() as u32);
+        }
+    }
+    let hier = crate::solver::cpu::amg::AmgHierarchy::build(&row_offsets, &col_indices, &values);
+    AmgPressure { hier, csr_values: values }
 }
 
 /// `A_pp · x` (scalar 5-band pressure operator).
@@ -379,7 +447,25 @@ fn apply(built: &Built, a: &[f32], nx: usize, ny: usize, s: usize, r: &[f64]) ->
                 }
             }
 
-            // 3. inner pressure solve  Ŝ psol = g_p   (Ŝ = A_pp).
+            // 3. inner pressure solve  Ŝ psol = g_p   (Ŝ = A_pp): one AMG V-cycle
+            //    if requested (and available), else the safeguarded heavy-ball.
+            #[cfg(feature = "cpu")]
+            let psol = if let Some(ap) = &sd.amg {
+                // Galerkin-assemble the (hierarchy-borrowing) solver from the
+                // current A_pp values, then one V(1,1) cycle from x0 = 0.
+                let solver = crate::solver::cpu::amg::AmgSolver::assemble(
+                    &ap.hier,
+                    &ap.csr_values,
+                    1,
+                    false,
+                );
+                let mut psol = vec![0.0f64; ncells];
+                solver.vcycle(&gp, &mut psol);
+                psol
+            } else {
+                heavy_ball_pressure(sd, nx, ny, &gp)
+            };
+            #[cfg(not(feature = "cpu"))]
             let psol = heavy_ball_pressure(sd, nx, ny, &gp);
 
             // 4. velocity correct  z_u -= diag(A_uu)⁻¹ A_up psol ;  z_p = psol.
@@ -629,13 +715,38 @@ fn banded_fgmres(
     (x.iter().map(|&v| v as f32).collect(), norm(&res) / bnorm)
 }
 
-/// Read a model's declared Schur block layout, if any, into a [`BandedPrecond`].
-/// Returns `None` when the model declares no Schur preconditioner (e.g. the
-/// density-based compressible model) — the caller then uses block-Jacobi.
-pub fn schur_from_model(model: &crate::solver::model::ModelSpec) -> Option<BandedPrecond> {
+/// A model's declared Schur block layout, extracted once so a solver can rebuild
+/// its preconditioner for either pressure-solve choice (heavy-ball vs AMG)
+/// without re-reading the model.
+#[derive(Clone, Debug)]
+pub struct SchurLayout {
+    pub u_idx: Vec<usize>,
+    pub p: usize,
+    pub omega: f32,
+    pub sweeps_cap: u32,
+}
+
+impl BandedPrecond {
+    /// Build a Schur preconditioner from a [`SchurLayout`], picking the inner
+    /// pressure solve (`pressure_amg`: AMG V-cycle vs safeguarded heavy-ball).
+    pub fn schur(layout: &SchurLayout, pressure_amg: bool) -> Self {
+        BandedPrecond::Schur {
+            u_idx: layout.u_idx.clone(),
+            p: layout.p,
+            omega: layout.omega,
+            sweeps_cap: layout.sweeps_cap,
+            pressure_amg,
+        }
+    }
+}
+
+/// Read a model's declared Schur block layout, if any. `None` when the model
+/// declares no Schur preconditioner (e.g. the density-based compressible model)
+/// — the caller then uses block-Jacobi.
+pub fn schur_layout_from_model(model: &crate::solver::model::ModelSpec) -> Option<SchurLayout> {
     model.linear_solver.and_then(|ls| match ls.preconditioner {
         crate::solver::model::ModelPreconditionerSpec::Schur { omega, sweeps_cap, layout } => {
-            Some(BandedPrecond::Schur {
+            Some(SchurLayout {
                 u_idx: layout.u_indices().iter().map(|&u| u as usize).collect(),
                 p: layout.p as usize,
                 omega,
@@ -644,4 +755,14 @@ pub fn schur_from_model(model: &crate::solver::model::ModelSpec) -> Option<Bande
         }
         _ => None,
     })
+}
+
+/// Resolve the active preconditioner of a built [`BandedPrecond`] back to its
+/// [`CoupledPrecondKind`] (for the solver's `set_preconditioner` return value).
+pub fn kind_of(precond: &BandedPrecond) -> CoupledPrecondKind {
+    match precond {
+        BandedPrecond::BlockJacobi => CoupledPrecondKind::BlockJacobi,
+        BandedPrecond::Schur { pressure_amg: true, .. } => CoupledPrecondKind::SchurAmg,
+        BandedPrecond::Schur { .. } => CoupledPrecondKind::Schur,
+    }
 }

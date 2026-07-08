@@ -432,9 +432,9 @@ pub struct StructuredGpuSolver {
 
     /// The model's declared Schur block layout (`None` if the model declares no
     /// Schur preconditioner, e.g. the density-based compressible model). Lets
-    /// `set_preconditioner` toggle the host coupled solve between block-Jacobi
-    /// and the model-owned Schur without re-reading the model.
-    schur_precond: Option<crate::solver::banded_schur::BandedPrecond>,
+    /// `set_preconditioner` rebuild the host coupled solve's preconditioner for
+    /// any of {block-Jacobi, Schur, Schur+AMG} without re-reading the model.
+    schur_layout: Option<crate::solver::banded_schur::SchurLayout>,
 
     outer_iters: usize,
     dt: f64,
@@ -651,7 +651,7 @@ impl StructuredGpuSolver {
             grid_buf,
             low_mach_buf,
             solver,
-            schur_precond: crate::solver::banded_schur::schur_from_model(model),
+            schur_layout: crate::solver::banded_schur::schur_layout_from_model(model),
             outer_iters: outer_iters.max(1),
             dt,
             model_id: model.id,
@@ -941,25 +941,27 @@ impl StructuredGpuSolver {
         self.dt = dt;
     }
 
-    /// Select the coupled-solve preconditioner: `true` = the model-owned SIMPLE
-    /// Schur (if the model declares a `SchurBlockLayout`), `false` = block-Jacobi.
-    /// Requesting Schur on a model without a layout (e.g. compressible) silently
-    /// keeps block-Jacobi. Returns whether Schur is now active.
-    pub fn set_preconditioner(&mut self, use_schur: bool) -> bool {
-        self.solver.precond = match (use_schur, &self.schur_precond) {
-            (true, Some(schur)) => schur.clone(),
-            _ => crate::solver::banded_schur::BandedPrecond::BlockJacobi,
+    /// Select the coupled-solve preconditioner: block-Jacobi, the model-owned
+    /// SIMPLE Schur, or Schur with an AMG pressure solve. Requesting a Schur
+    /// variant on a model without a `SchurBlockLayout` (e.g. compressible)
+    /// silently keeps block-Jacobi. Returns the EFFECTIVE kind.
+    pub fn set_preconditioner(
+        &mut self,
+        kind: crate::solver::banded_schur::CoupledPrecondKind,
+    ) -> crate::solver::banded_schur::CoupledPrecondKind {
+        use crate::solver::banded_schur::{BandedPrecond, CoupledPrecondKind as K};
+        self.solver.precond = match (kind, &self.schur_layout) {
+            (K::Schur, Some(l)) => BandedPrecond::schur(l, false),
+            (K::SchurAmg, Some(l)) => BandedPrecond::schur(l, true),
+            _ => BandedPrecond::BlockJacobi,
         };
-        matches!(
-            self.solver.precond,
-            crate::solver::banded_schur::BandedPrecond::Schur { .. }
-        )
+        crate::solver::banded_schur::kind_of(&self.solver.precond)
     }
 
     /// Whether this model declares a Schur preconditioner (drives the GUI to
-    /// offer the block-Jacobi/Schur choice only where it is meaningful).
+    /// offer the Schur / Schur+AMG choices only where they are meaningful).
     pub fn supports_schur(&self) -> bool {
-        self.schur_precond.is_some()
+        self.schur_layout.is_some()
     }
 
     /// The implicit time-step size.

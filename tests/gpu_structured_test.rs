@@ -390,14 +390,15 @@ fn gpu_structured_momentum_lid_cavity_matches_cpu() {
 }
 
 /// PRECONDITIONER PARITY: the structured coupled solve now honours the model's
-/// declared Schur preconditioner (the same one the unstructured path uses),
-/// selectable alongside block-Jacobi. Since GMRES with either preconditioner
-/// drives the SAME linear system to the same tolerance, the converged lid-cavity
-/// field must be (near-)identical — the preconditioner changes iteration count,
-/// not the solution. Also checks the per-model availability: incompressible +
-/// thermal declare a Schur layout; the density-based compressible does not.
+/// declared Schur preconditioner (the same one the unstructured path uses), with
+/// either a heavy-ball OR an AMG pressure inner-solve — the FULL unstructured
+/// menu {block-Jacobi, Schur, Schur+AMG}. Since GMRES with any of them drives the
+/// SAME linear system to the same tolerance, the converged lid-cavity field must
+/// be (near-)identical across all three. Also checks per-model availability:
+/// incompressible + thermal declare a Schur layout; compressible does not.
 #[test]
 fn gpu_structured_schur_matches_block_jacobi() {
+    use cfd2::solver::banded_schur::CoupledPrecondKind as K;
     let (nx, ny) = (20usize, 20usize);
     let steps = 20;
     let model = incompressible_momentum_structured_model().expect("model");
@@ -413,10 +414,10 @@ fn gpu_structured_schur_matches_block_jacobi() {
             ],
         )
     };
-    let run = |use_schur: bool| -> (Vec<f64>, bool) {
+    let run = |kind: K| -> (Vec<f64>, K) {
         let mut s =
             StructuredGpuSolver::new(StructuredGrid::new(nx, ny, 1.0, 1.0), &model, 0.05, 3).unwrap();
-        let active = s.set_preconditioner(use_schur);
+        let active = s.set_preconditioner(kind);
         s.set_fluid(1.0, 0.005); // Re=200
         s.set_boundaries(|e, _x, _y| bc(e));
         for _ in 0..steps {
@@ -424,39 +425,49 @@ fn gpu_structured_schur_matches_block_jacobi() {
         }
         (s.state_field(0), active)
     };
-    let (bj, bj_active) = run(false);
-    let (schur, schur_active) = run(true);
-    assert!(!bj_active, "block-Jacobi must not report Schur active");
-    assert!(schur_active, "incompressible declares a Schur layout — must activate");
+    let (bj, bj_active) = run(K::BlockJacobi);
+    let (schur, schur_active) = run(K::Schur);
+    let (schur_amg, amg_active) = run(K::SchurAmg);
+    assert_eq!(bj_active, K::BlockJacobi, "block-Jacobi must report block-Jacobi");
+    assert_eq!(schur_active, K::Schur, "incompressible declares a Schur layout");
+    assert_eq!(amg_active, K::SchurAmg, "Schur+AMG must activate (cpu feature on)");
 
-    let mut max_d = 0.0f64;
     let mut umax = 0.0f64;
-    for (a, b) in bj.iter().zip(&schur) {
-        assert!(a.is_finite() && b.is_finite(), "a solve diverged");
-        max_d = max_d.max((a - b).abs());
-        umax = umax.max(a.abs());
+    let (mut d_schur, mut d_amg) = (0.0f64, 0.0f64);
+    for i in 0..bj.len() {
+        assert!(
+            bj[i].is_finite() && schur[i].is_finite() && schur_amg[i].is_finite(),
+            "a solve diverged"
+        );
+        d_schur = d_schur.max((bj[i] - schur[i]).abs());
+        d_amg = d_amg.max((bj[i] - schur_amg[i]).abs());
+        umax = umax.max(bj[i].abs());
     }
     println!(
-        "[gpu-structured] Schur vs BlockJacobi lid: umax={umax:.4} max|Δ|={max_d:e}"
+        "[gpu-structured] lid umax={umax:.4} Δ(Schur)={d_schur:e} Δ(Schur+AMG)={d_amg:e}"
     );
-    // Both preconditioners solve the SAME nonlinear problem; over 20 f32 steps the
-    // two Krylov paths agree to the same order as the CPU/GPU assembly-path spread
-    // (~1.7e-2 on this lid). The RIGOROUS correctness proof is the known-system
-    // recovery test below (both reach f32 epsilon); here we assert bounded,
-    // physical, same-solution-to-solver-tolerance behaviour.
-    assert!(umax > 0.1 && umax < 5.0, "unphysical Schur lid speed {umax}");
-    assert!(max_d < 3.5e-2, "Schur and block-Jacobi disagree beyond solver tolerance: {max_d}");
+    // All three solve the SAME nonlinear problem; over 20 f32 steps the different
+    // Krylov paths agree to the same order as the CPU/GPU assembly-path spread
+    // (~1.7e-2 on this lid). The rigorous correctness proof is the known-system
+    // recovery test (both reach f32 epsilon).
+    assert!(umax > 0.1 && umax < 5.0, "unphysical lid speed {umax}");
+    assert!(d_schur < 3.5e-2, "Schur disagrees beyond solver tolerance: {d_schur}");
+    assert!(d_amg < 3.5e-2, "Schur+AMG disagrees beyond solver tolerance: {d_amg}");
 
     // Thermal declares a Schur layout (omega=1.6); compressible does not.
     let thermal = allmach_thermal_structured_model().unwrap();
     let mut t = StructuredGpuSolver::new(StructuredGrid::new(8, 8, 1.0, 1.0), &thermal, 0.02, 2).unwrap();
     assert!(t.supports_schur(), "thermal must declare a Schur layout");
-    assert!(t.set_preconditioner(true), "thermal Schur must activate");
+    assert_eq!(t.set_preconditioner(K::SchurAmg), K::SchurAmg, "thermal Schur+AMG must activate");
 
     let comp = compressible_structured_model().unwrap();
     let mut c = StructuredGpuSolver::new(StructuredGrid::new(8, 8, 1.0, 1.0), &comp, 0.01, 2).unwrap();
     assert!(!c.supports_schur(), "compressible declares no Schur layout");
-    assert!(!c.set_preconditioner(true), "compressible must stay block-Jacobi");
+    assert_eq!(
+        c.set_preconditioner(K::SchurAmg),
+        K::BlockJacobi,
+        "compressible must fall back to block-Jacobi"
+    );
 }
 
 /// PRECONDITIONER CORRECTNESS (rigorous): the shared banded solve — with BOTH the
@@ -503,9 +514,17 @@ fn banded_schur_recovers_known_coupled_system() {
     let b64 = spmv(&a, nx, ny, s, &xstar);
     let b: Vec<f32> = b64.iter().map(|&v| v as f32).collect();
 
+    let schur = |amg: bool| BandedPrecond::Schur {
+        u_idx: vec![0, 1],
+        p: 2,
+        omega: 1.0,
+        sweeps_cap: 64,
+        pressure_amg: amg,
+    };
     for (name, prec) in [
         ("block-jacobi", BandedPrecond::BlockJacobi),
-        ("schur", BandedPrecond::Schur { u_idx: vec![0, 1], p: 2, omega: 1.0, sweeps_cap: 64 }),
+        ("schur-heavyball", schur(false)),
+        ("schur-amg", schur(true)),
     ] {
         let (x, res) = banded_gmres(&a, nx, ny, s, &b, &prec, 40, 200, 1e-10);
         let mut max_err = 0.0f64;

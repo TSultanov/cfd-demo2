@@ -248,22 +248,26 @@ struct SchurData {
     p_diag_inv: Vec<f64>,
     omega: f64,
     sweeps: usize,
-    /// AMG aggregation hierarchy + finest-CSR values over the `A_pp` pressure
-    /// Poisson (the inner solve when the caller requested `pressure_amg`; `None`
-    /// = heavy-ball). Built once per `banded_gmres` call from the current `A_pp`;
-    /// the (borrowing) `AmgSolver` is Galerkin-assembled per apply. `cpu` only.
-    #[cfg(feature = "cpu")]
-    amg: Option<AmgPressure>,
+    /// Whether the caller requested the AMG V-cycle pressure solve (else the
+    /// safeguarded heavy-ball). The AMG *hierarchy* is now cached across solves in
+    /// a [`StructuredAmgCache`]; only the current `A_pp` Galerkin values are
+    /// re-assembled per solve inside `banded_fgmres`.
+    pressure_amg: bool,
 }
 
-/// The AMG pieces needed to run V-cycles on `A_pp`: the aggregation hierarchy
-/// (pattern) and the finest-level CSR values (in the row-major stencil order
-/// [`build_pressure_amg`] emits), from which each apply Galerkin-assembles an
-/// `AmgSolver`.
-#[cfg(feature = "cpu")]
-struct AmgPressure {
-    hier: crate::solver::cpu::amg::AmgHierarchy,
-    csr_values: Vec<f32>,
+/// Cross-solve cache for the structured Schur AMG pressure hierarchy. The
+/// hierarchy (aggregation + Galerkin scatter maps) is SPARSITY-only — a fixed
+/// 5-point stencil on the fixed `nx×ny` grid — so it is built ONCE from a
+/// canonical Poisson seed (independent of any solve's values) and reused across
+/// every solve and step; only the Galerkin VALUES are re-assembled each solve
+/// from the current `A_pp`. Structured mirror of `CpuSolver::amg_hier`.
+/// Empty / no-op without the `cpu` feature.
+#[derive(Default)]
+pub struct StructuredAmgCache {
+    // `OnceLock` (not `cell::OnceCell`) so the enclosing solvers stay `Sync` — the
+    // GPU `BandedGpuLinAlg` is held across threads. Same `get_or_init` semantics.
+    #[cfg(feature = "cpu")]
+    hier: std::sync::OnceLock<crate::solver::cpu::amg::AmgHierarchy>,
 }
 
 /// The inner heavy-ball sweep count: `min(20 + √n/8, sweeps_cap)` (mirrors
@@ -344,14 +348,6 @@ fn build(a: &[f32], nx: usize, ny: usize, s: usize, prec: &BandedPrecond) -> Bui
                 let dp = a_pp[cell * 5 + BAND_DIAG];
                 p_diag_inv[cell] = if dp.abs() > 1e-30 { 1.0 / dp } else { 0.0 };
             }
-            #[cfg(feature = "cpu")]
-            let amg = if *pressure_amg {
-                Some(build_pressure_amg(&a_pp, nx, ny))
-            } else {
-                None
-            };
-            #[cfg(not(feature = "cpu"))]
-            let _ = pressure_amg;
             Built::Schur(SchurData {
                 u_idx: u_idx.clone(),
                 p: *pp,
@@ -361,21 +357,30 @@ fn build(a: &[f32], nx: usize, ny: usize, s: usize, prec: &BandedPrecond) -> Bui
                 p_diag_inv,
                 omega: heavy_ball_omega(*omega),
                 sweeps: default_pressure_sweeps(ncells, *sweeps_cap),
-                #[cfg(feature = "cpu")]
-                amg,
+                pressure_amg: *pressure_amg,
             })
         }
     }
 }
 
-/// Assemble an [`AmgHierarchy`] over the scalar `A_pp` pressure-Poisson operator.
-/// Converts the 5-band operator (`a_pp[cell*5 + band]`, bands `[S,W,diag,E,N]`)
-/// into a CSR (per row: self + in-grid neighbours) and hands it to the SAME
-/// aggregation AMG the unstructured Schur uses. Built fresh each solve (`A_pp`
-/// changes every outer iteration; the grids are modest, so the O(nnz) build is
-/// cheap relative to the FGMRES iterations).
+/// Build the AMG aggregation hierarchy over the structured pressure Poisson's
+/// FIXED 5-point sparsity, seeded with a CANONICAL Poisson value set (diagonal =
+/// in-grid-neighbour count, off-diagonals = −1) rather than any solve's actual
+/// `A_pp`.
+///
+/// Anti-hang rationale: seeding the hierarchy from a real `A_pp` deadlocks the
+/// solve when that matrix is the atypical FIRST outer iteration (`A_pp` ~all-zero
+/// before `d_p` is populated) — a zero diagonal makes strength-of-connection
+/// reject every edge, aggregation yields `nc==n` singletons, `AmgHierarchy::build`
+/// bails with ZERO coarsening levels, and the "coarsest = finest" level is
+/// dense-inverted (O(n³)) then V-cycled to no effect every apply, so FGMRES never
+/// contracts. The canonical seed is guaranteed strongly connected + non-singular,
+/// so it ALWAYS coarsens; on the uniform structured grid it is the exact discrete
+/// Laplacian, so the aggregation equals what the real values would produce. The
+/// hierarchy is value-INDEPENDENT (aggregation + Galerkin scatter maps only); the
+/// real `A_pp` values enter per solve via [`amg_csr_values`] + `AmgSolver::assemble`.
 #[cfg(feature = "cpu")]
-fn build_pressure_amg(a_pp: &[f64], nx: usize, ny: usize) -> AmgPressure {
+fn build_pressure_amg_hierarchy(nx: usize, ny: usize) -> crate::solver::cpu::amg::AmgHierarchy {
     let ncells = nx * ny;
     let mut row_offsets = Vec::with_capacity(ncells + 1);
     let mut col_indices: Vec<u32> = Vec::with_capacity(ncells * 5);
@@ -383,16 +388,37 @@ fn build_pressure_amg(a_pp: &[f64], nx: usize, ny: usize) -> AmgPressure {
     row_offsets.push(0u32);
     for j in 0..ny {
         for i in 0..nx {
-            let cell = j * nx + i;
-            for &(band, q) in neighbors(i, j, nx, ny).iter() {
+            let nb = neighbors(i, j, nx, ny);
+            let ndeg = nb.len - 1; // in-grid neighbours (the diagonal is push #0)
+            for &(band, q) in nb.iter() {
                 col_indices.push(q as u32);
-                values.push(a_pp[cell * 5 + band] as f32);
+                values.push(if band == BAND_DIAG { ndeg as f32 } else { -1.0 });
             }
             row_offsets.push(col_indices.len() as u32);
         }
     }
-    let hier = crate::solver::cpu::amg::AmgHierarchy::build(&row_offsets, &col_indices, &values);
-    AmgPressure { hier, csr_values: values }
+    crate::solver::cpu::amg::AmgHierarchy::build(&row_offsets, &col_indices, &values)
+}
+
+/// Finest-level CSR VALUES of the current `A_pp`, in the exact per-row order
+/// [`build_pressure_amg_hierarchy`] laid out the pattern (`neighbors()`: diagonal
+/// first, then in-grid S/W/E/N), so they line up index-for-index with the cached
+/// hierarchy. Recomputed every solve; `AmgSolver::assemble` Galerkin-coarsens
+/// them through the cached scatter maps, so the V-cycle operator tracks the
+/// current `A_pp` exactly (only the aggregation PATTERN is frozen).
+#[cfg(feature = "cpu")]
+fn amg_csr_values(a_pp: &[f64], nx: usize, ny: usize) -> Vec<f32> {
+    let ncells = nx * ny;
+    let mut values: Vec<f32> = Vec::with_capacity(ncells * 5);
+    for j in 0..ny {
+        for i in 0..nx {
+            let cell = j * nx + i;
+            for &(band, _q) in neighbors(i, j, nx, ny).iter() {
+                values.push(a_pp[cell * 5 + band] as f32);
+            }
+        }
+    }
+    values
 }
 
 /// `A_pp · x` (scalar 5-band pressure operator).
@@ -598,11 +624,13 @@ pub fn banded_gmres(
     max_outer: usize,
     tol: f64,
 ) -> (Vec<f32>, f64) {
-    banded_gmres_t(a, nx, ny, s, b, precond, restart, max_outer, tol, 1)
+    banded_gmres_t(a, nx, ny, s, b, precond, restart, max_outer, tol, 1, None)
 }
 
 /// Threaded variant: `threads` parallelizes the per-cell SpMV / preconditioner
-/// apply and the Arnoldi dots over disjoint cell chunks.
+/// apply and the Arnoldi dots over disjoint cell chunks. `amg_cache`, when
+/// supplied, holds the cross-solve Schur AMG hierarchy (built once, reused every
+/// solve); pass `None` for the non-AMG path or a self-contained one-off solve.
 #[allow(clippy::too_many_arguments)]
 pub fn banded_gmres_t(
     a: &[f32],
@@ -615,11 +643,15 @@ pub fn banded_gmres_t(
     max_outer: usize,
     tol: f64,
     threads: usize,
+    amg_cache: Option<&StructuredAmgCache>,
 ) -> (Vec<f32>, f64) {
     let built = build(a, nx, ny, s, precond);
     if matches!(built, Built::Schur(_)) {
-        return banded_fgmres(a, nx, ny, s, b, &built, restart, max_outer, tol, threads);
+        return banded_fgmres(
+            a, nx, ny, s, b, &built, restart, max_outer, tol, threads, amg_cache,
+        );
     }
+    let _ = amg_cache;
     let n = nx * ny * s;
     let b64: Vec<f64> = b.iter().map(|&v| v as f64).collect();
     let bnorm = pnorm(threads, &b64).max(1e-30);
@@ -728,23 +760,31 @@ fn banded_fgmres(
     max_outer: usize,
     tol: f64,
     threads: usize,
+    amg_cache: Option<&StructuredAmgCache>,
 ) -> (Vec<f32>, f64) {
     let n = nx * ny * s;
     let b64: Vec<f64> = b.iter().map(|&v| v as f64).collect();
     let bnorm = pnorm(threads, &b64).max(1e-30);
     let mut x = vec![0.0f64; n];
 
-    // Assemble the AMG pressure solver ONCE for this outer solve (A_pp is fixed
-    // within it), then reuse its V-cycle across every preconditioner apply — the
-    // per-apply Galerkin re-assembly was catastrophic at scale. `psolve` is the
-    // pressure inner-solve closure the Schur apply consumes (heavy-ball when None).
+    // Reuse the CACHED AMG hierarchy (aggregation is sparsity-only, built once from
+    // a canonical Poisson seed — see `build_pressure_amg_hierarchy`) and re-Galerkin
+    // only the CURRENT `A_pp` values this solve. A per-call fallback hierarchy covers
+    // no-cache callers (`banded_gmres`, one-off tests). The assembled `AmgSolver`
+    // V-cycle is then reused across every preconditioner apply in this solve.
     let ncells = nx * ny;
     #[cfg(feature = "cpu")]
+    let mut fallback_hier: Option<crate::solver::cpu::amg::AmgHierarchy> = None;
+    #[cfg(feature = "cpu")]
     let amg_solver = match built {
-        Built::Schur(sd) => sd
-            .amg
-            .as_ref()
-            .map(|ap| crate::solver::cpu::amg::AmgSolver::assemble(&ap.hier, &ap.csr_values, threads, false)),
+        Built::Schur(sd) if sd.pressure_amg => {
+            let hier: &crate::solver::cpu::amg::AmgHierarchy = match amg_cache {
+                Some(cache) => cache.hier.get_or_init(|| build_pressure_amg_hierarchy(nx, ny)),
+                None => fallback_hier.insert(build_pressure_amg_hierarchy(nx, ny)),
+            };
+            let csr = amg_csr_values(&sd.a_pp, nx, ny);
+            Some(crate::solver::cpu::amg::AmgSolver::assemble(hier, &csr, threads, false))
+        }
         _ => None,
     };
     #[cfg(feature = "cpu")]
@@ -760,7 +800,7 @@ fn banded_fgmres(
         psolve_owned.as_ref().map(|f| f as &dyn Fn(&[f64]) -> Vec<f64>);
     #[cfg(not(feature = "cpu"))]
     let psolve: Option<&dyn Fn(&[f64]) -> Vec<f64>> = {
-        let _ = ncells;
+        let _ = (ncells, amg_cache);
         None
     };
 

@@ -1342,6 +1342,13 @@ fn gpu_structured_thermal_channel_ibm_cylinder_runs() {
         (btype, v)
     });
 
+    // Seed a uniform-freestream Ux IC (matching how the driver/GUI seeds the
+    // all-Mach models). From a REST start this thermal channel gets trapped in the
+    // documented slow-inlet low-Mach pseudo-acoustic mode (the corrected inlet
+    // boundary no longer masks it), converging to a spuriously low through-flow;
+    // the uniform IC is the production-representative start that develops properly.
+    s.set_state_component(0, move |_, _| u_in);
+
     for _ in 0..40 {
         s.step();
     }
@@ -1546,6 +1553,11 @@ fn cpu_structured_transpiled_thermal_matches_interpreter() {
             }
             (bt, v)
         });
+        // Uniform-freestream Ux IC (production-representative): a REST start traps
+        // this all-Mach thermal channel in the slow-inlet pseudo-acoustic mode
+        // (the corrected inlet boundary no longer masks it). Both engines get the
+        // same IC, so this remains a faithful transpiled-vs-interpreter parity check.
+        s.set_state(0, |_, _| 0.05);
         for _ in 0..8 {
             s.step();
         }

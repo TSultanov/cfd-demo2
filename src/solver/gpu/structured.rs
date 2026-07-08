@@ -1021,6 +1021,10 @@ struct BandedGpuLinAlg {
     /// block-Jacobi (default) or the model-owned SIMPLE Schur. The on-device
     /// GMRES/CG paths always use the block-Jacobi GPU kernels.
     precond: crate::solver::banded_schur::BandedPrecond,
+    /// Cross-step cache for the Schur AMG pressure hierarchy (built once from the
+    /// grid sparsity; only the Galerkin values re-assemble each host solve). Shared
+    /// borrow works via `OnceCell` interior mutability under `host_solve(&self)`.
+    amg_cache: crate::solver::banded_schur::StructuredAmgCache,
     dims_buf: wgpu::Buffer,
     scalar_buf: wgpu::Buffer,
 
@@ -1113,6 +1117,7 @@ impl BandedGpuLinAlg {
             ndof,
             restart,
             precond: crate::solver::banded_schur::BandedPrecond::BlockJacobi,
+            amg_cache: crate::solver::banded_schur::StructuredAmgCache::default(),
             dims_buf,
             scalar_buf,
             p_spmv: make(LA_SPMV, "spmv"),
@@ -1285,6 +1290,7 @@ impl BandedGpuLinAlg {
             200,
             crate::solver::banded_schur::default_step_tol(),
             threads,
+            Some(&self.amg_cache),
         );
         ctx.queue.write_buffer(x, 0, bytemuck::cast_slice(&xh));
     }

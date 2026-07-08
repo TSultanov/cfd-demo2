@@ -418,6 +418,9 @@ pub struct StructuredModelSolver {
     /// Active coupled-solve preconditioner (shared banded routine): block-Jacobi,
     /// the model-owned Schur, or Schur + AMG pressure solve.
     precond: crate::solver::banded_schur::BandedPrecond,
+    /// Cross-step cache for the Schur AMG pressure hierarchy (built once from the
+    /// grid sparsity, reused every solve; only the Galerkin values re-assemble).
+    amg_cache: crate::solver::banded_schur::StructuredAmgCache,
     /// The model's declared Schur layout (`None` if it declares none), so
     /// `set_preconditioner` can rebuild for any kind without re-reading the model.
     schur_layout: Option<crate::solver::banded_schur::SchurLayout>,
@@ -553,6 +556,7 @@ impl StructuredModelSolver {
             threads: 1,
             engine: crate::solver::cpu::CpuEngine::Interpreter,
             precond: crate::solver::banded_schur::BandedPrecond::BlockJacobi,
+            amg_cache: crate::solver::banded_schur::StructuredAmgCache::default(),
             schur_layout: crate::solver::banded_schur::schur_layout_from_model(model),
             model_id: model.id,
             time: 0.0,
@@ -718,6 +722,7 @@ impl StructuredModelSolver {
                 200,
                 crate::solver::banded_schur::default_step_tol(),
                 self.threads,
+                Some(&self.amg_cache),
             );
             self.buffers.copy_into_f32("x", &x);
             for id in &upd {

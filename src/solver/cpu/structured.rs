@@ -416,6 +416,9 @@ pub struct StructuredModelSolver {
     /// The model's declared Schur layout (`None` if it declares none), so
     /// `set_preconditioner` can rebuild for any kind without re-reading the model.
     schur_layout: Option<crate::solver::banded_schur::SchurLayout>,
+    /// Model id + accumulated sim time (GUI parity with `StructuredGpuSolver`).
+    model_id: &'static str,
+    time: f64,
 }
 
 impl StructuredModelSolver {
@@ -545,6 +548,8 @@ impl StructuredModelSolver {
             threads: 1,
             precond: crate::solver::banded_schur::BandedPrecond::BlockJacobi,
             schur_layout: crate::solver::banded_schur::schur_layout_from_model(model),
+            model_id: model.id,
+            time: 0.0,
         })
     }
 
@@ -703,6 +708,60 @@ impl StructuredModelSolver {
                 self.run(id, n, &ctx);
             }
         }
+        self.time += self.dt;
+    }
+
+    /// Model id (GUI model-echo / caps).
+    pub fn model_id(&self) -> &'static str {
+        self.model_id
+    }
+
+    /// Accumulated simulation time.
+    pub fn time(&self) -> f64 {
+        self.time
+    }
+
+    /// The implicit time-step size.
+    pub fn dt(&self) -> f64 {
+        self.dt
+    }
+
+    /// Set the implicit time-step size (GUI timestep slider).
+    pub fn set_dt(&mut self, dt: f64) {
+        self.dt = dt;
+    }
+
+    /// The dense grid.
+    pub fn grid(&self) -> StructuredGrid {
+        self.grid
+    }
+
+    /// The state layout (drives the UI ports).
+    pub fn state_layout(&self) -> &crate::solver::model::backend::state_layout::StateLayout {
+        &self.layout
+    }
+
+    /// The packed `f32` state (`n * state_stride`, cell-major) — the same layout
+    /// the GPU solver's `state` buffer holds, for uploading to a renderer viz
+    /// buffer (the GUI CPU backend feeds the GPU-direct renderer this way).
+    pub fn packed_state_f32(&self) -> Vec<f32> {
+        self.buffers.f32_vec("state")
+    }
+
+    /// Paired velocity `(Ux, Uy)` per cell — the GUI readback shape.
+    pub fn get_u(&self, u_offset: usize) -> Vec<(f64, f64)> {
+        let st = self.buffers.f32_vec("state");
+        (0..self.grid.num_cells())
+            .map(|p| {
+                let b = p * self.state_stride + u_offset;
+                (st[b] as f64, st[b + 1] as f64)
+            })
+            .collect()
+    }
+
+    /// A single scalar field per cell — the GUI readback shape.
+    pub fn get_scalar(&self, offset: usize) -> Vec<f64> {
+        self.state_field(offset)
     }
 
     fn run(&self, id: &str, n: usize, ctx: &Ctx) {

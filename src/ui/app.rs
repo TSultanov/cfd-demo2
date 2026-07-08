@@ -8,6 +8,7 @@ use crate::solver::model::{
     all_models, compressible_model_with_eos, ModelPreconditionerSpec, ModelSpec,
 };
 use crate::solver::scheme::Scheme;
+use crate::solver::cpu::structured::StructuredModelSolver;
 use crate::solver::gpu::structured::{
     BcComp as StructBc, Edge as StructEdge, StructuredGpuSolver, StructuredGrid,
 };
@@ -231,6 +232,10 @@ struct SolverInitRequest {
     /// / Schur+AMG). Applied by `build_structured_init` via
     /// `StructuredGpuSolver::set_preconditioner`.
     structured_precond: crate::solver::banded_schur::CoupledPrecondKind,
+    /// Compute backend: structured honours GPU and CPU Interpreter (the CPU
+    /// transpiled paths have no structured kernels — the interpreter runs the
+    /// same codegen IR the GPU lowers).
+    backend: BackendChoice,
     min_cell_size: f64,
     max_cell_size: f64,
     growth_rate: f64,
@@ -336,6 +341,55 @@ enum SolverMode {
     /// [`StructuredGpuSolver`] (no `SolverDriver`/`Mesh`). The worker drives it
     /// through the mode-level abstraction methods below rather than `driver()`.
     Structured(StructuredGpuSolver),
+    /// Structured on the CPU interpreter ([`StructuredModelSolver`]) — the compute
+    /// runs on the host, and each step uploads the packed state to a GPU buffer so
+    /// the same on-device renderer viz is reused. Same abstraction surface as
+    /// [`Self::Structured`].
+    StructuredCpu(StructuredCpuBridge),
+}
+
+/// Bridges the CPU structured solver ([`StructuredModelSolver`]) to the GPU-direct
+/// renderer: it holds a GPU `state` buffer seeded from the CPU state so the viz
+/// init copy works, and `copy_state_to_buffer` writes the current CPU packed
+/// state straight into the target viz buffer (`queue.write_buffer`). The compute
+/// is 100% host-side; only the viz feed touches the GPU (as it must — the GUI is
+/// a wgpu app).
+struct StructuredCpuBridge {
+    solver: StructuredModelSolver,
+    /// GPU copy of the packed state (COPY_SRC), for the one-time viz-buffer init.
+    state_buf: wgpu::Buffer,
+    size_bytes: u64,
+    queue: wgpu::Queue,
+}
+
+impl StructuredCpuBridge {
+    fn new(solver: StructuredModelSolver, device: &wgpu::Device, queue: wgpu::Queue) -> Self {
+        use wgpu::util::DeviceExt;
+        let packed = solver.packed_state_f32();
+        let size_bytes = (packed.len() * 4) as u64;
+        let state_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("structured_cpu_state"),
+            contents: bytemuck::cast_slice(&packed),
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
+        });
+        Self { solver, state_buf, size_bytes, queue }
+    }
+
+    fn step(&mut self) {
+        self.solver.step();
+    }
+
+    fn state_buffer(&self) -> &wgpu::Buffer {
+        &self.state_buf
+    }
+
+    fn copy_state_to_buffer(&self, dst: &wgpu::Buffer) {
+        // Write the CURRENT host state straight into the viz buffer.
+        let packed = self.solver.packed_state_f32();
+        self.queue.write_buffer(dst, 0, bytemuck::cast_slice(&packed));
+    }
 }
 
 impl SolverMode {
@@ -346,7 +400,9 @@ impl SolverMode {
         match self {
             SolverMode::Static(d) => d,
             SolverMode::MovingMesh(m) => m.driver(),
-            SolverMode::Structured(_) => panic!("driver() called on Structured SolverMode"),
+            SolverMode::Structured(_) | SolverMode::StructuredCpu(_) => {
+                panic!("driver() called on a Structured SolverMode")
+            }
         }
     }
 
@@ -355,7 +411,9 @@ impl SolverMode {
         match self {
             SolverMode::Static(d) => d,
             SolverMode::MovingMesh(m) => m.driver_mut(),
-            SolverMode::Structured(_) => panic!("driver_mut() called on Structured SolverMode"),
+            SolverMode::Structured(_) | SolverMode::StructuredCpu(_) => {
+                panic!("driver_mut() called on a Structured SolverMode")
+            }
         }
     }
 
@@ -365,7 +423,7 @@ impl SolverMode {
         match self {
             SolverMode::Static(d) => Some(d.solver()),
             SolverMode::MovingMesh(m) => Some(m.driver().solver()),
-            SolverMode::Structured(_) => None,
+            SolverMode::Structured(_) | SolverMode::StructuredCpu(_) => None,
         }
     }
 
@@ -373,7 +431,7 @@ impl SolverMode {
         match self {
             SolverMode::Static(d) => Some(d.solver_mut()),
             SolverMode::MovingMesh(m) => Some(m.driver_mut().solver_mut()),
-            SolverMode::Structured(_) => None,
+            SolverMode::Structured(_) | SolverMode::StructuredCpu(_) => None,
         }
     }
 
@@ -381,6 +439,7 @@ impl SolverMode {
     fn state_buffer(&self) -> &wgpu::Buffer {
         match self {
             SolverMode::Structured(s) => s.state_buffer(),
+            SolverMode::StructuredCpu(s) => s.state_buffer(),
             _ => self.driver().solver().state_buffer(),
         }
     }
@@ -389,6 +448,7 @@ impl SolverMode {
     fn copy_state_to_buffer(&self, dst: &wgpu::Buffer) {
         match self {
             SolverMode::Structured(s) => s.copy_state_to_buffer(dst),
+            SolverMode::StructuredCpu(s) => s.copy_state_to_buffer(dst),
             _ => self.driver().solver().copy_state_to_buffer(dst),
         }
     }
@@ -397,6 +457,7 @@ impl SolverMode {
     fn ui_ports(&self) -> UiPortSet {
         match self {
             SolverMode::Structured(s) => UiPortSet::from_layout(s.state_layout()),
+            SolverMode::StructuredCpu(s) => UiPortSet::from_layout(s.solver.state_layout()),
             _ => self.driver().solver().ui_ports(),
         }
     }
@@ -404,6 +465,7 @@ impl SolverMode {
     fn model_id_str(&self) -> &'static str {
         match self {
             SolverMode::Structured(s) => s.model_id(),
+            SolverMode::StructuredCpu(s) => s.solver.model_id(),
             _ => self.driver().solver().model().id,
         }
     }
@@ -411,6 +473,7 @@ impl SolverMode {
     fn sim_time(&self) -> f32 {
         match self {
             SolverMode::Structured(s) => s.time() as f32,
+            SolverMode::StructuredCpu(s) => s.solver.time() as f32,
             _ => self.driver().solver().time(),
         }
     }
@@ -418,6 +481,7 @@ impl SolverMode {
     fn sim_dt(&self) -> f32 {
         match self {
             SolverMode::Structured(s) => s.dt() as f32,
+            SolverMode::StructuredCpu(s) => s.solver.dt() as f32,
             _ => self.driver().solver().dt(),
         }
     }
@@ -429,6 +493,10 @@ impl SolverMode {
             SolverMode::Structured(s) => {
                 s.set_dt(params.requested_dt as f64);
                 s.set_fluid(params.density as f64, params.viscosity as f64);
+            }
+            SolverMode::StructuredCpu(s) => {
+                s.solver.set_dt(params.requested_dt as f64);
+                s.solver.set_fluid(params.density as f64, params.viscosity as f64);
             }
             _ => self.driver_mut().apply_params(params),
         }
@@ -1361,6 +1429,7 @@ impl CFDApp {
             mesh_type: self.mesh_type,
             mesh_mode: self.mesh_mode,
             structured_precond: self.structured_precond,
+            backend: self.backend,
             min_cell_size: self.min_cell_size,
             max_cell_size: self.max_cell_size,
             growth_rate: self.growth_rate,
@@ -2508,40 +2577,57 @@ impl CFDApp {
         let dt = request.params.requested_dt.max(1.0e-6) as f64;
         let outer = request.params.outer_iters.max(1) as usize;
 
+        let u_in = request.params.inlet_velocity as f64;
+        let (density, viscosity) = (request.params.density as f64, request.params.viscosity as f64);
+        let (scheme, time_scheme) = (request.params.advection_scheme, request.params.time_scheme);
+        let precond = request.structured_precond;
         let solver_start = std::time::Instant::now();
-        let ctx = pollster::block_on(crate::solver::gpu::context::GpuContext::new(
-            Some(device),
-            Some(queue),
-        ))?;
-        // Honour the selected advection + time-integration schemes (structured
-        // kernels read them at runtime — full parity with the unstructured path).
-        let mut solver = StructuredGpuSolver::with_config(
-            ctx,
-            grid,
-            &model,
-            dt,
-            outer,
-            request.params.advection_scheme,
-            request.params.time_scheme,
-        )?;
-        solver.set_fluid(request.params.density as f64, request.params.viscosity as f64);
-        // Coupled-solve preconditioner: the model-owned SIMPLE Schur (if the model
-        // declares a layout) or block-Jacobi. No-op where unsupported.
-        solver.set_preconditioner(request.structured_precond);
-        seed_structured_state(&mut solver, request.model_id);
-        // Uniform-freestream momentum IC (compressible: rho_u = rho*u_in) so the
-        // channel starts from a moving state — the stable configuration; a rest
-        // IC on the fine grid can stall/diverge the density-based model.
-        seed_structured_freestream(&mut solver, request.model_id, request.params.inlet_velocity as f64);
-        // Immersed obstacle from the selected geometry (Brinkman mask; all three
-        // structured models now declare an `ibm_penalty_U` field).
-        seed_structured_ibm(&mut solver, request.selected_geometry, lx, ly);
-        setup_structured_bcs(
-            &mut solver,
-            request.model_id,
-            request.params.inlet_velocity as f64,
-            s,
-        );
+
+        // The CPU interpreter runs the SAME Structured2D codegen IR the GPU lowers
+        // (the transpiled CPU backends have no structured kernels), bridged to the
+        // GPU-direct renderer by uploading its packed state to a viz buffer. The
+        // seeding + BCs are backend-generic (StructuredSeed).
+        let (mode, cached_u, cached_p) = if request.backend == BackendChoice::CpuInterpreter {
+            let mut cpu =
+                StructuredModelSolver::with_config(grid, &model, dt, outer, scheme, time_scheme)?;
+            cpu.set_fluid(density, viscosity);
+            cpu.set_preconditioner(precond);
+            seed_structured_state(&mut cpu, request.model_id);
+            seed_structured_freestream(&mut cpu, request.model_id, u_in);
+            seed_structured_ibm(&mut cpu, request.selected_geometry, lx, ly);
+            setup_structured_bcs(&mut cpu, request.model_id, u_in, s);
+            let ports = UiPortSet::from_layout(cpu.state_layout());
+            let cached_u = ports.u_offset.map(|o| cpu.get_u(o as usize)).unwrap_or_default();
+            let cached_p = ports.p_offset.map(|o| cpu.get_scalar(o as usize)).unwrap_or_default();
+            let bridge = StructuredCpuBridge::new(cpu, &device, queue);
+            (SolverMode::StructuredCpu(bridge), cached_u, cached_p)
+        } else {
+            let ctx = pollster::block_on(crate::solver::gpu::context::GpuContext::new(
+                Some(device),
+                Some(queue),
+            ))?;
+            // Honour the selected advection + time-integration schemes (structured
+            // kernels read them at runtime — full parity with the unstructured path).
+            let mut solver =
+                StructuredGpuSolver::with_config(ctx, grid, &model, dt, outer, scheme, time_scheme)?;
+            solver.set_fluid(density, viscosity);
+            // Coupled-solve preconditioner: the model-owned SIMPLE Schur (if the
+            // model declares a layout) or block-Jacobi. No-op where unsupported.
+            solver.set_preconditioner(precond);
+            seed_structured_state(&mut solver, request.model_id);
+            // Uniform-freestream momentum IC (compressible: rho_u = rho*u_in) so the
+            // channel starts from a moving state — the stable configuration; a rest
+            // IC on the fine grid can stall/diverge the density-based model.
+            seed_structured_freestream(&mut solver, request.model_id, u_in);
+            // Immersed obstacle from the selected geometry (Brinkman mask; all three
+            // structured models now declare an `ibm_penalty_U` field).
+            seed_structured_ibm(&mut solver, request.selected_geometry, lx, ly);
+            setup_structured_bcs(&mut solver, request.model_id, u_in, s);
+            let ports = UiPortSet::from_layout(solver.state_layout());
+            let cached_u = ports.u_offset.map(|o| solver.get_u(o as usize)).unwrap_or_default();
+            let cached_p = ports.p_offset.map(|o| solver.get_scalar(o as usize)).unwrap_or_default();
+            (SolverMode::Structured(solver), cached_u, cached_p)
+        };
         CFDApp::push_trace_init_event(
             trace_init_events,
             "solver.new",
@@ -2549,24 +2635,7 @@ impl CFDApp {
             Some(format!("model_id={} cells={}", request.model_id, nx * ny)),
         );
 
-        // Initial fields for the first plot (before the first readback).
-        let ports = UiPortSet::from_layout(solver.state_layout());
-        let cached_u = ports
-            .u_offset
-            .map(|o| solver.get_u(o as usize))
-            .unwrap_or_default();
-        let cached_p = ports
-            .p_offset
-            .map(|o| solver.get_scalar(o as usize))
-            .unwrap_or_default();
-
-        Ok((
-            SolverMode::Structured(solver),
-            mesh,
-            cached_u,
-            cached_p,
-            model_caps,
-        ))
+        Ok((mode, mesh, cached_u, cached_p, model_caps))
     }
 
     /// Moving-mesh (ALE) init path: build a CVT mesh WITH its authoritative seeds
@@ -4580,11 +4649,18 @@ impl eframe::App for CFDApp {
                         egui::ComboBox::from_label("Compute Backend")
                             .selected_text(self.backend.label())
                             .show_ui(ui, |ui| {
-                                // The structured GPU solver needs a GPU device (its
-                                // state buffer feeds the renderer) — only offer GPU.
+                                // Structured runs on the GPU or the CPU INTERPRETER
+                                // (which executes the same Structured2D codegen IR the
+                                // GPU lowers). The transpiled CPU backends have no
+                                // structured kernels (build.rs skips them), so they
+                                // stay disabled in structured mode.
                                 let structured = self.mesh_mode == MeshMode::Structured2D;
                                 for choice in BackendChoice::ALL {
-                                    let ok = !structured || choice == BackendChoice::Gpu;
+                                    let ok = !structured
+                                        || matches!(
+                                            choice,
+                                            BackendChoice::Gpu | BackendChoice::CpuInterpreter
+                                        );
                                     ui.add_enabled_ui(ok, |ui| {
                                         ui.selectable_value(
                                             &mut self.backend,
@@ -4979,21 +5055,66 @@ fn solver_worker_stop_trace(
 /// `StepOutcome`/`Readback`/`FieldStats` shape the worker consumes from the
 /// unstructured `SolverDriver::step` — the structured banded solve has no
 /// adaptive-dt / divergence machinery, so we build these here.
-fn structured_step(s: &mut StructuredGpuSolver, readback: bool) -> StepOutcome {
-    let t0 = std::time::Instant::now();
-    s.step();
-    let step_time_ms = t0.elapsed().as_secs_f32() * 1000.0;
-    let dt = s.dt() as f32;
+/// The step + readback surface shared by the GPU and CPU structured solvers, so
+/// `structured_step` drives either. `st_`-prefixed to avoid colliding with the
+/// identically-named inherent methods the impls forward to.
+trait StructuredSteppable {
+    fn st_step(&mut self);
+    fn st_dt(&self) -> f64;
+    fn st_layout(&self) -> &crate::solver::model::backend::state_layout::StateLayout;
+    fn st_get_u(&self, off: usize) -> Vec<(f64, f64)>;
+    fn st_get_scalar(&self, off: usize) -> Vec<f64>;
+}
+impl StructuredSteppable for StructuredGpuSolver {
+    fn st_step(&mut self) {
+        self.step()
+    }
+    fn st_dt(&self) -> f64 {
+        self.dt()
+    }
+    fn st_layout(&self) -> &crate::solver::model::backend::state_layout::StateLayout {
+        self.state_layout()
+    }
+    fn st_get_u(&self, off: usize) -> Vec<(f64, f64)> {
+        self.get_u(off)
+    }
+    fn st_get_scalar(&self, off: usize) -> Vec<f64> {
+        self.get_scalar(off)
+    }
+}
+impl StructuredSteppable for StructuredModelSolver {
+    fn st_step(&mut self) {
+        self.step()
+    }
+    fn st_dt(&self) -> f64 {
+        self.dt()
+    }
+    fn st_layout(&self) -> &crate::solver::model::backend::state_layout::StateLayout {
+        self.state_layout()
+    }
+    fn st_get_u(&self, off: usize) -> Vec<(f64, f64)> {
+        self.get_u(off)
+    }
+    fn st_get_scalar(&self, off: usize) -> Vec<f64> {
+        self.get_scalar(off)
+    }
+}
 
-    let ports = UiPortSet::from_layout(s.state_layout());
+fn structured_step(s: &mut impl StructuredSteppable, readback: bool) -> StepOutcome {
+    let t0 = std::time::Instant::now();
+    s.st_step();
+    let step_time_ms = t0.elapsed().as_secs_f32() * 1000.0;
+    let dt = s.st_dt() as f32;
+
+    let ports = UiPortSet::from_layout(s.st_layout());
     let readback = if readback {
         let u = ports
             .u_offset
-            .map(|off| s.get_u(off as usize))
+            .map(|off| s.st_get_u(off as usize))
             .unwrap_or_default();
         let p = ports
             .p_offset
-            .map(|off| s.get_scalar(off as usize))
+            .map(|off| s.st_get_scalar(off as usize))
             .unwrap_or_default();
         let mut max_vel = 0.0f64;
         let mut nonfinite_u = 0usize;
@@ -5068,29 +5189,68 @@ fn structured_model_by_id(id: &str) -> Result<ModelSpec, String> {
 /// Seed the non-solved state fields a structured model needs (all-Mach `psi`/`rho`
 /// reference fields; compressible conserved rest state). Mirrors the driver's
 /// seeding + the structured tests.
-fn seed_structured_state(s: &mut StructuredGpuSolver, model_id: &str) {
+/// The state-seeding + BC surface shared by the GPU (`StructuredGpuSolver`) and
+/// CPU (`StructuredModelSolver`) structured solvers, so the GUI's seed/BC helpers
+/// drive either backend. The `sc_`-prefixed names avoid colliding with the
+/// identically-named inherent methods the impls forward to.
+trait StructuredSeed {
+    fn sc_field_offset(&self, name: &str) -> Option<usize>;
+    fn sc_set_named<F: Fn(f64, f64) -> f64>(&mut self, name: &str, f: F);
+    fn sc_set_component<F: Fn(f64, f64) -> f64>(&mut self, offset: usize, f: F);
+    fn sc_set_boundaries<F: Fn(StructEdge, f64, f64) -> (u32, Vec<StructBc>)>(&mut self, f: F);
+}
+impl StructuredSeed for StructuredGpuSolver {
+    fn sc_field_offset(&self, name: &str) -> Option<usize> {
+        self.field_offset(name)
+    }
+    fn sc_set_named<F: Fn(f64, f64) -> f64>(&mut self, name: &str, f: F) {
+        self.set_named_field(name, f)
+    }
+    fn sc_set_component<F: Fn(f64, f64) -> f64>(&mut self, offset: usize, f: F) {
+        self.set_state_component(offset, f)
+    }
+    fn sc_set_boundaries<F: Fn(StructEdge, f64, f64) -> (u32, Vec<StructBc>)>(&mut self, f: F) {
+        self.set_boundaries(f)
+    }
+}
+impl StructuredSeed for StructuredModelSolver {
+    fn sc_field_offset(&self, name: &str) -> Option<usize> {
+        self.field_offset(name)
+    }
+    fn sc_set_named<F: Fn(f64, f64) -> f64>(&mut self, name: &str, f: F) {
+        self.set_named_field(name, f)
+    }
+    fn sc_set_component<F: Fn(f64, f64) -> f64>(&mut self, offset: usize, f: F) {
+        self.set_state(offset, f)
+    }
+    fn sc_set_boundaries<F: Fn(StructEdge, f64, f64) -> (u32, Vec<StructBc>)>(&mut self, f: F) {
+        self.set_boundaries(f)
+    }
+}
+
+fn seed_structured_state(s: &mut impl StructuredSeed, model_id: &str) {
     match model_id {
         "allmach_thermal_structured" => {
             let psi = 0.5_f64;
-            s.set_named_field("psi", |_, _| psi);
-            s.set_named_field("psi_precond", move |_, _| psi.max(1.0));
-            s.set_named_field("rho", |_, _| 1.0);
-            s.set_named_field("rho_t_ref", |_, _| 1.0);
-            s.set_named_field("T", |_, _| 1.0);
-            if s.field_offset("t_ref").is_some() {
-                s.set_named_field("t_ref", |_, _| 1.0);
+            s.sc_set_named("psi", |_, _| psi);
+            s.sc_set_named("psi_precond", move |_, _| psi.max(1.0));
+            s.sc_set_named("rho", |_, _| 1.0);
+            s.sc_set_named("rho_t_ref", |_, _| 1.0);
+            s.sc_set_named("T", |_, _| 1.0);
+            if s.sc_field_offset("t_ref").is_some() {
+                s.sc_set_named("t_ref", |_, _| 1.0);
             }
-            if s.field_offset("rho_floor").is_some() {
-                s.set_named_field("rho_floor", move |_, _| psi * 1.0e-5);
+            if s.sc_field_offset("rho_floor").is_some() {
+                s.sc_set_named("rho_floor", move |_, _| psi * 1.0e-5);
             }
         }
         "compressible_structured" => {
-            s.set_named_field("rho", |_, _| 1.0);
-            s.set_named_field("rho_e", |_, _| 2.5);
-            s.set_named_field("p", |_, _| 1.0);
-            s.set_named_field("T", |_, _| 1.0);
-            if s.field_offset("mu").is_some() {
-                s.set_named_field("mu", |_, _| 0.0);
+            s.sc_set_named("rho", |_, _| 1.0);
+            s.sc_set_named("rho_e", |_, _| 2.5);
+            s.sc_set_named("p", |_, _| 1.0);
+            s.sc_set_named("T", |_, _| 1.0);
+            if s.sc_field_offset("mu").is_some() {
+                s.sc_set_named("mu", |_, _| 0.0);
             }
         }
         _ => {}
@@ -5124,11 +5284,11 @@ fn structured_geometry_is_solid(geom: GeometryType, x: f64, y: f64, lx: f64, ly:
 /// Rasterize the selected geometry into the momentum Brinkman penalty field
 /// `ibm_penalty_U` (large negative inside the solid; a `source_coeff(Sp,U)` sink
 /// pins U→0 there). No-op for models without the field (thermal / compressible).
-fn seed_structured_ibm(s: &mut StructuredGpuSolver, geom: GeometryType, lx: f64, ly: f64) {
-    let Some(off) = s.field_offset("ibm_penalty_U") else {
+fn seed_structured_ibm(s: &mut impl StructuredSeed, geom: GeometryType, lx: f64, ly: f64) {
+    let Some(off) = s.sc_field_offset("ibm_penalty_U") else {
         return;
     };
-    s.set_state_component(off, move |x, y| {
+    s.sc_set_component(off, move |x, y| {
         if structured_geometry_is_solid(geom, x, y, lx, ly) {
             -1.0e5
         } else {
@@ -5140,11 +5300,11 @@ fn seed_structured_ibm(s: &mut StructuredGpuSolver, geom: GeometryType, lx: f64,
 /// Seed the uniform-freestream momentum IC the density-based compressible
 /// channel needs: `rho_u = rho * u_in` (rightward). No-op for the pressure-based
 /// models, whose primitive-velocity channel drives fine from a rest IC.
-fn seed_structured_freestream(s: &mut StructuredGpuSolver, model_id: &str, u_in: f64) {
+fn seed_structured_freestream(s: &mut impl StructuredSeed, model_id: &str, u_in: f64) {
     if model_id == "compressible_structured" {
         // rho was seeded to 1.0 in seed_structured_state; rho_u_x = rho*u_in.
-        if s.field_offset("rho_u").is_some() {
-            s.set_named_field("rho_u", move |_, _| u_in);
+        if s.sc_field_offset("rho_u").is_some() {
+            s.sc_set_named("rho_u", move |_, _| u_in);
         }
     }
 }
@@ -5159,10 +5319,10 @@ fn seed_structured_freestream(s: &mut StructuredGpuSolver, model_id: &str, u_in:
 ///   conserved-Dirichlet inlet (`rho`, `rho*u_in`, `rho_e`), zero-gradient
 ///   outlet; the model's `bc_expr` closure keeps the dependent entries
 ///   thermodynamically consistent.
-fn setup_structured_bcs(s: &mut StructuredGpuSolver, model_id: &str, u_in: f64, stride_s: usize) {
+fn setup_structured_bcs(s: &mut impl StructuredSeed, model_id: &str, u_in: f64, stride_s: usize) {
     if model_id == "compressible_structured" {
         let (rho0, e0) = (1.0f32, 2.5f32);
-        s.set_boundaries(move |edge, _x, _y| {
+        s.sc_set_boundaries(move |edge, _x, _y| {
             let d = |v: f32| StructBc { kind: 1, value: v };
             let n = || StructBc { kind: 2, value: 0.0 };
             let (btype, mut v): (u32, Vec<StructBc>) = match edge {
@@ -5182,7 +5342,7 @@ fn setup_structured_bcs(s: &mut StructuredGpuSolver, model_id: &str, u_in: f64, 
     } else {
         // Pressure-based channel. bc_kind 1=Dirichlet, 2=Neumann(zero-grad).
         // Components 0=Ux, 1=Uy, 2=p (+3=T).
-        s.set_boundaries(move |edge, _x, _y| {
+        s.sc_set_boundaries(move |edge, _x, _y| {
             let (btype, mut v): (u32, Vec<StructBc>) = match edge {
                 StructEdge::Left => (
                     1,
@@ -5345,6 +5505,7 @@ fn solver_worker_main(
         let (outcome, moving_refresh) = match mode {
             SolverMode::Static(d) => (d.step(should_readback), None),
             SolverMode::Structured(s) => (structured_step(s, should_readback), None),
+            SolverMode::StructuredCpu(s) => (structured_step(&mut s.solver, should_readback), None),
             SolverMode::MovingMesh(m) => match m.step(should_readback) {
                 Ok((o, mstats)) => {
                     // Clone + publish the regenerated mesh only at readback

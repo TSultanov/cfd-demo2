@@ -1372,3 +1372,54 @@ fn gpu_structured_thermal_channel_ibm_cylinder_runs() {
         "thermal obstacle not pinned (inside_max={inside_max}, umax={umax})"
     );
 }
+
+/// GUI CPU BACKEND: the accessors the GUI's `StructuredCpuBridge` drives on the
+/// CPU `StructuredModelSolver` — packed_state_f32 (viz upload), get_u/get_scalar
+/// (readback shape), time/dt/model_id/state_layout — behave correctly on a lid
+/// cavity. This is the CPU-side surface the GUI "CPU Interpreter" structured
+/// backend depends on.
+#[test]
+fn cpu_structured_gui_accessors_work() {
+    let (nx, ny) = (12usize, 12usize);
+    let model = incompressible_momentum_structured_model().unwrap();
+    let mut s =
+        StructuredModelSolver::new(StructuredGrid::new(nx, ny, 1.0, 1.0), &model, 0.05, 3).unwrap();
+    assert_eq!(s.model_id(), "incompressible_momentum_structured");
+    assert!((s.dt() - 0.05).abs() < 1e-12);
+    s.set_fluid(1.0, 0.01);
+    s.set_boundaries(|edge, _x, _y| {
+        let uw = if matches!(edge, Edge::Top) { 1.0f32 } else { 0.0 };
+        let bt = if matches!(edge, Edge::Top) { 5 } else { 3 };
+        (
+            bt,
+            vec![
+                BcComp { kind: 1, value: uw },
+                BcComp { kind: 1, value: 0.0 },
+                BcComp { kind: 2, value: 0.0 },
+            ],
+        )
+    });
+
+    let stride = s.state_layout().stride() as usize;
+    let t0 = s.time();
+    for _ in 0..8 {
+        s.step();
+    }
+    // Time accumulates by dt per step.
+    assert!((s.time() - (t0 + 8.0 * 0.05)).abs() < 1e-9, "sim time must accumulate");
+
+    // Packed state has the layout the viz upload expects (n * stride, f32).
+    let packed = s.packed_state_f32();
+    assert_eq!(packed.len(), nx * ny * stride, "packed state size = n*stride");
+    assert!(packed.iter().all(|v| v.is_finite()), "packed state finite");
+
+    // get_u pairs match the packed velocity components; flow develops.
+    let ports = cfd2::solver::UiPortSet::from_layout(s.state_layout());
+    let u = s.get_u(ports.u_offset.unwrap() as usize);
+    assert_eq!(u.len(), nx * ny);
+    let umax = u.iter().fold(0.0f64, |m, &(a, b)| m.max(a.hypot(b)));
+    assert!(umax > 0.02 && umax < 5.0, "CPU lid flow speed {umax}");
+    let top_ux: f64 = (0..nx).map(|i| u[(ny - 1) * nx + i].0).sum::<f64>() / nx as f64;
+    assert!(top_ux > 0.1, "CPU near-lid velocity did not develop ({top_ux})");
+    println!("[cpu-structured] GUI accessors ok: umax={umax:.4}, top_ux={top_ux:.4}, stride={stride}");
+}

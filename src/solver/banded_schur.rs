@@ -413,9 +413,32 @@ fn amg_csr_values(a_pp: &[f64], nx: usize, ny: usize) -> Vec<f32> {
     for j in 0..ny {
         for i in 0..nx {
             let cell = j * nx + i;
-            for &(band, _q) in neighbors(i, j, nx, ny).iter() {
-                values.push(a_pp[cell * 5 + band] as f32);
+            // Floor each row to a symmetric M-matrix (off-diagonals ≤ 0, diagonal ≥
+            // Σ|off-diag|) before handing it to the AMG. A from-rest through-flow
+            // startup transiently drives the Rhie–Chow d_p NEGATIVE, flipping the
+            // pressure-Laplacian off-diagonals POSITIVE → A_pp indefinite → the
+            // SPD-assuming AMG V-cycle amplifies and FGMRES stalls (SchurAmg
+            // diverged from rest). The AMG is only a PRECONDITIONER — FGMRES builds
+            // its Krylov space on the TRUE residual (b − A x), so an M-matrix
+            // surrogate here just changes the preconditioner quality, never the
+            // converged solution. On the DEVELOPED (already-SPD, diagonally-dominant
+            // Laplacian) A_pp every clamp is inert → bit-identical to the raw values.
+            let nb = neighbors(i, j, nx, ny);
+            let mut row: [f32; 5] = [0.0; 5];
+            let mut off_abs_sum = 0.0f64;
+            let mut len = 0usize;
+            for &(band, _q) in nb.iter() {
+                if band == BAND_DIAG {
+                    row[len] = 0.0; // diagonal is push #0 — filled in after the sum
+                } else {
+                    let v = a_pp[cell * 5 + band].min(0.0); // off-diag must be ≤ 0
+                    off_abs_sum += -v;
+                    row[len] = v as f32;
+                }
+                len += 1;
             }
+            row[0] = a_pp[cell * 5 + BAND_DIAG].max(off_abs_sum + 1e-12) as f32;
+            values.extend_from_slice(&row[..len]);
         }
     }
     values
@@ -767,6 +790,17 @@ fn banded_fgmres(
     let bnorm = pnorm(threads, &b64).max(1e-30);
     let mut x = vec![0.0f64; n];
 
+    // Best-iterate / monotonicity guard (mirrors the unstructured fgmres). A
+    // data-dependent preconditioner — the Schur heavy-ball safeguard, or the AMG
+    // V-cycle on a TRANSIENTLY-indefinite A_pp during a from-rest startup — can
+    // occasionally return a correction that GROWS the true residual (the observed
+    // SchurAmg umax~1e25 transient). Track the lowest-residual iterate; if an outer
+    // head sees the residual go non-finite or grow past 1.25x the best, restore the
+    // best iterate and stop instead of compounding the blow-up. Precision-safe.
+    let mut best_x = x.clone();
+    let mut best_beta = f64::INFINITY;
+    const RESTART_GROWTH_TOL: f64 = 1.25;
+
     // Reuse the CACHED AMG hierarchy (aggregation is sparsity-only, built once from
     // a canonical Poisson seed — see `build_pressure_amg_hierarchy`) and re-Galerkin
     // only the CURRENT `A_pp` values this solve. A per-call fallback hierarchy covers
@@ -810,6 +844,18 @@ fn banded_fgmres(
         let ax = spmv_t(a, nx, ny, s, &x, threads);
         let r0: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
         let beta = pnorm(threads, &r0);
+        // Monotonicity guard: bail to the best iterate if this outer's starting
+        // residual is non-finite or has grown past 1.25x the best seen — the
+        // previous cycle's (data-dependent) correction diverged; do not compound it.
+        if !beta.is_finite() || beta > best_beta * RESTART_GROWTH_TOL {
+            let ax = spmv_t(a, nx, ny, s, &best_x, threads);
+            let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
+            return (best_x.iter().map(|&v| v as f32).collect(), pnorm(threads, &res) / bnorm);
+        }
+        if beta < best_beta {
+            best_beta = beta;
+            best_x.copy_from_slice(&x);
+        }
         if beta / bnorm <= tol {
             return (x.iter().map(|&v| v as f32).collect(), beta / bnorm);
         }

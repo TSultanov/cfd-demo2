@@ -421,6 +421,15 @@ pub struct StructuredModelSolver {
     /// Cross-step cache for the Schur AMG pressure hierarchy (built once from the
     /// grid sparsity, reused every solve; only the Galerkin values re-assemble).
     amg_cache: crate::solver::banded_schur::StructuredAmgCache,
+    /// ADAPTIVE AMG activation (mirrors the unstructured `CpuSolver::schur_amg_active`
+    /// one-way latch). When the preconditioner is Schur+AMG we do NOT run the AMG
+    /// V-cycle from the start: the from-rest startup drives A_pp transiently
+    /// indefinite, on which the AMG blows up. We run the robust heavy-ball Schur
+    /// first and flip this latch ON (permanently, until a rebuild) only once the
+    /// heavy-ball inner solve genuinely STALLS (the h-dependent fine-mesh regime,
+    /// where AMG's mesh-independence pays off) — giving robust-from-rest AND
+    /// h-independent-once-developed without the user pre-committing to fragile AMG.
+    amg_active: std::sync::atomic::AtomicBool,
     /// The model's declared Schur layout (`None` if it declares none), so
     /// `set_preconditioner` can rebuild for any kind without re-reading the model.
     schur_layout: Option<crate::solver::banded_schur::SchurLayout>,
@@ -540,6 +549,18 @@ impl StructuredModelSolver {
         // runtime kernels branch on them (BDF2 at time_scheme==1). Do NOT override.
         constants.stride_x = grid.nx as u32;
 
+        let schur_layout = crate::solver::banded_schur::schur_layout_from_model(model);
+        // Pressure under-relaxation, mirroring the driver's incompressible/all-Mach
+        // default (alpha_p=0.3, alpha_u=0.7): the coupled update kernel applies
+        // `phi = phi_old + alpha*(x - phi_old)`, so a sub-1 alpha_p damps the
+        // saddle-point OUTER-iteration instability. Only the Schur-layout (coupled
+        // incompressible / all-Mach) models get it; compressible keeps its declared
+        // 1.0 (recipe default). No kernel change — the update already consumes it.
+        if schur_layout.is_some() {
+            constants.alpha_p = 0.3;
+            constants.alpha_u = 0.7;
+        }
+
         Ok(Self {
             grid,
             s,
@@ -557,7 +578,8 @@ impl StructuredModelSolver {
             engine: crate::solver::cpu::CpuEngine::Interpreter,
             precond: crate::solver::banded_schur::BandedPrecond::BlockJacobi,
             amg_cache: crate::solver::banded_schur::StructuredAmgCache::default(),
-            schur_layout: crate::solver::banded_schur::schur_layout_from_model(model),
+            amg_active: std::sync::atomic::AtomicBool::new(false),
+            schur_layout,
             model_id: model.id,
             time: 0.0,
         })
@@ -585,7 +607,36 @@ impl StructuredModelSolver {
             (K::SchurAmg, Some(l)) => BandedPrecond::schur(l, true),
             _ => BandedPrecond::BlockJacobi,
         };
+        self.amg_active.store(false, std::sync::atomic::Ordering::Relaxed); // re-arm the adaptive latch on a precond change
         crate::solver::banded_schur::kind_of(&self.precond)
+    }
+
+    /// The preconditioner to actually run this step. A Schur+AMG request runs the
+    /// robust heavy-ball Schur until the adaptive latch ([`amg_active`]) flips; all
+    /// other kinds pass through unchanged.
+    fn effective_precond(&self) -> crate::solver::banded_schur::BandedPrecond {
+        use crate::solver::banded_schur::BandedPrecond;
+        match &self.precond {
+            BandedPrecond::Schur {
+                u_idx,
+                p,
+                omega,
+                sweeps_cap,
+                pressure_amg: true,
+            } if !self.amg_active.load(std::sync::atomic::Ordering::Relaxed) => BandedPrecond::Schur {
+                u_idx: u_idx.clone(),
+                p: *p,
+                omega: *omega,
+                sweeps_cap: *sweeps_cap,
+                pressure_amg: false, // heavy-ball until the latch activates AMG
+            },
+            other => other.clone(),
+        }
+    }
+
+    /// Whether the adaptive AMG latch has activated (diagnostics/tests).
+    pub fn amg_is_active(&self) -> bool {
+        self.amg_active.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Whether this model declares a Schur preconditioner.
@@ -700,6 +751,17 @@ impl StructuredModelSolver {
         }
         let per = self.per_iter.clone();
         let upd = self.update.clone();
+        // Adaptive-AMG bookkeeping: while a Schur+AMG request is still running the
+        // heavy-ball fallback, count near-total inner stalls (`rel > 0.7`) vs total
+        // applies; flip the latch to AMG after this step if the heavy-ball majority-
+        // stalled (the h-dependent regime AMG cures). Mirrors the unstructured
+        // `failures*2 >= applies` rule.
+        let precond = self.effective_precond();
+        let counting_stalls = matches!(
+            &self.precond,
+            crate::solver::banded_schur::BandedPrecond::Schur { pressure_amg: true, .. }
+        ) && !self.amg_active.load(std::sync::atomic::Ordering::Relaxed);
+        let (mut applies, mut stalls) = (0u32, 0u32);
         for _outer in 0..self.outer_iters {
             let snap = self.buffers.f32_vec("state");
             self.buffers.copy_into_f32("state_iter", &snap);
@@ -711,23 +773,32 @@ impl StructuredModelSolver {
             // host coupled solve).
             let a = self.buffers.f32_vec("matrix_values");
             let b = self.buffers.f32_vec("rhs");
-            let (x, _res) = crate::solver::banded_schur::banded_gmres_t(
+            let (x, res) = crate::solver::banded_schur::banded_gmres_t(
                 &a,
                 self.grid.nx,
                 self.grid.ny,
                 self.s,
                 &b,
-                &self.precond,
+                &precond,
                 60,
                 200,
                 crate::solver::banded_schur::default_step_tol(),
                 self.threads,
                 Some(&self.amg_cache),
             );
+            if counting_stalls {
+                applies += 1;
+                if res > 0.7 {
+                    stalls += 1;
+                }
+            }
             self.buffers.copy_into_f32("x", &x);
             for id in &upd {
                 self.run(id, n, &ctx);
             }
+        }
+        if counting_stalls && applies > 0 && stalls * 2 >= applies {
+            self.amg_active.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         self.time += self.dt;
     }
@@ -745,6 +816,17 @@ impl StructuredModelSolver {
     /// The implicit time-step size.
     pub fn dt(&self) -> f64 {
         self.dt
+    }
+
+    /// Velocity under-relaxation for the coupled update (`phi = phi_old + α·Δ`).
+    pub fn set_alpha_u(&mut self, alpha_u: f32) {
+        self.constants.alpha_u = alpha_u;
+    }
+
+    /// Pressure under-relaxation for the coupled update — the driver's
+    /// incompressible/all-Mach default is 0.3 (damps the saddle outer iteration).
+    pub fn set_alpha_p(&mut self, alpha_p: f32) {
+        self.constants.alpha_p = alpha_p;
     }
 
     /// Set the implicit time-step size (GUI timestep slider).

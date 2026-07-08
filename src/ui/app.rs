@@ -1151,19 +1151,17 @@ impl CFDApp {
         self.selected_scheme = d.advection_scheme;
         self.time_scheme = d.time_scheme;
         self.selected_preconditioner = d.preconditioner;
-        // STRUCTURED coupled preconditioner default, per model: the pure-
-        // incompressible saddle uses plain Schur (diagonal-momentum predict/correct
-        // + heavy-ball A_pp pressure solve) — robust and mass-conserving on the
-        // driven channel. (Schur+AMG is faster but its V-cycle on the structured
-        // A_pp currently diverges under the mass-correct through-flow coupling — a
-        // known follow-up.) The all-Mach/thermal + compressible models (whose
-        // psi_precond stabilizes the pressure diagonal) run on plain block-Jacobi.
-        // The user can still override via the radio.
-        self.structured_precond = if self.model_id == "incompressible_momentum_structured" {
-            crate::solver::banded_schur::CoupledPrecondKind::Schur
-        } else {
-            crate::solver::banded_schur::CoupledPrecondKind::BlockJacobi
-        };
+        // STRUCTURED coupled preconditioner default = block-Jacobi (per-cell s×s
+        // inverse) for ALL models: it develops the channel cleanly FROM REST and is
+        // fast with the transpiled kernels (~27ms/step at 60×20). The Schur variants
+        // are more fragile on the from-rest startup transient — plain Schur's
+        // heavy-ball pressure solve is h-dependent (slow at GUI grid sizes) and
+        // Schur+AMG's V-cycle blows up transiently before recovering, because
+        // (unlike the unstructured SchurPrecond) it lacks the ADAPTIVE ACTIVATION
+        // that delays AMG until A_pp is well-conditioned. Porting that is the path
+        // to a fast h-independent structured default; block-Jacobi is the robust
+        // one meanwhile. The user can still override via the radio.
+        self.structured_precond = crate::solver::banded_schur::CoupledPrecondKind::BlockJacobi;
         self.alpha_u = d.alpha_u;
         self.alpha_p = d.alpha_p;
         self.outer_iters = d.outer_iters;
@@ -5323,6 +5321,25 @@ fn seed_structured_freestream(s: &mut impl StructuredSeed, model_id: &str, u_in:
         // rho was seeded to 1.0 in seed_structured_state; rho_u_x = rho*u_in.
         if s.sc_field_offset("rho_u").is_some() {
             s.sc_set_named("rho_u", move |_, _| u_in);
+        }
+    }
+    if model_id == "allmach_thermal_structured" {
+        // Low-Mach preconditioner CONFIG (mirrors the unstructured driver's all-Mach
+        // seeds). The on-device psi_precond recovery reads beta^2 = max(|U|^2,
+        // u_ref^2); WITHOUT u_ref the from-REST field gives psi_precond ~ 1/|U|^2 ->
+        // huge -> the pressure over-damps and the thermal channel never develops
+        // (traps at ~1% of the inlet flux). u_ref = k*max(U_inlet, floor). This is
+        // model config, NOT a velocity head-start — the flow still starts from rest.
+        let psi = 0.5_f64;
+        let u_ref = 2.0 * u_in.abs().max(0.2);
+        if s.sc_field_offset("u_ref").is_some() {
+            s.sc_set_named("u_ref", move |_, _| u_ref);
+        }
+        if s.sc_field_offset("psi_ref").is_some() {
+            s.sc_set_named("psi_ref", move |_, _| psi);
+        }
+        if s.sc_field_offset("precond_mask").is_some() {
+            s.sc_set_named("precond_mask", |_, _| 1.0);
         }
     }
 }

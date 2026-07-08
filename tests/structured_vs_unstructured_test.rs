@@ -162,32 +162,16 @@ fn run_structured(case: &Case) -> Field {
     solver.set_engine(cfd2::solver::cpu::CpuEngine::Transpiled, cmp_threads());
     solver.set_fluid(case.density, case.viscosity);
 
-    // Coupled saddle preconditioner. Schur+AMG (h-independent) is the FAST option
-    // and — with a uniform inlet IC (seeded above) avoiding the rest-start shock
-    // that would flip the momentum diagonal (hence d_p, hence the pressure operator
-    // A_pp) indefinite and break the SPD-assuming AMG V-cycle — it is stable and
-    // mass-conserving on the anchored-outlet channel. The all-Neumann LID has no
-    // pressure anchor (A_pp singular), which trips the structured AMG gauge path,
-    // so it stays on the robust block-Jacobi default.
-    if solver.supports_schur() && matches!(case.bc, Bc::Channel) {
-        solver.set_preconditioner(cfd2::solver::banded_schur::CoupledPrecondKind::SchurAmg);
-    }
+    // Coupled saddle preconditioner: block-Jacobi (the with_config default) — it
+    // develops the channel cleanly FROM REST (no velocity IC) and stays fast with
+    // the transpiled kernels, exactly like the GUI default. (Schur+AMG is faster at
+    // large grids but blows up transiently on the from-rest startup — it lacks the
+    // adaptive AMG activation the unstructured SchurPrecond has.) The velocity field
+    // starts at REST; only the thermodynamic state (psi/rho/T, below) is seeded —
+    // that is model state, not a flow head-start, and mirrors the unstructured
+    // driver's seeds.
 
-    // Uniform inlet IC (Ux = inlet) for the channel, matching the unstructured
-    // harness (`run_unstructured` seeds `initial_u = (inlet,0)`). Starting a
-    // through-flow from REST instead pins a hard inlet Dirichlet against a
-    // quiescent field — a startup shock whose transient net-outflux can flip the
-    // momentum diagonal negative. Seeding the developed-ish field is both the
-    // fair apples-to-apples comparison and the physically-standard IC.
-    if matches!(case.physics, Physics::Incompressible | Physics::AllMachThermal { .. }) {
-        let u0 = match case.bc {
-            Bc::Channel => case.inlet,
-            Bc::Lid => 0.0,
-        };
-        solver.set_state(0, move |_, _| u0); // Ux
-    }
-
-    // Physics-specific field seeds.
+    // Physics-specific field seeds (thermodynamic state only; velocity stays rest).
     match case.physics {
         Physics::Incompressible => {}
         Physics::AllMachThermal { psi } => {
@@ -199,6 +183,14 @@ fn run_structured(case: &Case) -> Field {
             seed_named(&mut solver, "t_ref", ALLMACH_T_REF);
             seed_named(&mut solver, "rho_floor", psi * 1.0e-5);
             seed_named(&mut solver, "dt_local", 0.0);
+            // Low-Mach preconditioner CONFIG (the driver seeds these; the on-device
+            // psi_precond recovery reads beta^2 = max(|U|^2, u_ref^2). WITHOUT u_ref
+            // (=0) a from-rest field gives psi_precond ~ 1/|U|^2 -> huge -> the
+            // pressure over-damps and the flow never develops. This is model config,
+            // not a velocity head-start.
+            seed_named(&mut solver, "psi_ref", psi);
+            seed_named(&mut solver, "u_ref", 2.0 * case.inlet.max(0.2));
+            seed_named(&mut solver, "precond_mask", if psi > 0.0 { 1.0 } else { 0.0 });
         }
         Physics::Compressible => {
             // Uniform-freestream IC (rho0, u=(inlet,0), p=1), matching the
@@ -275,11 +267,23 @@ fn compressible_bc(case: &Case, s: usize) -> impl Fn(Edge, f64, f64) -> (u32, Ve
     let u0 = case.inlet as f32;
     let e0 = (1.0 / 0.4 + 0.5 * case.density * case.inlet * case.inlet) as f32;
     move |_edge: Edge, _x: f64, _y: f64| {
-        let mut v = vec![k1(rho0), k1(rho0 * u0), k1(0.0)];
-        if s >= 4 {
-            v.push(k1(e0));
-        }
-        (1u32, v) // Inlet on every edge
+        // Coupled-unknown order: 0 rho, 1 rho_u_x, 2 rho_u_y, 3 rho_e, 4 u_x,
+        // 5 u_y, 6 p, 7 T. The inlet rho_u / rho_e / p / T are EXPRESSION BCs the
+        // prep-phase `bc_expr` kernel DERIVES from the PRIMITIVE velocity (slots
+        // 4/5) + rho each step — so we MUST pin the primitive velocity, not the
+        // conserved rho_u (which bc_expr would overwrite with rho*u_primitive=0).
+        // This mirrors the unstructured driver's `params.inlet_velocity`.
+        let full = vec![
+            k1(rho0),        // 0 rho (Dirichlet)
+            k1(rho0 * u0),   // 1 rho_u_x (placeholder; bc_expr overwrites from #4)
+            k1(0.0),         // 2 rho_u_y
+            k1(e0),          // 3 rho_e (placeholder; bc_expr overwrites)
+            k1(u0),          // 4 u_x  — the actual inlet driver
+            k1(0.0),         // 5 u_y
+            k1(1.0),         // 6 p
+            k1(1.0),         // 7 T
+        ];
+        (1u32, full.into_iter().take(s).collect()) // Inlet on every edge
     }
 }
 
@@ -426,11 +430,12 @@ fn run_unstructured(case: &Case) -> Field {
     let params = base_params(case);
     let model = unstructured_model(case.physics);
 
-    let u0 = match case.bc {
-        Bc::Channel => case.inlet,
-        Bc::Lid => 0.0,
-    };
-    let initial_u = vec![(u0, 0.0); n];
+    // Start from REST (no velocity head-start) — same as the structured side, so
+    // the comparison exercises both solvers' from-rest development. (Compressible
+    // is the one exception: it seeds a freestream below, because "maintain a uniform
+    // freestream" is the test's premise, and the unstructured driver's compressible
+    // path seeds the freestream too.)
+    let initial_u = vec![(0.0f64, 0.0f64); n];
     let initial_p = vec![0.0; n];
 
     let mut build = pollster::block_on(SolverDriver::build_forced_cpu(
@@ -716,19 +721,20 @@ fn incompressible_channel_matches() {
 #[ignore]
 fn diag_structured_channel_development() {
     use cfd2::solver::banded_schur::CoupledPrecondKind;
-    let (nx, ny, lx, ly) = (32usize, 12usize, 2.0f64, 1.0f64);
+    // GUI-scale channel (3x1), FROM REST (no IC seed) — the exact regime that froze
+    // the GUI. Transpiled kernels + per-step timing.
+    let (nx, ny, lx, ly) = (60usize, 20usize, 3.0f64, 1.0f64);
     let inlet = 0.5;
     let model = incompressible_momentum_structured_model().expect("model");
     let s = model.system.unknowns_per_cell() as usize;
     for &(dt, outer, precond) in &[
-        (0.02, 3usize, CoupledPrecondKind::BlockJacobi),
-        (0.02, 8usize, CoupledPrecondKind::BlockJacobi),
-        (0.02, 8usize, CoupledPrecondKind::Schur),
         (0.02, 8usize, CoupledPrecondKind::SchurAmg),
+        (0.02, 8usize, CoupledPrecondKind::BlockJacobi),
     ] {
         let mut solver =
             StructuredModelSolver::with_config(StructuredGrid::new(nx, ny, lx, ly), &model, dt, outer, Scheme::Upwind, TimeScheme::BDF2)
                 .expect("solver");
+        solver.set_engine(cfd2::solver::cpu::CpuEngine::Transpiled, cmp_threads());
         solver.set_fluid(1.0, 0.02);
         solver.set_preconditioner(precond);
         let case = Case {
@@ -739,16 +745,19 @@ fn diag_structured_channel_development() {
         };
         let bc = flow_bc(&case, s);
         solver.set_boundaries(move |e, x, y| bc(e, x, y));
-        // Per-step trace: catch WHEN/where it blows up.
+        // Per-step trace + timing: does it DEVELOP from rest, and how fast per step?
+        println!("[diag {precond:?} {nx}x{ny} FROM REST]");
         for st in 0..80 {
+            let t = std::time::Instant::now();
             solver.step();
-            if st < 6 || st % 20 == 19 {
+            let ms = t.elapsed().as_secs_f64() * 1000.0;
+            if st < 4 || st % 20 == 19 {
                 let ux = solver.state_field(0);
                 let uy = solver.state_field(1);
                 let umax = ux.iter().zip(&uy).map(|(a, b)| a.hypot(*b)).fold(0.0, f64::max);
                 let col0: f64 = (0..ny).map(|j| ux[j * nx]).sum::<f64>() / ny as f64;
                 let coln: f64 = (0..ny).map(|j| ux[j * nx + (nx - 1)]).sum::<f64>() / ny as f64;
-                println!("[trace dt={dt} step={}] umax={:.4e} inlet_col={:.4} outlet_col={:.4}", st + 1, umax, col0, coln);
+                println!("  step={:3} {:6.1}ms umax={:.4e} inlet_col={:.4} outlet_col={:.4} amg_active={}", st + 1, ms, umax, col0, coln, solver.amg_is_active());
             }
         }
         let ux = solver.state_field(0);
@@ -767,31 +776,6 @@ fn diag_structured_channel_development() {
         );
     }
 
-    // UNSTRUCTURED control on the SAME grid — must conserve flux (inlet=mid=outlet≈0.5).
-    let case = Case {
-        name: "diag_unstruct", nx, ny, lx, ly, density: 1.0, viscosity: 0.02, inlet,
-        dt: 0.02, steps: 80, outer: 8, scheme: Scheme::Upwind, time: TimeScheme::BDF2,
-        bc: Bc::Channel, obstacle: None, physics: Physics::Incompressible,
-    };
-    let uf = run_unstructured(&case);
-    // Map cells to columns via centroid x.
-    let col_u = |i: usize| -> f64 {
-        let xc = (i as f64 + 0.5) / nx as f64 * lx;
-        let mut sum = 0.0;
-        let mut cnt = 0;
-        for (c, &(cx, _)) in uf.centroids.iter().enumerate() {
-            if (cx - xc).abs() < lx / nx as f64 * 0.5 {
-                // speed is |u|, but for a channel u dominates; good enough for flux.
-                sum += uf.speed[c];
-                cnt += 1;
-            }
-        }
-        sum / cnt.max(1) as f64
-    };
-    println!(
-        "[diag UNSTRUCT] flux inlet={:.3} mid={:.3} outlet={:.3}",
-        col_u(0), col_u(nx / 2), col_u(nx - 1)
-    );
 }
 
 #[test]
@@ -834,21 +818,14 @@ fn allmach_thermal_channel_matches() {
     run_case(&c, 0.08);
 }
 
-/// COMPRESSIBLE (density-based, central-upwind), uniform freestream both backends
-/// should maintain exactly.
-///
-/// KNOWN LIMITATION (ignored): the structured density-based compressible flux does
-/// NOT preserve a uniform freestream at all-Dirichlet boundaries — it develops
-/// edge/corner velocity spikes (vmax ~5x freestream, mean decays ~15%), whereas
-/// the unstructured cut-cell path maintains it exactly. This is a free-stream-
-/// preservation gap specific to the structured compressible BOUNDARY flux (the
-/// pressure-based incompressible + all-Mach-thermal paths, which share the same
-/// boundary bc-keying fix, match the unstructured solver well — see the passing
-/// cases above). The structured compressible CPU/GPU parity itself is intact
-/// (gpu_structured_compressible_box_matches_cpu passes). Root-causing the
-/// density-based boundary free-stream violation is a follow-up.
+/// COMPRESSIBLE (density-based, central-upwind): an all-inlet uniform freestream
+/// both backends must maintain exactly. The inlet is specified in the model's
+/// PRIMITIVE-velocity convention (see `compressible_bc`) — the structured solver
+/// then preserves the freestream to machine precision, matching the unstructured
+/// cut-cell path. (An earlier version pinned the CONSERVED rho_u, which the
+/// prep-phase bc_expr overwrites, zeroing the inlet flux — a test-BC bug, not a
+/// solver bug.)
 #[test]
-#[ignore]
 fn compressible_box_matches() {
     let mut c = channel_incompressible();
     c.name = "compressible_box";

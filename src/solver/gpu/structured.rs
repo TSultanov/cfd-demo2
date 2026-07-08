@@ -597,6 +597,13 @@ impl StructuredGpuSolver {
         constants.dt_old = dt as f32;
         constants.dtau = 0.0;
         constants.stride_x = grid.nx as u32;
+        // Pressure under-relaxation for the coupled Schur-layout models (mirrors the
+        // CPU `StructuredModelSolver` + the driver's alpha_p=0.3): the update kernel
+        // applies `phi = phi_old + alpha*(x-phi_old)`, damping the saddle outer loop.
+        if crate::solver::banded_schur::schur_layout_from_model(model).is_some() {
+            constants.alpha_p = 0.3;
+            constants.alpha_u = 0.7;
+        }
         let constants_buf = dev.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("constants"),
             contents: bytemuck::bytes_of(&constants),

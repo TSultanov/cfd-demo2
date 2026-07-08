@@ -1342,12 +1342,18 @@ fn gpu_structured_thermal_channel_ibm_cylinder_runs() {
         (btype, v)
     });
 
-    // Seed a uniform-freestream Ux IC (matching how the driver/GUI seeds the
-    // all-Mach models). From a REST start this thermal channel gets trapped in the
-    // documented slow-inlet low-Mach pseudo-acoustic mode (the corrected inlet
-    // boundary no longer masks it), converging to a spuriously low through-flow;
-    // the uniform IC is the production-representative start that develops properly.
-    s.set_state_component(0, move |_, _| u_in);
+    // Seed the low-Mach preconditioner CONFIG (the driver's all-Mach seeds) — NOT a
+    // velocity IC; the flow still starts from REST. The on-device psi_precond
+    // recovery reads beta^2 = max(|U|^2, u_ref^2); WITHOUT u_ref a rest field gives
+    // psi_precond ~ 1/|U|^2 -> huge -> the pressure over-damps and the channel traps
+    // at ~1% of the inlet flux. u_ref = k*max(U_inlet, floor).
+    s.set_named_field("u_ref", move |_, _| 2.0 * u_in.max(0.2));
+    if s.field_offset("psi_ref").is_some() {
+        s.set_named_field("psi_ref", |_, _| psi);
+    }
+    if s.field_offset("precond_mask").is_some() {
+        s.set_named_field("precond_mask", |_, _| 1.0);
+    }
 
     for _ in 0..40 {
         s.step();
@@ -1553,11 +1559,17 @@ fn cpu_structured_transpiled_thermal_matches_interpreter() {
             }
             (bt, v)
         });
-        // Uniform-freestream Ux IC (production-representative): a REST start traps
-        // this all-Mach thermal channel in the slow-inlet pseudo-acoustic mode
-        // (the corrected inlet boundary no longer masks it). Both engines get the
-        // same IC, so this remains a faithful transpiled-vs-interpreter parity check.
-        s.set_state(0, |_, _| 0.05);
+        // Low-Mach preconditioner CONFIG (not a velocity IC — flow starts from REST):
+        // without u_ref the on-device psi_precond recovery over-damps a rest field
+        // and the channel never develops. Both engines get the same config, so this
+        // stays a faithful transpiled-vs-interpreter parity check.
+        s.set_named_field("u_ref", |_, _| 2.0 * 0.05_f64.max(0.2));
+        if s.field_offset("psi_ref").is_some() {
+            s.set_named_field("psi_ref", move |_, _| psi);
+        }
+        if s.field_offset("precond_mask").is_some() {
+            s.set_named_field("precond_mask", |_, _| 1.0);
+        }
         for _ in 0..8 {
             s.step();
         }

@@ -488,18 +488,25 @@ impl SolverMode {
         }
     }
 
-    /// Apply live runtime params. Structured supports fluid + dt + outer Picard
-    /// knobs; the unstructured arms route to the full `SolverDriver::apply_params`.
+    /// Apply live runtime params. Structured supports fluid + outer Picard knobs
+    /// and fixed-dt when adaptive is off; the unstructured arms route to the full
+    /// `SolverDriver::apply_params`.
     fn apply_params_any(&mut self, params: &RuntimeParams) {
         match self {
             SolverMode::Structured(s) => {
-                s.set_dt(params.requested_dt as f64);
+                // Match SolverDriver: only pin the slider seed when adaptive is off;
+                // otherwise the per-step CFL controller owns dt.
+                if !params.adaptive_dt {
+                    s.set_dt(params.requested_dt as f64);
+                }
                 s.set_fluid(params.density as f64, params.viscosity as f64);
                 s.set_outer_iters(params.outer_iters.max(1) as usize);
                 s.set_outer_auto_converge(params.outer_auto_converge);
             }
             SolverMode::StructuredCpu(s) => {
-                s.solver.set_dt(params.requested_dt as f64);
+                if !params.adaptive_dt {
+                    s.solver.set_dt(params.requested_dt as f64);
+                }
                 s.solver.set_fluid(params.density as f64, params.viscosity as f64);
                 s.solver
                     .set_outer_iters(params.outer_iters.max(1) as usize);
@@ -4131,10 +4138,12 @@ impl eframe::App for CFDApp {
                         if ui
                             .checkbox(&mut self.adaptive_dt, "Adaptive Timestep")
                             .on_hover_text(
-                                "Acoustically-adaptive timestep (CFL-targeted). On the \
-                                 moving mesh (ALE) it is applied inside the GCL dt \
+                                "Acoustically-adaptive timestep (CFL-targeted, 1.2× growth \
+                                 cap). Static unstructured and structured both recompute \
+                                 dt each step from max(|U|, |U_in|) + EOS sound speed. On \
+                                 the moving mesh (ALE) it is applied inside the GCL dt \
                                  handshake: pinned per step before the swept-flux \
-                                 closure, growth-limited 1.2×/step.",
+                                 closure.",
                             )
                             .changed()
                         {
@@ -5073,6 +5082,10 @@ fn solver_worker_stop_trace(
 trait StructuredSteppable {
     fn st_step(&mut self);
     fn st_dt(&self) -> f64;
+    fn st_set_dt(&mut self, dt: f64);
+    /// Min Cartesian spacing `min(dx, dy)` — the structured analogue of the
+    /// driver's mesh-derived `min_cell_size` used by adaptive CFL.
+    fn st_min_cell_size(&self) -> f64;
     fn st_layout(&self) -> &crate::solver::model::backend::state_layout::StateLayout;
     fn st_get_u(&self, off: usize) -> Vec<(f64, f64)>;
     fn st_get_scalar(&self, off: usize) -> Vec<f64>;
@@ -5086,6 +5099,12 @@ impl StructuredSteppable for StructuredGpuSolver {
     }
     fn st_dt(&self) -> f64 {
         self.dt()
+    }
+    fn st_set_dt(&mut self, dt: f64) {
+        self.set_dt(dt)
+    }
+    fn st_min_cell_size(&self) -> f64 {
+        self.grid().dx.min(self.grid().dy)
     }
     fn st_layout(&self) -> &crate::solver::model::backend::state_layout::StateLayout {
         self.state_layout()
@@ -5107,6 +5126,12 @@ impl StructuredSteppable for StructuredModelSolver {
     fn st_dt(&self) -> f64 {
         self.dt()
     }
+    fn st_set_dt(&mut self, dt: f64) {
+        self.set_dt(dt)
+    }
+    fn st_min_cell_size(&self) -> f64 {
+        self.grid().dx.min(self.grid().dy)
+    }
     fn st_layout(&self) -> &crate::solver::model::backend::state_layout::StateLayout {
         self.state_layout()
     }
@@ -5121,7 +5146,69 @@ impl StructuredSteppable for StructuredModelSolver {
     }
 }
 
-fn structured_step(s: &mut impl StructuredSteppable, readback: bool) -> StepOutcome {
+/// Pin `dt` for one structured step — bit-for-bit the same CFL policy as
+/// [`crate::sim::SolverDriver::step`]: acoustic-aware adaptive (with 1.2× growth
+/// cap) or the fixed `requested_dt` seed.
+fn structured_pin_dt(
+    s: &mut impl StructuredSteppable,
+    params: &RuntimeParams,
+    prev_max_vel: f64,
+    supports_sound_speed: bool,
+) {
+    if params.adaptive_dt {
+        let sound_speed = if supports_sound_speed {
+            params.eos.sound_speed(params.density as f64)
+        } else {
+            0.0
+        };
+        let adv_speed = prev_max_vel.max(params.inlet_velocity.abs() as f64);
+        let effective_sound_speed = match params.low_mach_model {
+            GpuLowMachPrecondModel::Off => sound_speed,
+            GpuLowMachPrecondModel::Legacy => sound_speed.min(adv_speed),
+            GpuLowMachPrecondModel::WeissSmith => {
+                let theta = (params.low_mach_theta_floor as f64).max(0.0);
+                let c_floor = sound_speed * theta.sqrt();
+                sound_speed.min(adv_speed.max(c_floor))
+            }
+        };
+        let wave_speed = adv_speed + effective_sound_speed;
+        let min_h = s.st_min_cell_size();
+        if min_h > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
+            let current_dt = s.st_dt();
+            let mut next_dt = params.target_cfl * min_h / wave_speed;
+            if next_dt > current_dt * 1.2 {
+                next_dt = current_dt * 1.2;
+            }
+            next_dt = next_dt.clamp(1e-9, 100.0);
+            s.st_set_dt(next_dt);
+        }
+    } else {
+        s.st_set_dt(params.requested_dt.max(1.0e-9) as f64);
+    }
+}
+
+/// Whether this structured model carries a thermodynamic EOS that contributes
+/// sound speed to the adaptive CFL (mirrors `SolverDriver::supports_sound_speed`
+/// which keys off the `eos.gamma` named param — only the density-based compressible
+/// family).
+fn structured_supports_sound_speed(model_id: &str) -> bool {
+    model_id == "compressible_structured" || model_id == "compressible"
+}
+
+fn structured_step(
+    s: &mut impl StructuredSteppable,
+    params: &RuntimeParams,
+    prev_max_vel: &mut f64,
+    model_id: &str,
+    readback: bool,
+) -> StepOutcome {
+    structured_pin_dt(
+        s,
+        params,
+        *prev_max_vel,
+        structured_supports_sound_speed(model_id),
+    );
+
     let t0 = std::time::Instant::now();
     s.st_step();
     let step_time_ms = t0.elapsed().as_secs_f32() * 1000.0;
@@ -5148,6 +5235,8 @@ fn structured_step(s: &mut impl StructuredSteppable, readback: bool) -> StepOutc
                 nonfinite_u += 1;
             }
         }
+        // Adaptive-dt velocity scale — same place the driver updates `prev_max_vel`.
+        *prev_max_vel = max_vel;
         let mut p_min = f64::INFINITY;
         let mut p_max = f64::NEG_INFINITY;
         let mut nonfinite_p = 0usize;
@@ -5507,6 +5596,9 @@ fn solver_worker_main(
 
     let mut running = false;
     let mut step_idx: u64 = 0;
+    /// Adaptive-dt velocity scale for the structured path (mirrors
+    /// `SolverDriver::prev_max_vel`). Updated from structured field readbacks.
+    let mut structured_prev_max_vel: f64 = 0.0;
     let mut last_stats_publish = std::time::Instant::now();
     let mut last_snapshot_publish = std::time::Instant::now();
     let stats_publish_interval = std::time::Duration::from_millis(33);
@@ -5523,6 +5615,7 @@ fn solver_worker_main(
                 &mut params,
                 &mut running,
                 &mut step_idx,
+                &mut structured_prev_max_vel,
                 &mut last_stats_publish,
                 &mut last_snapshot_publish,
                 &evt_tx,
@@ -5543,6 +5636,7 @@ fn solver_worker_main(
                         &mut params,
                         &mut running,
                         &mut step_idx,
+                        &mut structured_prev_max_vel,
                         &mut last_stats_publish,
                         &mut last_snapshot_publish,
                         &evt_tx,
@@ -5591,8 +5685,26 @@ fn solver_worker_main(
         // per-step telemetry to publish.
         let (outcome, moving_refresh) = match mode {
             SolverMode::Static(d) => (d.step(should_readback), None),
-            SolverMode::Structured(s) => (structured_step(s, should_readback), None),
-            SolverMode::StructuredCpu(s) => (structured_step(&mut s.solver, should_readback), None),
+            SolverMode::Structured(s) => (
+                structured_step(
+                    s,
+                    &params,
+                    &mut structured_prev_max_vel,
+                    model_id,
+                    should_readback,
+                ),
+                None,
+            ),
+            SolverMode::StructuredCpu(s) => (
+                structured_step(
+                    &mut s.solver,
+                    &params,
+                    &mut structured_prev_max_vel,
+                    model_id,
+                    should_readback,
+                ),
+                None,
+            ),
             SolverMode::MovingMesh(m) => match m.step(should_readback) {
                 Ok((o, mstats)) => {
                     // Clone + publish the regenerated mesh only at readback
@@ -5896,6 +6008,7 @@ fn solver_worker_handle_cmd(
     params: &mut RuntimeParams,
     running: &mut bool,
     step_idx: &mut u64,
+    structured_prev_max_vel: &mut f64,
     last_stats_publish: &mut std::time::Instant,
     last_snapshot_publish: &mut std::time::Instant,
     evt_tx: &mpsc::Sender<SolverWorkerEvent>,
@@ -5913,6 +6026,7 @@ fn solver_worker_handle_cmd(
             *viz_field = next_viz_field;
             *running = false;
             *step_idx = 0;
+            *structured_prev_max_vel = 0.0;
             let now = std::time::Instant::now();
             *last_stats_publish = now;
             *last_snapshot_publish = now;
@@ -5940,6 +6054,7 @@ fn solver_worker_handle_cmd(
             *model_id = "<uninitialized>";
             *running = false;
             *step_idx = 0;
+            *structured_prev_max_vel = 0.0;
             *viz_field = None;
             let now = std::time::Instant::now();
             *last_stats_publish = now;

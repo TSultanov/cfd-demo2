@@ -2554,9 +2554,17 @@ impl CFDApp {
         // Dirichlet inlet (its bc_expr closure keeps the dependent entries
         // thermodynamically consistent).
         let (lx, ly) = (3.0_f64, 1.0_f64);
-        let cell = request.max_cell_size.max(1.0e-3);
-        let nx = ((lx / cell).round() as usize).clamp(8, 192);
-        let ny = ((ly / cell).round() as usize).clamp(8, 96);
+        // Resolution tracks the user's max-cell-size slider with no artificial
+        // DOF cap (the old clamp(…, 192)×clamp(…, 96) floor at 18 432 cells was a
+        // GUI convenience limit, not a solver bound). Only reject non-positive /
+        // non-finite sizes and keep at least one cell per axis.
+        let cell = if request.max_cell_size.is_finite() && request.max_cell_size > 0.0 {
+            request.max_cell_size
+        } else {
+            0.025
+        };
+        let nx = ((lx / cell).round() as usize).max(1);
+        let ny = ((ly / cell).round() as usize).max(1);
 
         let mesh_start = std::time::Instant::now();
         let sides = BoundarySides {

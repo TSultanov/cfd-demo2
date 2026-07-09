@@ -416,6 +416,13 @@ pub struct StructuredModelSolver {
     /// `outer_auto_converge` is set).
     outer_tol: f32,
     dt: f64,
+    /// Previous step's `dt` — BDF2 variable-step coefficients read `r = dt/dt_old`.
+    /// Must lag `dt` across adaptive-dt changes (unstructured `CpuSolver::dt_old`).
+    dt_old: f64,
+    /// Committed steps — drives the BDF2→Euler startup fallback (`step_count == 0`).
+    step_count: u64,
+    /// Requested time scheme (BDF2 falls back to Euler on step 0).
+    time_scheme: TimeScheme,
     threads: usize,
     /// Kernel engine: the interpreter (default, correctness oracle) or the
     /// compiled-Rust transpiled kernels (speed path; `generated::lookup_structured`
@@ -594,6 +601,9 @@ impl StructuredModelSolver {
             outer_auto_converge: false,
             outer_tol: 1e-3,
             dt,
+            dt_old: dt,
+            step_count: 0,
+            time_scheme,
             threads: 1,
             engine: crate::solver::cpu::CpuEngine::Interpreter,
             precond: crate::solver::banded_schur::BandedPrecond::BlockJacobi,
@@ -774,8 +784,18 @@ impl StructuredModelSolver {
     /// L-infinity change of the state across the step.
     pub fn step(&mut self) {
         let n = self.grid.num_cells();
+        // Variable-dt BDF2: use the PREVIOUS step's dt as `dt_old` (unstructured
+        // CpuSolver parity). Overwriting `dt_old = dt` every step forced r=1 and
+        // broke adaptive-dt BDF2 (pressure oscillations / stalled development).
         self.constants.dt = self.dt as f32;
-        self.constants.dt_old = self.dt as f32;
+        self.constants.dt_old = self.dt_old as f32;
+        // BDF2 OpenFOAM-style startup: first step is Euler (no valid n-2 state).
+        self.constants.time_scheme = if self.time_scheme == TimeScheme::BDF2 && self.step_count == 0
+        {
+            TimeScheme::Euler as u32
+        } else {
+            self.time_scheme as u32
+        };
         // Advance history.
         let cur = self.buffers.f32_vec("state");
         let old = self.buffers.f32_vec("state_old");
@@ -890,6 +910,10 @@ impl StructuredModelSolver {
             outer_du: last_du,
             outer_dp: last_dp,
         };
+        // Commit the step's dt into dt_old for the next step's BDF2 ratio, and
+        // bump the step counter (unstructured `CpuSolver` end-of-step bookkeeping).
+        self.dt_old = self.dt;
+        self.step_count = self.step_count.saturating_add(1);
         self.time += self.dt;
     }
 
@@ -925,9 +949,22 @@ impl StructuredModelSolver {
         self.constants.alpha_p = alpha_p;
     }
 
-    /// Set the implicit time-step size (GUI timestep slider).
+    /// Set the implicit time-step size (GUI timestep slider / adaptive CFL).
+    /// On the very first configuration (`step_count == 0`) also seeds `dt_old`
+    /// so BDF2 starts with `r = dt/dt_old = 1` (unstructured TimeIntegrationModule).
     pub fn set_dt(&mut self, dt: f64) {
         self.dt = dt;
+        if self.step_count == 0 {
+            self.dt_old = dt;
+        }
+    }
+
+    /// Live time-scheme switch (GUI); resets the BDF2 Euler-startup counter only
+    /// if the caller rebuilds history — step_count is left intact so a mid-run
+    /// scheme flip does not re-fire step-0 Euler.
+    pub fn set_time_scheme(&mut self, scheme: TimeScheme) {
+        self.time_scheme = scheme;
+        self.constants.time_scheme = scheme as u32;
     }
 
     /// The dense grid.
@@ -1009,7 +1046,7 @@ impl StructuredModelSolver {
         // Match `step()`: the time-step size drives the `ddt` diagonal; the
         // constructor leaves `constants.dt` at the recipe default until a step.
         self.constants.dt = self.dt as f32;
-        self.constants.dt_old = self.dt as f32;
+        self.constants.dt_old = self.dt_old as f32;
         let cur = self.buffers.f32_vec("state");
         self.buffers.copy_into_f32("state_old", &cur);
         self.buffers.copy_into_f32("state_iter", &cur);

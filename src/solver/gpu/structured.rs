@@ -446,6 +446,13 @@ pub struct StructuredGpuSolver {
     /// norm instead — same checkbox, slightly different residual definition).
     outer_tol: f32,
     dt: f64,
+    /// Previous step's `dt` — BDF2 variable-step coefficients read `r = dt/dt_old`
+    /// (must lag `dt` under adaptive CFL; unstructured TimeIntegrationModule).
+    dt_old: f64,
+    /// Committed steps — BDF2→Euler startup when `step_count == 0`.
+    step_count: u64,
+    /// Requested time scheme (BDF2 falls back to Euler on step 0).
+    time_scheme: crate::solver::TimeScheme,
     /// Model id (for the GUI's model-echo / caps) and accumulated sim time.
     model_id: &'static str,
     time: f64,
@@ -674,6 +681,9 @@ impl StructuredGpuSolver {
             outer_auto_converge: false,
             outer_tol: 1e-3,
             dt,
+            dt_old: dt,
+            step_count: 0,
+            time_scheme,
             model_id: model.id,
             time: 0.0,
             last_stats: crate::solver::banded_schur::StructuredStepStats::default(),
@@ -868,10 +878,20 @@ impl StructuredGpuSolver {
     /// `outer_iters` sweeps of prep/flux/gradients/assembly → banded solve →
     /// update. All on the GPU.
     pub fn step(&mut self) {
+        use crate::solver::TimeScheme;
         let n = self.n;
         let sstride = self.state_stride;
+        // Variable-dt BDF2: `dt_old` lags `dt` (unstructured TimeIntegrationModule).
+        // Overwriting `dt_old = dt` every step forced r=1 and broke adaptive-dt BDF2.
         self.constants.dt = self.dt as f32;
-        self.constants.dt_old = self.dt as f32;
+        self.constants.dt_old = self.dt_old as f32;
+        // BDF2 OpenFOAM-style startup: first step is Euler (no valid n-2 state).
+        self.constants.time_scheme = if self.time_scheme == TimeScheme::BDF2 && self.step_count == 0
+        {
+            TimeScheme::Euler as u32
+        } else {
+            self.time_scheme as u32
+        };
         self.write_kernel_constants();
 
         // Advance history: old_old <- old, old <- state.
@@ -921,6 +941,9 @@ impl StructuredGpuSolver {
         }
         solve_stats.outer_iters = outers_done;
         self.last_stats = solve_stats;
+        // Commit dt → dt_old and bump step counter (unstructured finalize_step).
+        self.dt_old = self.dt;
+        self.step_count = self.step_count.saturating_add(1);
         self.time += self.dt;
     }
 
@@ -983,9 +1006,32 @@ impl StructuredGpuSolver {
         self.grid
     }
 
-    /// Set the implicit time-step size (GUI timestep slider).
+    /// Set the implicit time-step size (GUI timestep slider / adaptive CFL).
+    /// On step 0 also seeds `dt_old` so BDF2 starts with `r = 1`.
     pub fn set_dt(&mut self, dt: f64) {
         self.dt = dt;
+        if self.step_count == 0 {
+            self.dt_old = dt;
+        }
+    }
+
+    /// Velocity under-relaxation for the coupled update.
+    pub fn set_alpha_u(&mut self, alpha_u: f32) {
+        self.constants.alpha_u = alpha_u;
+        self.write_kernel_constants();
+    }
+
+    /// Pressure under-relaxation for the coupled update.
+    pub fn set_alpha_p(&mut self, alpha_p: f32) {
+        self.constants.alpha_p = alpha_p;
+        self.write_kernel_constants();
+    }
+
+    /// Live time-scheme switch (GUI).
+    pub fn set_time_scheme(&mut self, scheme: crate::solver::TimeScheme) {
+        self.time_scheme = scheme;
+        self.constants.time_scheme = scheme as u32;
+        self.write_kernel_constants();
     }
 
     /// Cap on Picard (outer) sweeps per time step.

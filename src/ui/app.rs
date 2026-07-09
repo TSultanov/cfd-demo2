@@ -502,6 +502,9 @@ impl SolverMode {
                 s.set_fluid(params.density as f64, params.viscosity as f64);
                 s.set_outer_iters(params.outer_iters.max(1) as usize);
                 s.set_outer_auto_converge(params.outer_auto_converge);
+                s.set_alpha_u(params.alpha_u);
+                s.set_alpha_p(params.alpha_p);
+                s.set_time_scheme(params.time_scheme);
             }
             SolverMode::StructuredCpu(s) => {
                 if !params.adaptive_dt {
@@ -512,6 +515,9 @@ impl SolverMode {
                     .set_outer_iters(params.outer_iters.max(1) as usize);
                 s.solver
                     .set_outer_auto_converge(params.outer_auto_converge);
+                s.solver.set_alpha_u(params.alpha_u);
+                s.solver.set_alpha_p(params.alpha_p);
+                s.solver.set_time_scheme(params.time_scheme);
             }
             _ => self.driver_mut().apply_params(params),
         }
@@ -2621,8 +2627,10 @@ impl CFDApp {
             cpu.set_preconditioner(precond);
             cpu.set_outer_iters(outer);
             cpu.set_outer_auto_converge(request.params.outer_auto_converge);
-            seed_structured_state(&mut cpu, request.model_id);
-            seed_structured_freestream(&mut cpu, request.model_id, u_in);
+            cpu.set_alpha_u(request.params.alpha_u);
+            cpu.set_alpha_p(request.params.alpha_p);
+            seed_structured_state(&mut cpu, request.model_id, &request.params);
+            seed_structured_freestream(&mut cpu, request.model_id, u_in, &request.params);
             seed_structured_ibm(&mut cpu, request.selected_geometry, lx, ly);
             setup_structured_bcs(&mut cpu, request.model_id, u_in, s);
             let ports = UiPortSet::from_layout(cpu.state_layout());
@@ -2645,11 +2653,13 @@ impl CFDApp {
             solver.set_preconditioner(precond);
             solver.set_outer_iters(outer);
             solver.set_outer_auto_converge(request.params.outer_auto_converge);
-            seed_structured_state(&mut solver, request.model_id);
+            solver.set_alpha_u(request.params.alpha_u);
+            solver.set_alpha_p(request.params.alpha_p);
+            seed_structured_state(&mut solver, request.model_id, &request.params);
             // Uniform-freestream momentum IC (compressible: rho_u = rho*u_in) so the
             // channel starts from a moving state — the stable configuration; a rest
             // IC on the fine grid can stall/diverge the density-based model.
-            seed_structured_freestream(&mut solver, request.model_id, u_in);
+            seed_structured_freestream(&mut solver, request.model_id, u_in, &request.params);
             // Immersed obstacle from the selected geometry (Brinkman mask; all three
             // structured models now declare an `ibm_penalty_U` field).
             seed_structured_ibm(&mut solver, request.selected_geometry, lx, ly);
@@ -5393,29 +5403,57 @@ impl StructuredSeed for StructuredModelSolver {
     }
 }
 
-fn seed_structured_state(s: &mut impl StructuredSeed, model_id: &str) {
+fn seed_structured_state(
+    s: &mut impl StructuredSeed,
+    model_id: &str,
+    params: &RuntimeParams,
+) {
     match model_id {
         "allmach_thermal_structured" => {
-            let psi = 0.5_f64;
-            s.sc_set_named("psi", |_, _| psi);
-            s.sc_set_named("psi_precond", move |_, _| psi.max(1.0));
-            s.sc_set_named("rho", |_, _| 1.0);
-            s.sc_set_named("rho_t_ref", |_, _| 1.0);
-            s.sc_set_named("T", |_, _| 1.0);
+            // Match SolverDriver all-Mach seeds: real fluid compressibility
+            // `psi = 1/c²` (not a hardcoded 0.5), density from the fluid, and
+            // psi_precond floored by the uref preconditioner target — NOT
+            // `psi.max(1.0)`, which forced an O(1) acoustic mass and stalled
+            // low-Mach development under adaptive dt.
+            let psi = (params.compressibility_psi as f64).max(0.0);
+            let rho = params.density as f64;
+            let t_ref = 1.0_f64;
+            s.sc_set_named("psi", move |_, _| psi);
+            s.sc_set_named("rho", move |_, _| rho);
+            s.sc_set_named("rho_t_ref", move |_, _| rho * t_ref);
+            s.sc_set_named("T", move |_, _| t_ref);
             if s.sc_field_offset("t_ref").is_some() {
-                s.sc_set_named("t_ref", |_, _| 1.0);
+                s.sc_set_named("t_ref", move |_, _| t_ref);
             }
             if s.sc_field_offset("rho_floor").is_some() {
+                // ABS_PRESSURE_FLOOR ≈ 1e-5 gauge units (driver parity).
                 s.sc_set_named("rho_floor", move |_, _| psi * 1.0e-5);
             }
+            if s.sc_field_offset("psi_ref").is_some() {
+                s.sc_set_named("psi_ref", move |_, _| psi);
+            }
+            // psi_precond host seed; on-device recovery refreshes it from u_ref.
+            let u_ref = 2.0
+                * (params.inlet_velocity.abs() as f64)
+                    .max(params.allmach_precond_uref_min.max(0.2) as f64);
+            let psi_precond = if u_ref > 0.0 {
+                psi.max(1.0 / (u_ref * u_ref))
+            } else {
+                psi
+            };
+            s.sc_set_named("psi_precond", move |_, _| psi_precond);
         }
         "compressible_structured" => {
-            s.sc_set_named("rho", |_, _| 1.0);
-            s.sc_set_named("rho_e", |_, _| 2.5);
-            s.sc_set_named("p", |_, _| 1.0);
+            let rho = params.density as f64;
+            s.sc_set_named("rho", move |_, _| rho);
+            // Ideal-gas rest internal energy scale e = p/((γ-1)ρ) with p=ρ R T;
+            // keep the historical nondimensional rest (ρ=1, e=2.5) scaled by ρ.
+            s.sc_set_named("rho_e", move |_, _| 2.5 * rho);
+            s.sc_set_named("p", move |_, _| rho); // θ_ref=1 → p = ρ
             s.sc_set_named("T", |_, _| 1.0);
             if s.sc_field_offset("mu").is_some() {
-                s.sc_set_named("mu", |_, _| 0.0);
+                let mu = params.viscosity as f64;
+                s.sc_set_named("mu", move |_, _| mu);
             }
         }
         _ => {}
@@ -5465,22 +5503,30 @@ fn seed_structured_ibm(s: &mut impl StructuredSeed, geom: GeometryType, lx: f64,
 /// Seed the uniform-freestream momentum IC the density-based compressible
 /// channel needs: `rho_u = rho * u_in` (rightward). No-op for the pressure-based
 /// models, whose primitive-velocity channel drives fine from a rest IC.
-fn seed_structured_freestream(s: &mut impl StructuredSeed, model_id: &str, u_in: f64) {
+fn seed_structured_freestream(
+    s: &mut impl StructuredSeed,
+    model_id: &str,
+    u_in: f64,
+    params: &RuntimeParams,
+) {
     if model_id == "compressible_structured" {
-        // rho was seeded to 1.0 in seed_structured_state; rho_u_x = rho*u_in.
+        // rho_u_x = rho * u_in (rho seeded in seed_structured_state).
+        let rho = params.density as f64;
         if s.sc_field_offset("rho_u").is_some() {
-            s.sc_set_named("rho_u", move |_, _| u_in);
+            s.sc_set_named("rho_u", move |_, _| rho * u_in);
         }
     }
     if model_id == "allmach_thermal_structured" {
         // Low-Mach preconditioner CONFIG (mirrors the unstructured driver's all-Mach
         // seeds). The on-device psi_precond recovery reads beta^2 = max(|U|^2,
-        // u_ref^2); WITHOUT u_ref the from-REST field gives psi_precond ~ 1/|U|^2 ->
-        // huge -> the pressure over-damps and the thermal channel never develops
-        // (traps at ~1% of the inlet flux). u_ref = k*max(U_inlet, floor). This is
-        // model config, NOT a velocity head-start — the flow still starts from rest.
-        let psi = 0.5_f64;
-        let u_ref = 2.0 * u_in.abs().max(0.2);
+        // u_ref^2); WITHOUT u_ref the from-REST field over-damps. u_ref tracks the
+        // inlet slider floored by the GUI preconditioner floor — model config, NOT
+        // a velocity head-start (flow still starts from rest).
+        let psi = (params.compressibility_psi as f64).max(0.0);
+        let u_ref = 2.0
+            * u_in
+                .abs()
+                .max(params.allmach_precond_uref_min.max(0.2) as f64);
         if s.sc_field_offset("u_ref").is_some() {
             s.sc_set_named("u_ref", move |_, _| u_ref);
         }
@@ -5488,7 +5534,8 @@ fn seed_structured_freestream(s: &mut impl StructuredSeed, model_id: &str, u_in:
             s.sc_set_named("psi_ref", move |_, _| psi);
         }
         if s.sc_field_offset("precond_mask").is_some() {
-            s.sc_set_named("precond_mask", |_, _| 1.0);
+            let mask = if psi > 0.0 { 1.0 } else { 0.0 };
+            s.sc_set_named("precond_mask", move |_, _| mask);
         }
     }
 }

@@ -641,7 +641,21 @@ impl SolverDriver {
                     sound_speed.min(adv_speed.max(c_floor))
                 }
             };
-            let wave_speed = adv_speed + effective_sound_speed;
+            // All-Mach: the pressure-row ddt uses psi_precond with Turkel
+            // pseudo-sound-speed β = k·max(U_in, uref_min). That β is ≫ |U| at
+            // the near-incompressible GUI defaults (uref_min≈1, U_in≈0.01), so a
+            // pure-convective CFL would run the pressure system at Courant
+            // β/|U| ≫ 1 → checkerboard / frozen wake. Count β as the acoustic
+            // contribution (same k as allmach_psi_precond).
+            let acoustic = if self.allmach && self.params.compressibility_psi > 0.0 {
+                let u_ref = (self.params.inlet_velocity.abs() as f64).max(
+                    allmach_precond_uref_target(self.params.allmach_precond_uref_min as f64),
+                );
+                ALLMACH_PRECOND_MACH_K * u_ref
+            } else {
+                effective_sound_speed
+            };
+            let wave_speed = adv_speed + acoustic;
             if self.min_cell_size > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
                 let current_dt = self.solver.dt() as f64;
                 let mut next_dt = self.params.target_cfl * self.min_cell_size / wave_speed;

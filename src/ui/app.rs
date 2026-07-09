@@ -1172,18 +1172,16 @@ impl CFDApp {
         self.selected_scheme = d.advection_scheme;
         self.time_scheme = d.time_scheme;
         self.selected_preconditioner = d.preconditioner;
-        // STRUCTURED coupled preconditioner defaults:
-        // - pure incompressible saddle → Schur+AMG (h-independent pressure solve;
-        //   adaptive AMG latch covers from-rest). Measured ~30 ms/step vs BJ ~285
-        //   at 120×40.
-        // - all-Mach thermal → BlockJacobi: psi_precond already stabilizes the
-        //   pressure diagonal (faster than Schur+AMG in the fair channel benchmark).
-        //   Schur's heavy-ball path STALLS when a wake hits an immersed obstacle
-        //   (lin iters 7 → 800+, multi-second steps) because the stall latch only
-        //   watched residual>0.7, not "converges but takes hundreds of iters".
-        // - compressible → BlockJacobi (no Schur layout).
+        // STRUCTURED coupled preconditioner defaults (fast path first):
+        // saddle models (incompressible / all-Mach thermal) → Schur+AMG — the
+        // h-independent pressure solve. BlockJacobi "converges" on fine grids but
+        // leaves an unphysical checkerboard pressure field (no Kármán street).
+        // Adaptive AMG latch: heavy-ball until A_pp is well-conditioned / until a
+        // slow outer is seen, then V-cycle (must flip MID-step so remaining
+        // Picard outers of the same step benefit). Compressible → block-Jacobi
+        // (no Schur layout). User can override via the radio.
         self.structured_precond = match self.model_id {
-            "incompressible_momentum_structured" => {
+            "incompressible_momentum_structured" | "allmach_thermal_structured" => {
                 crate::solver::banded_schur::CoupledPrecondKind::SchurAmg
             }
             _ => crate::solver::banded_schur::CoupledPrecondKind::BlockJacobi,
@@ -5167,14 +5165,21 @@ impl StructuredSteppable for StructuredModelSolver {
     }
 }
 
-/// Pin `dt` for one structured step — bit-for-bit the same CFL policy as
-/// [`crate::sim::SolverDriver::step`]: acoustic-aware adaptive (with 1.2× growth
-/// cap) or the fixed `requested_dt` seed.
+/// Turkel low-Mach precond reference-velocity scale (same `k` as
+/// `sim::driver::ALLMACH_PRECOND_MACH_K`). The preconditioned pressure equation
+/// propagates at pseudo-sound-speed `β ≈ k·u_ref`, not at the physical `c` and
+/// not at |U| — adaptive CFL must count it or the pressure CFL blows past 1.
+const ALLMACH_PRECOND_MACH_K: f64 = 2.0;
+
+/// Pin `dt` for one structured step — same CFL policy as
+/// [`crate::sim::SolverDriver::step`], plus the all-Mach pseudo-sound floor that
+/// the driver currently omits on the barotropic/thermal path (see below).
 fn structured_pin_dt(
     s: &mut impl StructuredSteppable,
     params: &RuntimeParams,
     prev_max_vel: f64,
     supports_sound_speed: bool,
+    allmach_precond_cfl: bool,
 ) {
     if params.adaptive_dt {
         let sound_speed = if supports_sound_speed {
@@ -5192,7 +5197,21 @@ fn structured_pin_dt(
                 sound_speed.min(adv_speed.max(c_floor))
             }
         };
-        let wave_speed = adv_speed + effective_sound_speed;
+        // All-Mach: psi_precond = max(psi, 1/β²) with β = k·max(U_in, uref_min).
+        // The pressure-row ddt term therefore supports waves at speed β, which at
+        // the GUI near-incompressible defaults (U_in≈0.01, uref_min=1) is
+        // β≈2 ≫ |U|. Using only |U| for the adaptive CFL (as a pure incompressible
+        // model would) yields pressure CFL = β·dt/h ≈ (β/|U|)·target_cfl ≫ 1 →
+        // checkerboard pressure, frozen wake, no Kármán street. Count β as the
+        // acoustic contribution so target_cfl is the true pressure Courant number.
+        let acoustic = if allmach_precond_cfl && params.compressibility_psi > 0.0 {
+            let u_ref = (params.inlet_velocity.abs() as f64)
+                .max(params.allmach_precond_uref_min as f64);
+            ALLMACH_PRECOND_MACH_K * u_ref
+        } else {
+            effective_sound_speed
+        };
+        let wave_speed = adv_speed + acoustic;
         let min_h = s.st_min_cell_size();
         if min_h > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
             let current_dt = s.st_dt();
@@ -5209,11 +5228,15 @@ fn structured_pin_dt(
 }
 
 /// Whether this structured model carries a thermodynamic EOS that contributes
-/// sound speed to the adaptive CFL (mirrors `SolverDriver::supports_sound_speed`
-/// which keys off the `eos.gamma` named param — only the density-based compressible
-/// family).
+/// physical sound speed to the adaptive CFL (density-based compressible only).
 fn structured_supports_sound_speed(model_id: &str) -> bool {
     model_id == "compressible_structured" || model_id == "compressible"
+}
+
+/// All-Mach gauge-pressure models run Turkel `psi_precond` — adaptive CFL must
+/// use the pseudo-sound floor (see [`structured_pin_dt`]).
+fn structured_allmach_precond_cfl(model_id: &str) -> bool {
+    model_id.contains("allmach")
 }
 
 fn structured_step(
@@ -5228,6 +5251,7 @@ fn structured_step(
         params,
         *prev_max_vel,
         structured_supports_sound_speed(model_id),
+        structured_allmach_precond_cfl(model_id),
     );
 
     let t0 = std::time::Instant::now();
@@ -5237,11 +5261,32 @@ fn structured_step(
     let cstats = s.st_stats();
 
     let ports = UiPortSet::from_layout(s.st_layout());
-    let readback = if readback {
-        let u = ports
+    // When adaptive CFL is on, refresh `prev_max_vel` EVERY step (not only the
+    // throttled GUI snapshot cadence). A stale velocity scale lets dt lag a
+    // developing jet/wake and overshoot the true Courant number for several
+    // steps — the driver has the same pattern, but structured steps are cheap
+    // enough on the CPU path (default) that a local U scan is fine.
+    let need_u = readback || params.adaptive_dt;
+    let u_for_cfl = if need_u {
+        ports
             .u_offset
             .map(|off| s.st_get_u(off as usize))
-            .unwrap_or_default();
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    if params.adaptive_dt && !u_for_cfl.is_empty() {
+        let mut max_vel = 0.0f64;
+        for &(ux, uy) in &u_for_cfl {
+            if ux.is_finite() && uy.is_finite() {
+                max_vel = max_vel.max(ux.hypot(uy));
+            }
+        }
+        *prev_max_vel = max_vel;
+    }
+
+    let readback = if readback {
+        let u = u_for_cfl;
         let p = ports
             .p_offset
             .map(|off| s.st_get_scalar(off as usize))
@@ -5256,7 +5301,6 @@ fn structured_step(
                 nonfinite_u += 1;
             }
         }
-        // Adaptive-dt velocity scale — same place the driver updates `prev_max_vel`.
         *prev_max_vel = max_vel;
         let mut p_min = f64::INFINITY;
         let mut p_max = f64::NEG_INFINITY;

@@ -436,14 +436,19 @@ pub struct StructuredGpuSolver {
     /// any of {block-Jacobi, Schur, Schur+AMG} without re-reading the model.
     schur_layout: Option<crate::solver::banded_schur::SchurLayout>,
 
+    /// State-layout offsets of the solved unknowns (not auxiliaries like
+    /// `ibm_penalty_U`). Drives the applied Picard residual — same set the
+    /// CPU structured solver uses.
+    unknown_state_offsets: Vec<usize>,
+
     outer_iters: usize,
-    /// When true, the Picard loop may exit early once the coupled increment
-    /// residuals fall below [`Self::outer_tol`] (GUI `outer_auto_converge`).
+    /// When true, the Picard loop may exit early once every unknown's
+    /// per-field scaled applied residual falls below [`Self::outer_tol`]
+    /// (GUI `outer_auto_converge`). Residual is `|state − state_iter| /
+    /// max(|state|, 1)` after under-relaxation — CPU parity; not absolute `|x|`.
     outer_auto_converge: bool,
-    /// Absolute L∞ coupled-increment threshold for opportunistic outer early-exit
-    /// (`1e-3` default). Uses the host-solve `outer_du`/`outer_dp` so the break
-    /// needs no extra GPU state readback (CPU structured uses a relative state
-    /// norm instead — same checkbox, slightly different residual definition).
+    /// Per-unknown relative applied-change threshold for outer early-exit
+    /// (`1e-3` default). Matches CPU structured / unstructured outer tol.
     outer_tol: f32,
     dt: f64,
     /// Previous step's `dt` — BDF2 variable-step coefficients read `r = dt/dt_old`
@@ -654,6 +659,12 @@ impl StructuredGpuSolver {
 
         let solver = BandedGpuLinAlg::new(dev, grid.nx as u32, grid.ny as u32, s as u32);
 
+        let unknown_state_offsets: Vec<usize> =
+            crate::solver::model::kernel::model_unknown_state_offsets(model)?
+                .into_iter()
+                .map(|o| o as usize)
+                .collect();
+
         // Pack each kernel's `constants` uniform to its own `Constants` layout.
         for k in kernels.values() {
             k.write_constants(&ctx.queue, &constants);
@@ -677,6 +688,7 @@ impl StructuredGpuSolver {
             low_mach_buf,
             solver,
             schur_layout: crate::solver::banded_schur::schur_layout_from_model(model),
+            unknown_state_offsets,
             outer_iters: outer_iters.max(1),
             outer_auto_converge: false,
             outer_tol: 1e-3,
@@ -904,15 +916,17 @@ impl StructuredGpuSolver {
 
         let mut solve_stats = crate::solver::banded_schur::StructuredStepStats::default();
         let mut outers_done = 0u32;
+        // Pressure state offset for the GUI "P residual" line (schur rank ==
+        // state offset for current models; fallback 2).
+        let p_slot: Option<usize> = self.schur_layout.as_ref().map(|l| l.p);
         for _outer in 0..self.outer_iters {
             // state_iter <- state, then flux/gradients/assembly.
             self.copy_submit("state", "state_iter", n * sstride);
             let per = self.per_iter.clone();
             self.dispatch_ids(&per);
 
-            // Banded solve: x = A^{-1} rhs (fully on the GPU). The host coupled
-            // path returns its linear + coupled-increment residuals; keep the LAST
-            // outer's (early outers are large by construction).
+            // Banded solve: x = A^{-1} rhs. Keep last outer's *linear* stats;
+            // Picard residual is measured from applied state change below.
             if let Some(st) = self.solver.solve(
                 &self.ctx,
                 self.buf("grid"),
@@ -920,21 +934,65 @@ impl StructuredGpuSolver {
                 self.buf("rhs"),
                 self.buf("x"),
             ) {
-                solve_stats = st;
+                solve_stats.linear_iters = st.linear_iters;
+                solve_stats.linear_res = st.linear_res;
             }
 
-            // Update: state <- f(x).
+            // Update: state <- phi + alpha*(x - phi) under-relaxation.
             let upd = self.update.clone();
             self.dispatch_ids(&upd);
             outers_done += 1;
-            // Opportunistic Picard early-exit: host-solve already reports L∞ ΔU/Δp
-            // of the coupled increment — break when both fall under outer_tol.
-            // (No extra GPU→host state readback; absolute on the increment, not a
-            // relative state norm like the CPU path.)
+
+            // Applied Picard residual (CPU parity): |state − state_iter| scaled
+            // PER UNKNOWN. Absolute |x| is NOT a residual — freestream U ~ O(0.01)
+            // and T≈1 both look "converged" or "huge" for the wrong reasons, and
+            // all-Mach previously reported U residual ≈ 1 from T living in the
+            // Schur u-block. Host-side banded solve already read the matrix back
+            // this outer, so the extra state/state_iter readback is not the cost.
+            let st = self.read_f32("state", n * sstride);
+            let it = self.read_f32("state_iter", n * sstride);
+            let n_unk = self.unknown_state_offsets.len();
+            let mut maxd_per = vec![0.0f32; n_unk];
+            let mut maxs_per = vec![0.0f32; n_unk];
+            for cell in 0..n {
+                let base = cell * sstride;
+                for (i, &off) in self.unknown_state_offsets.iter().enumerate() {
+                    let a = st[base + off];
+                    let b = it[base + off];
+                    maxd_per[i] = maxd_per[i].max((a - b).abs());
+                    maxs_per[i] = maxs_per[i].max(a.abs());
+                }
+            }
+            let scaled: Vec<f32> = maxd_per
+                .iter()
+                .zip(maxs_per.iter())
+                .map(|(&d, &s)| d / s.max(1.0))
+                .collect();
+
+            // GUI "Coupled: U / P": velocity components only (state offs 0,1),
+            // not T; pressure via schur p rank / offset 2.
+            let (mut du, mut dp) = (0.0f32, 0.0f32);
+            for (i, &off) in self.unknown_state_offsets.iter().enumerate() {
+                if off == 0 || off == 1 {
+                    du = du.max(scaled[i]);
+                }
+                if let Some(ps) = p_slot {
+                    if off == ps {
+                        dp = dp.max(scaled[i]);
+                    }
+                } else if off == 2 {
+                    dp = dp.max(scaled[i]);
+                }
+            }
+            solve_stats.outer_du = du;
+            solve_stats.outer_dp = dp;
+
+            // Early-exit only when EVERY unknown is under tol, and never before
+            // 2 outers (unstructured OUTER_TOL_EXIT_MIN_ITERS = 2).
             if self.outer_auto_converge
                 && self.outer_tol > 0.0
-                && solve_stats.outer_du <= self.outer_tol
-                && solve_stats.outer_dp <= self.outer_tol
+                && outers_done >= 2
+                && scaled.iter().all(|&c| c <= self.outer_tol)
             {
                 break;
             }
@@ -1039,12 +1097,13 @@ impl StructuredGpuSolver {
         self.outer_iters = n.max(1);
     }
 
-    /// Enable opportunistic Picard early-exit on small coupled increments.
+    /// Enable opportunistic Picard early-exit on small applied residuals.
     pub fn set_outer_auto_converge(&mut self, enable: bool) {
         self.outer_auto_converge = enable;
     }
 
-    /// Absolute L∞ ΔU/Δp threshold for outer early-exit (`1e-3` default).
+    /// Per-unknown relative applied-change threshold for outer early-exit
+    /// (`1e-3` default). Matches CPU structured.
     pub fn set_outer_tolerance(&mut self, tol: f32) {
         self.outer_tol = tol.max(0.0);
     }
@@ -1411,31 +1470,16 @@ impl BandedGpuLinAlg {
             threads,
             Some(&self.amg_cache),
         );
-        // Outer (Picard) residual: L-infinity of the coupled increment `xh` over
-        // the velocity / pressure slots (parity with the CPU solver's readout).
-        let (vel_slots, p_slot): (Vec<usize>, Option<usize>) = match &self.precond {
-            crate::solver::banded_schur::BandedPrecond::Schur { u_idx, p, .. } => {
-                (u_idx.clone(), Some(*p))
-            }
-            _ => ((0..s).collect(), None),
-        };
-        let (mut du, mut dp) = (0f32, 0f32);
-        for cell in 0..(nx * ny) {
-            let base = cell * s;
-            for &vs in &vel_slots {
-                du = du.max(xh[base + vs].abs());
-            }
-            if let Some(ps) = p_slot {
-                dp = dp.max(xh[base + ps].abs());
-            }
-        }
+        // Picard outer residual is measured by `StructuredGpuSolver::step` from
+        // applied |state − state_iter| after under-relaxation — not from |xh|.
+        // Absolute |x| is freestream-scale (or T≈1) and is not a residual.
         ctx.queue.write_buffer(x, 0, bytemuck::cast_slice(&xh));
         crate::solver::banded_schur::StructuredStepStats {
             outer_iters: 0, // filled in by the caller (`step`), which owns the count
             linear_iters: iters,
             linear_res: res as f32,
-            outer_du: du,
-            outer_dp: dp,
+            outer_du: 0.0,
+            outer_dp: 0.0,
         }
     }
 

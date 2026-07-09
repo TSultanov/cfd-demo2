@@ -826,22 +826,23 @@ impl StructuredModelSolver {
         // applies; flip the latch to AMG after this step if the heavy-ball majority-
         // stalled (the h-dependent regime AMG cures). Mirrors the unstructured
         // `failures*2 >= applies` rule.
-        let precond = self.effective_precond();
-        let counting_stalls = matches!(
+        // Effective preconditioner can flip mid-step once the adaptive AMG latch
+        // fires — re-read via `effective_precond()` after each outer when still
+        // counting stalls so later Picard sweeps of the SAME step use AMG.
+        let mut precond = self.effective_precond();
+        let mut counting_stalls = matches!(
             &self.precond,
             crate::solver::banded_schur::BandedPrecond::Schur { pressure_amg: true, .. }
         ) && !self.amg_active.load(std::sync::atomic::Ordering::Relaxed);
-        let (mut applies, mut stalls) = (0u32, 0u32);
         // Outer-convergence telemetry for the GUI readout (mirrors the unstructured
         // "Coupled: N iters, U:.. P:.." / "Linear: .. res=.." lines). The banded
         // solve returns the coupled increment `x`; its L-infinity over the velocity
         // slots / pressure slot is the Picard outer residual, and `res` is the linear
         // relative residual. We keep the LAST outer's values (early outers are large
         // by construction) so a small readout means the step actually converged.
-        let (vel_slots, p_slot): (Vec<usize>, Option<usize>) = match &self.schur_layout {
-            Some(l) => (l.u_idx.clone(), Some(l.p)),
-            None => ((0..self.s).collect(), None),
-        };
+        // Pressure coupled-rank (== state offset for current models) for the
+        // GUI P residual line; `None` → treat state offset 2 as p.
+        let p_slot: Option<usize> = self.schur_layout.as_ref().map(|l| l.p);
         let (mut last_res, mut last_du, mut last_dp) = (0f32, 0f32, 0f32);
         let mut last_iters = 0u32;
         let mut outers_done = 0u32;
@@ -870,65 +871,92 @@ impl StructuredModelSolver {
                 Some(&self.amg_cache),
             );
             if counting_stalls {
-                applies += 1;
-                // Residual stall (near-total non-progress) OR slow-but-eventual
-                // convergence: heavy-ball is h-dependent and can burn hundreds of
-                // FGMRES iters once a wake hits an immersed obstacle, yet still
-                // reach tol — residual>0.7 alone never fires, AMG never latches,
-                // and the GUI "freezes". Count high iteration counts as stalls too.
+                // Flip AMG as soon as heavy-ball either fails to reduce the residual
+                // OR converges only after burning a full GMRES restart budget
+                // (iters>60). Waiting until end-of-step left the remaining Picard
+                // outers of the wake-hit step on multi-second heavy-ball applies —
+                // the GUI freeze — even though the residual eventually met tol.
+                // One such outer is enough: the latch is one-way.
                 if res > 0.7 || iters > 60 {
-                    stalls += 1;
-                }
-            }
-            // L-infinity of the coupled increment over velocity / pressure slots.
-            let (mut du, mut dp) = (0f32, 0f32);
-            for cell in 0..n {
-                let base = cell * self.s;
-                for &vs in &vel_slots {
-                    du = du.max(x[base + vs].abs());
-                }
-                if let Some(ps) = p_slot {
-                    dp = dp.max(x[base + ps].abs());
+                    self.amg_active
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                    precond = self.effective_precond();
+                    counting_stalls = false;
                 }
             }
             last_res = res as f32;
-            last_du = du;
-            last_dp = dp;
             last_iters = iters;
             self.buffers.copy_into_f32("x", &x);
             for id in &upd {
                 self.run(id, n, &ctx);
             }
             outers_done += 1;
-            // Opportunistic Picard early-exit: relative L∞(Δφ)/L∞(|φ|) over the
-            // COUPLED UNKNOWNS only (equation targets). Measuring the full state
-            // buffer is wrong for immersed-boundary models — `ibm_penalty_U` is
-            // O(1e5) and never changes, so max|state| ≈ 1e5 and a legitimate
-            // O(1) pressure update looks like a 1e-5 relative residual → false
-            // 1-outer exit every step → under-relaxed Picard, pressure
-            // oscillations, and stalled channel development on fine grids.
-            if self.outer_auto_converge && self.outer_tol > 0.0 {
-                let st = self.buffers.f32_vec("state");
-                let it = self.buffers.f32_vec("state_iter");
-                let (mut maxd, mut maxs) = (0.0f32, 0.0f32);
-                let ncells = n;
-                let stride = self.state_stride;
-                for cell in 0..ncells {
-                    let base = cell * stride;
-                    for &off in &self.unknown_state_offsets {
-                        let a = st[base + off];
-                        let b = it[base + off];
-                        maxd = maxd.max((a - b).abs());
-                        maxs = maxs.max(a.abs());
-                    }
-                }
-                if (maxd as f64) <= (self.outer_tol as f64) * (maxs as f64 + 1e-30) {
-                    break;
+
+            // Picard residual = APPLIED under-relaxed change |state − state_iter|,
+            // scaled PER UNKNOWN (unstructured OuterConvergenceMonitor parity).
+            //
+            // Two bugs previously produced "outers=1, U residual=1.0" and an
+            // unphysical under-solved field:
+            // 1. Reporting max|x| over schur u_idx — for all-Mach thermal that
+            //    includes T≈1, so "U residual" was always ~1 regardless of flow.
+            // 2. A single global max|Δ|/max|φ| across all unknowns — T≈1
+            //    dominated the scale, so U/p only needed |Δ|≲1e-3 to look
+            //    "converged" and the outer loop exited after one sweep.
+            let st = self.buffers.f32_vec("state");
+            let it = self.buffers.f32_vec("state_iter");
+            let stride = self.state_stride;
+            let n_unk = self.unknown_state_offsets.len();
+            let mut maxd_per = vec![0.0f32; n_unk];
+            let mut maxs_per = vec![0.0f32; n_unk];
+            for cell in 0..n {
+                let base = cell * stride;
+                for (i, &off) in self.unknown_state_offsets.iter().enumerate() {
+                    let a = st[base + off];
+                    let b = it[base + off];
+                    maxd_per[i] = maxd_per[i].max((a - b).abs());
+                    maxs_per[i] = maxs_per[i].max(a.abs());
                 }
             }
-        }
-        if counting_stalls && applies > 0 && stalls * 2 >= applies {
-            self.amg_active.store(true, std::sync::atomic::Ordering::Relaxed);
+            let scaled: Vec<f32> = maxd_per
+                .iter()
+                .zip(maxs_per.iter())
+                .map(|(&d, &s)| d / s.max(1.0))
+                .collect();
+
+            // GUI "Coupled: U / P": velocity components only (not T), and p.
+            // U lives at the first two unknown offsets for every current model
+            // (Ux, Uy); p is the schur pressure rank mapped to state via
+            // unknown_state_offsets when present, else offset 2.
+            let (mut du, mut dp) = (0.0f32, 0.0f32);
+            for (i, &off) in self.unknown_state_offsets.iter().enumerate() {
+                // Velocity: state offsets 0 and 1 (U vector2).
+                if off == 0 || off == 1 {
+                    du = du.max(scaled[i]);
+                }
+                if let Some(ps) = p_slot {
+                    // p_slot is the COUPLED rank; for pressure-based models it
+                    // equals the state offset of p (2). Compare to state off.
+                    if off == ps {
+                        dp = dp.max(scaled[i]);
+                    }
+                } else if off == 2 {
+                    dp = dp.max(scaled[i]);
+                }
+            }
+            last_du = du;
+            last_dp = dp;
+
+            // Early-exit only when EVERY unknown's per-field scaled residual is
+            // under tol, and never before 2 outers (unstructured
+            // OUTER_TOL_EXIT_MIN_ITERS = 2 — a single lucky outer must be
+            // confirmed).
+            if self.outer_auto_converge
+                && self.outer_tol > 0.0
+                && outers_done >= 2
+                && scaled.iter().all(|&c| c <= self.outer_tol)
+            {
+                break;
+            }
         }
         self.last_stats = StructuredStepStats {
             outer_iters: outers_done,

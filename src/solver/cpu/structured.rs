@@ -423,6 +423,11 @@ pub struct StructuredModelSolver {
     step_count: u64,
     /// Requested time scheme (BDF2 falls back to Euler on step 0).
     time_scheme: TimeScheme,
+    /// State-layout offsets of the coupled unknowns (equation targets only).
+    /// Used for outer residual / early-exit so storage fields like
+    /// `ibm_penalty_U` (~1e5) cannot dominate max|state| and force a false
+    /// 1-outer exit on immersed-obstacle cases.
+    unknown_state_offsets: Vec<usize>,
     threads: usize,
     /// Kernel engine: the interpreter (default, correctness oracle) or the
     /// compiled-Rust transpiled kernels (speed path; `generated::lookup_structured`
@@ -586,6 +591,12 @@ impl StructuredModelSolver {
             constants.alpha_u = 0.7;
         }
 
+        let unknown_state_offsets: Vec<usize> =
+            crate::solver::model::kernel::model_unknown_state_offsets(model)?
+                .into_iter()
+                .map(|o| o as usize)
+                .collect();
+
         Ok(Self {
             grid,
             s,
@@ -604,6 +615,7 @@ impl StructuredModelSolver {
             dt_old: dt,
             step_count: 0,
             time_scheme,
+            unknown_state_offsets,
             threads: 1,
             engine: crate::solver::cpu::CpuEngine::Interpreter,
             precond: crate::solver::banded_schur::BandedPrecond::BlockJacobi,
@@ -883,17 +895,27 @@ impl StructuredModelSolver {
                 self.run(id, n, &ctx);
             }
             outers_done += 1;
-            // Opportunistic Picard early-exit (unstructured parity): relative
-            // L∞(state − state_iter) / L∞(|state|) ≤ outer_tol. state_iter is the
-            // pre-update snapshot, so this measures the actual applied change
-            // (including under-relaxation).
+            // Opportunistic Picard early-exit: relative L∞(Δφ)/L∞(|φ|) over the
+            // COUPLED UNKNOWNS only (equation targets). Measuring the full state
+            // buffer is wrong for immersed-boundary models — `ibm_penalty_U` is
+            // O(1e5) and never changes, so max|state| ≈ 1e5 and a legitimate
+            // O(1) pressure update looks like a 1e-5 relative residual → false
+            // 1-outer exit every step → under-relaxed Picard, pressure
+            // oscillations, and stalled channel development on fine grids.
             if self.outer_auto_converge && self.outer_tol > 0.0 {
                 let st = self.buffers.f32_vec("state");
                 let it = self.buffers.f32_vec("state_iter");
                 let (mut maxd, mut maxs) = (0.0f32, 0.0f32);
-                for i in 0..st.len() {
-                    maxd = maxd.max((st[i] - it[i]).abs());
-                    maxs = maxs.max(st[i].abs());
+                let ncells = n;
+                let stride = self.state_stride;
+                for cell in 0..ncells {
+                    let base = cell * stride;
+                    for &off in &self.unknown_state_offsets {
+                        let a = st[base + off];
+                        let b = it[base + off];
+                        maxd = maxd.max((a - b).abs());
+                        maxs = maxs.max(a.abs());
+                    }
                 }
                 if (maxd as f64) <= (self.outer_tol as f64) * (maxs as f64 + 1e-30) {
                     break;

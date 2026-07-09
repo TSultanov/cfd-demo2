@@ -121,14 +121,15 @@ fn ale_vols_history_items() -> Vec<Item> {
 /// `rho_f` is: the constant density coefficient (`constants.density`) when the
 /// state layout has NO `rho` field (constant-density incompressible mass flux
 /// `phi = rho*(U·n)A`); or the variable-density FACE density otherwise —
-/// reconstructed as the distance-symmetric average `0.5*(rho[idx]+rho[other_idx])`
-/// of the per-cell `rho` state. The average is uniform-exact (a uniform density
-/// gives `rho_f == rho` at every face, so a compressible free stream is preserved
-/// bitwise) and O(h²) for smooth density (MMS). Both cells of a shared face see
-/// the same `rho_f` (symmetric in idx/other_idx), and `other_idx == idx` on a
-/// boundary face, so the read is always a valid index. The incompressible path is
-/// byte-unchanged (no `rho` slot ⇒ `constants.density`), preserving the zero-flux
-/// equivalence and static-model gates.
+/// reconstructed with the DISTANCE-WEIGHTED `lambda_f` Lerp that matches the flux
+/// module's own face interpolation (`rho_f = rho_other + lambda_f*(rho[idx]-rho[other])`),
+/// so `phi` and its mesh-relative subtraction carry the SAME face density on a graded /
+/// deformed / adaptive mesh (a plain 0.5 average mismatches by `O(grad_rho*h)` there). It
+/// is uniform-exact (a uniform density gives `rho_f == rho[other]` bitwise, so a compressible
+/// free stream is preserved) and reduces to the standard average `lambda_f=0.5` on a uniform
+/// mesh. `other_idx == idx` on a boundary face, so the read is always a valid index. The
+/// incompressible path is byte-unchanged (no `rho` slot ⇒ `constants.density`), preserving the
+/// zero-flux equivalence and static-model gates.
 fn ale_relative_flux_expr(
     conv_op: &crate::solver::codegen::ir::DiscreteOp,
     flux_val_expr: Expr,
@@ -141,7 +142,19 @@ fn ale_relative_flux_expr(
         Some(rho_slot) => {
             let rho_idx = state_component_slot(slots.stride, "state", "idx", rho_slot, 0);
             let rho_other = state_component_slot(slots.stride, "state", "other_idx", rho_slot, 0);
-            Expr::from(0.5) * (rho_idx + rho_other)
+            // Distance-weighted (`lambda_f`) face density, MATCHING the flux module's Lerp
+            // convention (owner weight `lambda_f = d_neigh/(d_own+d_neigh)`, the same weight
+            // the Rhie-Chow d_p face interpolation uses): the assembly's face coeffs must
+            // interpolate identically to the flux module, else the mesh-relative subtraction
+            // carries a density inconsistent with the `phi` it is subtracted from on a
+            // graded / deformed / adaptive mesh (a plain 0.5 average mismatches by
+            // O(grad_rho*h) there). Written `rho_other + lambda_f*(rho_idx - rho_other)` so a
+            // uniform density (`rho_idx == rho_other`) reduces to EXACTLY `rho_other` bitwise
+            // — free stream preserved, and every current uniform/constant-density ALE test is
+            // runtime byte-identical (only the shader TEXT changes, so re-bless the snapshot).
+            // On a uniform mesh `lambda_f = 0.5` recovers the standard average. `lambda_f` is
+            // the per-face weight already emitted into the assembly face loop.
+            rho_other.clone() + Expr::ident("lambda_f") * (rho_idx - rho_other)
         }
         None => Expr::ident("constants").field("density"),
     };
@@ -1963,13 +1976,23 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
 
     // ALE continuity volume source: an equation whose `DivFlux` mass-flux
     // divergence is mesh-relative gains the compensating per-cell volume-change
-    // source. Mass balance on a moving cell (constant density):
+    // source. Mass balance on a moving cell:
     // ρ·(V^{n+1}−V^n)/dt + Σ_f φ_rel = 0, so the RHS (which already accumulated
     // `−Σ_f φ_rel` in the face loop) gains `−ρ·ale_dvdt_scl`. The rate is the
     // SCL/BDF1 rate — exactly what the mesh-flux closure guarantees
     // `Σ_f mesh_fluxes` sums to, so at a divergence-free absolute flux the two
     // cancel to f32 roundoff under any time scheme. Static mesh:
     // `ale_dvdt_scl == 0.0` bitwise and `rhs -= ρ·0.0` is the IEEE identity.
+    //
+    // Density is the PER-CELL `rho` (`ale_bounded_density`, = the `rho` state slot
+    // when present, else `constants.density`) — NOT `constants.density` — so it
+    // matches the per-cell `rho_f` the mesh-relative `Σ_f φ_rel` carries and the two
+    // geometric `rho·dV/dt` terms cancel EXACTLY for any density (not just `ρ≡ρ_ref`).
+    // Paired with a `non_conservative_ale` acoustic ddt (which then contributes NO
+    // geometric part), this makes the moving-mesh continuity row both 2nd-order and
+    // free-stream-preserving for a real (thermal-EOS) variable density. For the
+    // incompressible models (no `rho` slot) this is `constants.density`, bitwise the
+    // former behaviour.
     for equation in &system.equations {
         let has_ale_div_flux = equation.ops.iter().any(|op| {
             op.kind == DiscreteOpKind::Convection
@@ -1991,7 +2014,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             .expect("missing target offset");
         stmts.push(acc.sub_rhs(
             base_offset,
-            Expr::ident("constants").field("density") * Expr::ident("ale_dvdt_scl"),
+            ale_bounded_density.clone() * Expr::ident("ale_dvdt_scl"),
         ));
     }
 

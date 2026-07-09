@@ -409,7 +409,19 @@ pub fn emit_ddt_contributions(
                     // static integrator (base coeff V^{n+1}·c/dt). See the
                     // derivation at `ale_volume_locals_setup`. The dual-time
                     // (dtau) term stays on V^{n+1} by construction.
-                    let (phi_n, phi_nm1) = if ale {
+                    //
+                    // A `non_conservative_ale` own-variable ddt (e.g. the
+                    // compressibility/pseudo-acoustic `ddt(psi_precond, p)` in the
+                    // continuity row) OPTS OUT of the conservative weighting: it is an
+                    // intensive rate at V^{n+1} (like a cross-variable ddt), so its
+                    // history stays unweighted. This keeps its geometric mass-change
+                    // part OUT of the ddt (it would otherwise be a BDF2-rate
+                    // `psi*p*dV/dt` that mismatches the SCL-rate volume source + mesh
+                    // flux and caps the moving-mesh order at 1); the full per-cell
+                    // `rho*dV/dt` is instead carried by the continuity volume source at
+                    // the SCL rate, cancelling the mesh flux exactly. See
+                    // `Term::non_conservative_ale`.
+                    let (phi_n, phi_nm1) = if ale && !ddt_op.non_conservative_ale {
                         (
                             Expr::ident("ale_vol_ratio_n") * phi_n,
                             Expr::ident("ale_vol_ratio_nm1") * phi_nm1,

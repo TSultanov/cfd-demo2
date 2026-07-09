@@ -119,13 +119,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (constants.dtau > 0.0) {
         rhs_1 += state[idx * 15u + 11u] * dual_time_scale * state_iter[idx * 15u + 1u];
     }
-    rhs_2 += vol * state[idx * 15u + 9u] / select(constants.dt, state[idx * 15u + 10u], state[idx * 15u + 10u] > 0.0) * ale_vol_ratio_n * state_old[idx * 15u + 2u];
+    rhs_2 += vol * state[idx * 15u + 9u] / select(constants.dt, state[idx * 15u + 10u], state[idx * 15u + 10u] > 0.0) * state_old[idx * 15u + 2u];
     if (constants.time_scheme == 1u) {
         let r = constants.dt / constants.dt_old;
         let diag_bdf2 = vol * state[idx * 15u + 9u] / select(constants.dt, state[idx * 15u + 10u], state[idx * 15u + 10u] > 0.0) * (r * 2.0 + 1.0) / (r + 1.0);
         let factor_n = r + 1.0;
         let factor_nm1 = r * r / (r + 1.0);
-        rhs_2 = rhs_2 - vol * state[idx * 15u + 9u] / select(constants.dt, state[idx * 15u + 10u], state[idx * 15u + 10u] > 0.0) * ale_vol_ratio_n * state_old[idx * 15u + 2u] + vol * state[idx * 15u + 9u] / select(constants.dt, state[idx * 15u + 10u], state[idx * 15u + 10u] > 0.0) * (factor_n * ale_vol_ratio_n * state_old[idx * 15u + 2u] - factor_nm1 * ale_vol_ratio_nm1 * state_old_old[idx * 15u + 2u]);
+        rhs_2 = rhs_2 - vol * state[idx * 15u + 9u] / select(constants.dt, state[idx * 15u + 10u], state[idx * 15u + 10u] > 0.0) * state_old[idx * 15u + 2u] + vol * state[idx * 15u + 9u] / select(constants.dt, state[idx * 15u + 10u], state[idx * 15u + 10u] > 0.0) * (factor_n * state_old[idx * 15u + 2u] - factor_nm1 * state_old_old[idx * 15u + 2u]);
     }
     if (constants.dtau > 0.0) {
         rhs_2 += state[idx * 15u + 9u] * dual_time_scale * state_iter[idx * 15u + 2u];
@@ -215,7 +215,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let dev2_U_U_mu = select(constants.viscosity, constants.viscosity * lambda_f + constants.viscosity * (1.0 - lambda_f), !is_boundary);
         rhs_0 += dev2_U_U_mu * area * (normal.x * dev2_U_U_gx.x + normal.y * dev2_U_U_gy.x - 0.6666667 * dev2_U_U_div * normal.x);
         rhs_1 += dev2_U_U_mu * area * (normal.x * dev2_U_U_gx.y + normal.y * dev2_U_U_gy.y - 0.6666667 * dev2_U_U_div * normal.y);
-        var phi_0: f32 = fluxes[face_idx * 3u + 0u] - 0.5 * (state[idx * 15u + 11u] + state[other_idx * 15u + 11u]) * mesh_fluxes[face_idx];
+        var phi_0: f32 = fluxes[face_idx * 3u + 0u] - (state[other_idx * 15u + 11u] + lambda_f * (state[idx * 15u + 11u] - state[other_idx * 15u + 11u])) * mesh_fluxes[face_idx];
         if (owner != idx) {
             phi_0 -= phi_0 * 2.0;
         }
@@ -252,7 +252,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             } else {
             }
         }
-        var phi_1: f32 = fluxes[face_idx * 3u + 1u] - 0.5 * (state[idx * 15u + 11u] + state[other_idx * 15u + 11u]) * mesh_fluxes[face_idx];
+        var phi_1: f32 = fluxes[face_idx * 3u + 1u] - (state[other_idx * 15u + 11u] + lambda_f * (state[idx * 15u + 11u] - state[other_idx * 15u + 11u])) * mesh_fluxes[face_idx];
         if (owner != idx) {
             phi_1 -= phi_1 * 2.0;
         }
@@ -310,7 +310,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        var phi_2: f32 = fluxes[face_idx * 3u + 2u] - 0.5 * (state[idx * 15u + 11u] + state[other_idx * 15u + 11u]) * mesh_fluxes[face_idx];
+        var phi_2: f32 = fluxes[face_idx * 3u + 2u] - (state[other_idx * 15u + 11u] + lambda_f * (state[idx * 15u + 11u] - state[other_idx * 15u + 11u])) * mesh_fluxes[face_idx];
         if (owner != idx) {
             phi_2 -= phi_2 * 2.0;
         }
@@ -318,7 +318,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     bounded_sum_phi_0 += state[idx * 15u + 11u] * ale_dvdt_ddt;
     bounded_sum_phi_1 += state[idx * 15u + 11u] * ale_dvdt_ddt;
-    rhs_2 -= constants.density * ale_dvdt_scl;
+    rhs_2 -= state[idx * 15u + 11u] * ale_dvdt_scl;
     rhs[idx * 3u + 0u] = rhs_0;
     rhs[idx * 3u + 1u] = rhs_1;
     rhs[idx * 3u + 2u] = rhs_2;

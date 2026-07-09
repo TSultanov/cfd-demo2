@@ -71,6 +71,10 @@ pub struct DiscreteOp {
     /// `coeff * Phi_grad * V` to the target RHS (see `Term::viscous_dissipation`).
     /// Consumes grad_state, so it forces the gradients pipeline on.
     pub viscous_dissipation: bool,
+    /// Non-conservative own-variable ddt on ALE: skip the moving-volume `ale_vol_ratio`
+    /// weighting, treating the ddt as an intensive rate at `V^{n+1}` (see
+    /// `Term::non_conservative_ale`).
+    pub non_conservative_ale: bool,
     pub field: FieldRef,
     pub flux: Option<FluxRef>,
     pub coeff: Option<Coefficient>,
@@ -168,6 +172,7 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
         linearize_pressure_flux: term.linearize_pressure_flux.clone(),
         relative_to_mesh: term.relative_to_mesh,
         viscous_dissipation: term.viscous_dissipation,
+        non_conservative_ale: term.non_conservative_ale,
         field: term.field,
         flux: term.flux,
         coeff: term.coeff.clone(),

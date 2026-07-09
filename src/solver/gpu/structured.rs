@@ -441,6 +441,9 @@ pub struct StructuredGpuSolver {
     /// Model id (for the GUI's model-echo / caps) and accumulated sim time.
     model_id: &'static str,
     time: f64,
+    /// Convergence telemetry from the last [`step`](Self::step) (GUI readout;
+    /// parity with the CPU `StructuredModelSolver`).
+    last_stats: crate::solver::banded_schur::StructuredStepStats,
 }
 
 impl StructuredGpuSolver {
@@ -663,6 +666,7 @@ impl StructuredGpuSolver {
             dt,
             model_id: model.id,
             time: 0.0,
+            last_stats: crate::solver::banded_schur::StructuredStepStats::default(),
         })
     }
 
@@ -868,26 +872,39 @@ impl StructuredGpuSolver {
         let prep = self.prep.clone();
         self.dispatch_ids(&prep);
 
+        let mut solve_stats = crate::solver::banded_schur::StructuredStepStats::default();
         for _outer in 0..self.outer_iters {
             // state_iter <- state, then flux/gradients/assembly.
             self.copy_submit("state", "state_iter", n * sstride);
             let per = self.per_iter.clone();
             self.dispatch_ids(&per);
 
-            // Banded solve: x = A^{-1} rhs (fully on the GPU).
-            self.solver.solve(
+            // Banded solve: x = A^{-1} rhs (fully on the GPU). The host coupled
+            // path returns its linear + coupled-increment residuals; keep the LAST
+            // outer's (early outers are large by construction).
+            if let Some(st) = self.solver.solve(
                 &self.ctx,
                 self.buf("grid"),
                 self.buf("matrix_values"),
                 self.buf("rhs"),
                 self.buf("x"),
-            );
+            ) {
+                solve_stats = st;
+            }
 
             // Update: state <- f(x).
             let upd = self.update.clone();
             self.dispatch_ids(&upd);
         }
+        solve_stats.outer_iters = self.outer_iters as u32;
+        self.last_stats = solve_stats;
         self.time += self.dt;
+    }
+
+    /// Convergence telemetry from the most recent [`step`](Self::step) (GUI
+    /// readout; parity with the CPU `StructuredModelSolver::last_stats`).
+    pub fn last_stats(&self) -> crate::solver::banded_schur::StructuredStepStats {
+        self.last_stats
     }
 
     /// Read a state component field (length `nx*ny`).
@@ -1227,6 +1244,9 @@ impl BandedGpuLinAlg {
     /// Solve `A x = rhs` (matrix-free banded, block-Jacobi preconditioned). Picks
     /// CG for the SPD scalar system (`s == 1`) and BiCGStab for the indefinite
     /// coupled U–p system (`s > 1`). `x` is overwritten (initial guess zero).
+    /// Returns per-solve convergence telemetry (linear residual + coupled-increment
+    /// residuals) for the host coupled path; `None` for the on-device CG/GMRES
+    /// paths, which don't surface it to the GUI readout.
     fn solve(
         &self,
         ctx: &GpuContext,
@@ -1234,7 +1254,7 @@ impl BandedGpuLinAlg {
         mat: &wgpu::Buffer,
         rhs: &wgpu::Buffer,
         x: &wgpu::Buffer,
-    ) {
+    ) -> Option<crate::solver::banded_schur::StructuredStepStats> {
         let device = &ctx.device;
         let queue = &ctx.queue;
         if self.s == 1 {
@@ -1247,6 +1267,7 @@ impl BandedGpuLinAlg {
                 self.n,
             );
             self.cg(device, queue, grid, mat, rhs, x);
+            None
         } else if std::env::var("CFD2_STRUCTGPU_ONDEVICE_SOLVE").is_ok() {
             // Opt-in fully on-device GMRES (correct but per-dot readback makes it
             // slow for the many-iteration saddle-point solve).
@@ -1258,13 +1279,14 @@ impl BandedGpuLinAlg {
                 self.n,
             );
             self.gmres(device, queue, grid, mat, rhs, x);
+            None
         } else {
             // Coupled indefinite U-p: the assembly runs on the GPU, but the
             // banded block-GMRES inner solve is done host-side in f64 (one matrix
             // + rhs readback, one x upload per solve) — robust and fast, avoiding
             // O(iters^2) GPU dot-product round-trips on a weakly-preconditioned,
             // often-hundreds-of-iterations saddle-point system.
-            self.host_solve(ctx, mat, rhs, x);
+            Some(self.host_solve(ctx, mat, rhs, x))
         }
     }
 
@@ -1273,7 +1295,13 @@ impl BandedGpuLinAlg {
     /// `banded_schur::banded_gmres` (block-Jacobi or the model-owned Schur, per
     /// `self.precond`), and uploads the correction. Bit-identical to the CPU
     /// `StructuredModelSolver` coupled solve (same shared routine).
-    fn host_solve(&self, ctx: &GpuContext, mat: &wgpu::Buffer, rhs: &wgpu::Buffer, x: &wgpu::Buffer) {
+    fn host_solve(
+        &self,
+        ctx: &GpuContext,
+        mat: &wgpu::Buffer,
+        rhs: &wgpu::Buffer,
+        x: &wgpu::Buffer,
+    ) -> crate::solver::banded_schur::StructuredStepStats {
         let (nx, ny, s) = (self.nx as usize, self.ny as usize, self.s as usize);
         let a = read_buffer_f32(ctx, mat, nx * ny * BAND_STRIDE * s * s);
         let b = read_buffer_f32(ctx, rhs, nx * ny * s);
@@ -1286,7 +1314,7 @@ impl BandedGpuLinAlg {
             .or_else(|| std::thread::available_parallelism().ok().map(|n| n.get()))
             .unwrap_or(1)
             .max(1);
-        let (xh, _res) = crate::solver::banded_schur::banded_gmres_t(
+        let (xh, res, iters) = crate::solver::banded_schur::banded_gmres_t(
             &a,
             nx,
             ny,
@@ -1299,7 +1327,32 @@ impl BandedGpuLinAlg {
             threads,
             Some(&self.amg_cache),
         );
+        // Outer (Picard) residual: L-infinity of the coupled increment `xh` over
+        // the velocity / pressure slots (parity with the CPU solver's readout).
+        let (vel_slots, p_slot): (Vec<usize>, Option<usize>) = match &self.precond {
+            crate::solver::banded_schur::BandedPrecond::Schur { u_idx, p, .. } => {
+                (u_idx.clone(), Some(*p))
+            }
+            _ => ((0..s).collect(), None),
+        };
+        let (mut du, mut dp) = (0f32, 0f32);
+        for cell in 0..(nx * ny) {
+            let base = cell * s;
+            for &vs in &vel_slots {
+                du = du.max(xh[base + vs].abs());
+            }
+            if let Some(ps) = p_slot {
+                dp = dp.max(xh[base + ps].abs());
+            }
+        }
         ctx.queue.write_buffer(x, 0, bytemuck::cast_slice(&xh));
+        crate::solver::banded_schur::StructuredStepStats {
+            outer_iters: 0, // filled in by the caller (`step`), which owns the count
+            linear_iters: iters,
+            linear_res: res as f32,
+            outer_du: du,
+            outer_dp: dp,
+        }
     }
 
     /// Block-Jacobi preconditioned CG (SPD scalar system). Assumes `dinv` is set.

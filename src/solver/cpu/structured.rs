@@ -436,7 +436,18 @@ pub struct StructuredModelSolver {
     /// Model id + accumulated sim time (GUI parity with `StructuredGpuSolver`).
     model_id: &'static str,
     time: f64,
+    /// Convergence telemetry from the last [`step`](Self::step) (GUI readout):
+    /// `(outer_iters, linear rel-residual of the last inner solve, max |ΔU| and
+    /// max |Δp| across the last outer sweep = the nonlinear/Picard residual)`.
+    last_stats: StructuredStepStats,
 }
+
+/// Per-step convergence telemetry surfaced to the GUI (mirrors what the
+/// unstructured `step_stats()` reports). Defined in the always-compiled
+/// [`banded_schur`](crate::solver::banded_schur) module so the GPU backend (which
+/// compiles without the `cpu` feature) can produce the same shape; re-exported
+/// here for the CPU solver's callers.
+pub use crate::solver::banded_schur::StructuredStepStats;
 
 impl StructuredModelSolver {
     /// Build a structured solver for a coupled model on `grid`. `outer_iters` is
@@ -582,6 +593,7 @@ impl StructuredModelSolver {
             schur_layout,
             model_id: model.id,
             time: 0.0,
+            last_stats: StructuredStepStats::default(),
         })
     }
 
@@ -762,6 +774,18 @@ impl StructuredModelSolver {
             crate::solver::banded_schur::BandedPrecond::Schur { pressure_amg: true, .. }
         ) && !self.amg_active.load(std::sync::atomic::Ordering::Relaxed);
         let (mut applies, mut stalls) = (0u32, 0u32);
+        // Outer-convergence telemetry for the GUI readout (mirrors the unstructured
+        // "Coupled: N iters, U:.. P:.." / "Linear: .. res=.." lines). The banded
+        // solve returns the coupled increment `x`; its L-infinity over the velocity
+        // slots / pressure slot is the Picard outer residual, and `res` is the linear
+        // relative residual. We keep the LAST outer's values (early outers are large
+        // by construction) so a small readout means the step actually converged.
+        let (vel_slots, p_slot): (Vec<usize>, Option<usize>) = match &self.schur_layout {
+            Some(l) => (l.u_idx.clone(), Some(l.p)),
+            None => ((0..self.s).collect(), None),
+        };
+        let (mut last_res, mut last_du, mut last_dp) = (0f32, 0f32, 0f32);
+        let mut last_iters = 0u32;
         for _outer in 0..self.outer_iters {
             let snap = self.buffers.f32_vec("state");
             self.buffers.copy_into_f32("state_iter", &snap);
@@ -773,7 +797,7 @@ impl StructuredModelSolver {
             // host coupled solve).
             let a = self.buffers.f32_vec("matrix_values");
             let b = self.buffers.f32_vec("rhs");
-            let (x, res) = crate::solver::banded_schur::banded_gmres_t(
+            let (x, res, iters) = crate::solver::banded_schur::banded_gmres_t(
                 &a,
                 self.grid.nx,
                 self.grid.ny,
@@ -792,6 +816,21 @@ impl StructuredModelSolver {
                     stalls += 1;
                 }
             }
+            // L-infinity of the coupled increment over velocity / pressure slots.
+            let (mut du, mut dp) = (0f32, 0f32);
+            for cell in 0..n {
+                let base = cell * self.s;
+                for &vs in &vel_slots {
+                    du = du.max(x[base + vs].abs());
+                }
+                if let Some(ps) = p_slot {
+                    dp = dp.max(x[base + ps].abs());
+                }
+            }
+            last_res = res as f32;
+            last_du = du;
+            last_dp = dp;
+            last_iters = iters;
             self.buffers.copy_into_f32("x", &x);
             for id in &upd {
                 self.run(id, n, &ctx);
@@ -800,7 +839,20 @@ impl StructuredModelSolver {
         if counting_stalls && applies > 0 && stalls * 2 >= applies {
             self.amg_active.store(true, std::sync::atomic::Ordering::Relaxed);
         }
+        self.last_stats = StructuredStepStats {
+            outer_iters: self.outer_iters as u32,
+            linear_iters: last_iters,
+            linear_res: last_res,
+            outer_du: last_du,
+            outer_dp: last_dp,
+        };
         self.time += self.dt;
+    }
+
+    /// Convergence telemetry from the most recent [`step`](Self::step) — the GUI
+    /// readout mirrors the unstructured "Coupled/Linear" lines.
+    pub fn last_stats(&self) -> StructuredStepStats {
+        self.last_stats
     }
 
     /// Model id (GUI model-echo / caps).

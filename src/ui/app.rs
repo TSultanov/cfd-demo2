@@ -3370,7 +3370,9 @@ impl eframe::App for CFDApp {
                             )
                             .on_hover_text(
                                 "Dense Cartesian grid with NO connectivity indirection; \
-                                 immersed (Brinkman) obstacles instead of cut cells. GPU only. \
+                                 immersed (Brinkman) obstacles instead of cut cells. Defaults \
+                                 to the CPU-transpiled backend (fastest for the host-side \
+                                 banded coupled solve; the GPU backend is still selectable). \
                                  A lid-driven cavity / uniform-gas box demo. Hides the \
                                  unstructured meshers, mesh grading, moving mesh (ALE), and \
                                  the nozzle geometry.",
@@ -3379,10 +3381,18 @@ impl eframe::App for CFDApp {
                         if mode_changed {
                             if self.mesh_mode == MeshMode::Structured2D {
                                 // Structured has no ALE and a fixed model family:
-                                // force-disable moving mesh, use the GPU backend, and
-                                // switch to a structured model id.
+                                // force-disable moving mesh and switch to a structured
+                                // model id. DEFAULT to the CPU-transpiled backend: the
+                                // structured coupled saddle solve is host-side either
+                                // way (the GPU path reads the full banded matrix back
+                                // every outer iteration to solve in f64), so the GPU
+                                // backend adds per-outer readback + sync stalls for no
+                                // compute win — the CPU-transpiled solver is measurably
+                                // faster (~24 ms/step at 120×40) and drives the same
+                                // GPU-direct renderer via the state-upload bridge. The
+                                // GPU radio remains available for manual selection.
                                 self.enable_moving_mesh = false;
-                                self.backend = BackendChoice::Gpu;
+                                self.backend = BackendChoice::CpuTranspiled;
                                 if !self.model_id.ends_with("_structured") {
                                     self.model_id = "incompressible_momentum_structured";
                                 }
@@ -5080,6 +5090,9 @@ trait StructuredSteppable {
     fn st_layout(&self) -> &crate::solver::model::backend::state_layout::StateLayout;
     fn st_get_u(&self, off: usize) -> Vec<(f64, f64)>;
     fn st_get_scalar(&self, off: usize) -> Vec<f64>;
+    /// Convergence telemetry from the most recent `st_step` — plumbed into the
+    /// GUI's "Linear"/"Coupled" readout via `structured_step`.
+    fn st_stats(&self) -> crate::solver::banded_schur::StructuredStepStats;
 }
 impl StructuredSteppable for StructuredGpuSolver {
     fn st_step(&mut self) {
@@ -5096,6 +5109,9 @@ impl StructuredSteppable for StructuredGpuSolver {
     }
     fn st_get_scalar(&self, off: usize) -> Vec<f64> {
         self.get_scalar(off)
+    }
+    fn st_stats(&self) -> crate::solver::banded_schur::StructuredStepStats {
+        self.last_stats()
     }
 }
 impl StructuredSteppable for StructuredModelSolver {
@@ -5114,6 +5130,9 @@ impl StructuredSteppable for StructuredModelSolver {
     fn st_get_scalar(&self, off: usize) -> Vec<f64> {
         self.get_scalar(off)
     }
+    fn st_stats(&self) -> crate::solver::banded_schur::StructuredStepStats {
+        self.last_stats()
+    }
 }
 
 fn structured_step(s: &mut impl StructuredSteppable, readback: bool) -> StepOutcome {
@@ -5121,6 +5140,7 @@ fn structured_step(s: &mut impl StructuredSteppable, readback: bool) -> StepOutc
     s.st_step();
     let step_time_ms = t0.elapsed().as_secs_f32() * 1000.0;
     let dt = s.st_dt() as f32;
+    let cstats = s.st_stats();
 
     let ports = UiPortSet::from_layout(s.st_layout());
     let readback = if readback {
@@ -5179,11 +5199,30 @@ fn structured_step(s: &mut impl StructuredSteppable, readback: bool) -> StepOutc
         }
     });
 
+    // Convergence telemetry for the GUI readout. The banded solve is a direct
+    // f64 GMRES per outer, so we report the LAST outer's linear residual as a
+    // single [`LinearSolverStats`] (drives the "Linear:" line) plus the coupled
+    // (Picard) increment residuals as the "Coupled: U/P" line — matching the
+    // unstructured `UnifiedSolver` reporting the worker reads elsewhere.
+    let linear_stats = if cstats.outer_iters > 0 {
+        vec![LinearSolverStats {
+            iterations: cstats.linear_iters,
+            residual: cstats.linear_res,
+            converged: cstats.linear_res <= crate::solver::banded_schur::default_step_tol() as f32,
+            diverged: !cstats.linear_res.is_finite(),
+            time: std::time::Duration::ZERO,
+        }]
+    } else {
+        Vec::new()
+    };
+
     StepOutcome {
         dt,
         step_time_ms,
-        linear_stats: Vec::new(),
-        outer_iters: None,
+        linear_stats,
+        outer_iters: Some(cstats.outer_iters),
+        outer_residual_u: Some(cstats.outer_du),
+        outer_residual_p: Some(cstats.outer_dp),
         diverged,
         should_stop: false,
         readback,
@@ -5651,8 +5690,9 @@ fn solver_worker_main(
             ..Default::default()
         };
 
-        // Outer-iteration / positivity telemetry only exists on the UnifiedSolver
-        // path; the structured banded solver reports none.
+        // Outer-iteration / positivity telemetry on the UnifiedSolver path comes
+        // off `step_stats()`; the structured banded solver has no UnifiedSolver, so
+        // it rides the `StepOutcome` fields `structured_step` populated instead.
         if let Some(solver) = mode.unified_solver() {
             let step_stats = solver.step_stats();
             if let Some(iters) = step_stats.outer_iterations {
@@ -5672,6 +5712,16 @@ fn solver_worker_main(
             stats.positivity_pressure_undershoots = step_stats
                 .positivity_pressure_undershoot_count
                 .unwrap_or(0);
+        } else {
+            if let Some(iters) = outcome.outer_iters {
+                stats.outer_iterations = iters;
+            }
+            if let Some(res_u) = outcome.outer_residual_u {
+                stats.outer_residual_u = res_u;
+            }
+            if let Some(res_p) = outcome.outer_residual_p {
+                stats.outer_residual_p = res_p;
+            }
         }
 
         let mut trace_max_u: Option<f64> = None;

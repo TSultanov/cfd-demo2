@@ -551,6 +551,35 @@ fn solid_mask(case: &Case, wp: usize, hp: usize) -> Vec<bool> {
     m
 }
 
+/// Structured-only obstacle-interior diagnostics: the immersed Brinkman solid
+/// must be (near-)quiescent. Returns `(max speed strictly inside the obstacle,
+/// peak-to-peak pressure over that interior)`. A leaky Rhie–Chow `d_p` inside the
+/// solid (the ClosedForm-without-mask bug) shows up here as a nonzero interior
+/// speed + a pressure spot; the unstructured cut-cell reference has no interior
+/// cells at all, so this is a structured-field-only check.
+fn obstacle_interior_stats(field: &Field, case: &Case) -> (f64, f64) {
+    let Some((cx, cy, r)) = case.obstacle else {
+        return (0.0, 0.0);
+    };
+    let mut vmax = 0.0f64;
+    let (mut pmin, mut pmax) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut any = false;
+    for (i, &(x, y)) in field.centroids.iter().enumerate() {
+        // Strictly interior (r*0.6) so the fluid/solid interface ring is excluded.
+        if (x - cx).hypot(y - cy) < r * 0.6 {
+            any = true;
+            vmax = vmax.max(field.speed[i]);
+            pmin = pmin.min(field.p[i]);
+            pmax = pmax.max(field.p[i]);
+        }
+    }
+    if any {
+        (vmax, pmax - pmin)
+    } else {
+        (0.0, 0.0)
+    }
+}
+
 /// Relative L2 discrepancy over the unmasked (fluid) probe points.
 fn rel_l2(a: &[f64], b: &[f64], mask: &[bool]) -> f64 {
     let (mut num, mut den) = (0.0, 0.0);
@@ -678,6 +707,33 @@ fn run_case(case: &Case, tol: f64) -> f64 {
         umean
     );
     write_png(case, &ss, &us, &mask, wp, hp, vmax);
+
+    // With an immersed Brinkman obstacle, the structured solid interior must stay
+    // quiescent: the Rhie–Chow `d_p` is masked to ~0 inside the penalty region, so
+    // no pressure-driven flux leaks through (the fix for the interior-velocity +
+    // pressure-spot + interface-checkerboard defects). The cut-cell reference has
+    // no interior cells, so this is a structured-only sanity bar.
+    if case.obstacle.is_some() {
+        let (iv, ip) = obstacle_interior_stats(&sf, case);
+        println!(
+            "[cmp][{}] obstacle interior: max|U|={:.4} ({:.1}% of vmax {:.4})  p_ptp={:.4}",
+            case.name,
+            iv,
+            iv / vmax * 100.0,
+            vmax,
+            ip
+        );
+        assert!(
+            iv < 0.08 * vmax,
+            "[{}] structured obstacle-interior speed {:.4} = {:.1}% of vmax {:.4} exceeds 8% \
+             — Brinkman/Rhie–Chow d_p leak inside the solid",
+            case.name,
+            iv,
+            iv / vmax * 100.0,
+            vmax
+        );
+    }
+
     assert!(
         disc < tol,
         "[{}] structured vs unstructured rel-L2 {:.3}% exceeds tol {:.1}%",
@@ -778,6 +834,71 @@ fn diag_structured_channel_development() {
 
 }
 
+/// DIAGNOSTIC (not a gate): GUI-scale perf probe for issue #3 (structured GUI
+/// slowness). The exact GUI regime — all-Mach thermal, 120x40 dense grid, a
+/// Brinkman cylinder, FROM REST — timed per step and per preconditioner, reporting
+/// the inner GMRES iteration count (the h-dependence signature of block-Jacobi vs
+/// the h-independent Schur+AMG). Run with `--ignored --nocapture`.
+#[test]
+#[ignore]
+fn diag_structured_obstacle_perf() {
+    use cfd2::solver::banded_schur::CoupledPrecondKind;
+    let (nx, ny, lx, ly) = (120usize, 40usize, 3.0f64, 1.0f64);
+    let (inlet, psi, density, viscosity, dt, outer) = (0.5f64, 0.02f64, 1.0f64, 0.02f64, 0.02f64, 8usize);
+    let (cx, cy, r) = (1.0f64, 0.5f64, 0.16f64);
+    let model = allmach_thermal_structured_model().expect("model");
+    let s = model.system.unknowns_per_cell() as usize;
+    for &precond in &[CoupledPrecondKind::BlockJacobi, CoupledPrecondKind::SchurAmg] {
+        let mut solver = StructuredModelSolver::with_config(
+            StructuredGrid::new(nx, ny, lx, ly), &model, dt, outer, Scheme::SecondOrderUpwindVanLeer, TimeScheme::BDF2,
+        ).expect("solver");
+        solver.set_engine(cfd2::solver::cpu::CpuEngine::Transpiled, cmp_threads());
+        solver.set_fluid(density, viscosity);
+        solver.set_preconditioner(precond);
+        // Thermal config seeds (from rest — velocity stays at rest).
+        seed_named(&mut solver, "psi", psi);
+        seed_named(&mut solver, "psi_precond", psi.max(1.0));
+        seed_named(&mut solver, "rho", density);
+        seed_named(&mut solver, "rho_t_ref", density * ALLMACH_T_REF);
+        seed_named(&mut solver, "T", ALLMACH_T_REF);
+        seed_named(&mut solver, "t_ref", ALLMACH_T_REF);
+        seed_named(&mut solver, "rho_floor", psi * 1.0e-5);
+        seed_named(&mut solver, "dt_local", 0.0);
+        seed_named(&mut solver, "psi_ref", psi);
+        seed_named(&mut solver, "u_ref", 2.0 * inlet.max(0.2));
+        seed_named(&mut solver, "precond_mask", 1.0);
+        // Brinkman cylinder.
+        if let Some(pen) = solver.field_offset("ibm_penalty_U") {
+            solver.set_state(pen, move |x: f64, y: f64| if (x - cx).hypot(y - cy) < r { -1.0e5 } else { 0.0 });
+        }
+        let case = Case {
+            name: "perf", nx, ny, lx, ly, density, viscosity, inlet,
+            dt, steps: 0, outer: outer as u32, scheme: Scheme::SecondOrderUpwindVanLeer, time: TimeScheme::BDF2,
+            bc: Bc::Channel, obstacle: Some((cx, cy, r)), physics: Physics::AllMachThermal { psi },
+        };
+        let bc = flow_bc(&case, s);
+        solver.set_boundaries(move |e, x, y| bc(e, x, y));
+        println!("[perf {precond:?} {nx}x{ny} allmach-thermal + cylinder FROM REST]");
+        let t0 = std::time::Instant::now();
+        for st in 0..60 {
+            let t = std::time::Instant::now();
+            solver.step();
+            let ms = t.elapsed().as_secs_f64() * 1000.0;
+            if st < 3 || st % 20 == 19 {
+                let stx = solver.last_stats();
+                let ux = solver.state_field(0);
+                let uy = solver.state_field(1);
+                let umax = ux.iter().zip(&uy).map(|(a, b)| a.hypot(*b)).fold(0.0, f64::max);
+                println!(
+                    "  step={:3} {:7.1}ms lin_iters={:4} lin_res={:.2e} du={:.2e} dp={:.2e} umax={:.3e} amg={}",
+                    st + 1, ms, stx.linear_iters, stx.linear_res, stx.outer_du, stx.outer_dp, umax, solver.amg_is_active()
+                );
+            }
+        }
+        println!("[perf {precond:?}] total {:.2}s for 60 steps = {:.1}ms/step avg\n", t0.elapsed().as_secs_f64(), t0.elapsed().as_secs_f64() / 60.0 * 1000.0);
+    }
+}
+
 #[test]
 fn incompressible_lid_matches() {
     let mut c = channel_incompressible();
@@ -816,6 +937,22 @@ fn allmach_thermal_channel_matches() {
     c.physics = Physics::AllMachThermal { psi: 0.02 };
     c.steps = 90;
     run_case(&c, 0.08);
+}
+
+/// ALL-MACH THERMAL with a Brinkman immersed cylinder — the exact GUI scenario
+/// (thermal model, dense grid, immersed obstacle) that surfaced the interior
+/// non-zero velocity + near-obstacle checkerboard. The Rhie–Chow `d_p` mask keeps
+/// the solid interior quiescent (asserted by `obstacle_interior_stats` in
+/// `run_case`) while the fluid field still matches the cut-cell reference.
+#[test]
+fn allmach_thermal_cylinder_matches() {
+    let mut c = channel_incompressible();
+    c.name = "allmach_thermal_cylinder";
+    c.physics = Physics::AllMachThermal { psi: 0.02 };
+    c.obstacle = Some((0.8, 0.5, 0.16));
+    c.steps = 120;
+    // Brinkman-IBM vs cut-cell carve — a looser but physically-close bar.
+    run_case(&c, 0.18);
 }
 
 /// COMPRESSIBLE (density-based, central-upwind): an all-inlet uniform freestream

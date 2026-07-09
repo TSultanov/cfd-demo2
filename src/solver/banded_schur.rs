@@ -647,7 +647,8 @@ pub fn banded_gmres(
     max_outer: usize,
     tol: f64,
 ) -> (Vec<f32>, f64) {
-    banded_gmres_t(a, nx, ny, s, b, precond, restart, max_outer, tol, 1, None)
+    let (x, res, _iters) = banded_gmres_t(a, nx, ny, s, b, precond, restart, max_outer, tol, 1, None);
+    (x, res)
 }
 
 /// Threaded variant: `threads` parallelizes the per-cell SpMV / preconditioner
@@ -667,7 +668,7 @@ pub fn banded_gmres_t(
     tol: f64,
     threads: usize,
     amg_cache: Option<&StructuredAmgCache>,
-) -> (Vec<f32>, f64) {
+) -> (Vec<f32>, f64, u32) {
     let built = build(a, nx, ny, s, precond);
     if matches!(built, Built::Schur(_)) {
         return banded_fgmres(
@@ -679,6 +680,8 @@ pub fn banded_gmres_t(
     let b64: Vec<f64> = b.iter().map(|&v| v as f64).collect();
     let bnorm = pnorm(threads, &b64).max(1e-30);
     let mut x = vec![0.0f64; n];
+    // Total inner (Arnoldi) iterations across restart cycles (GUI "iters=.." readout).
+    let mut total_iters = 0u32;
 
     for _outer in 0..max_outer {
         // r0 = M^{-1}(b - A x)
@@ -687,7 +690,7 @@ pub fn banded_gmres_t(
         let r = apply(&built, a, nx, ny, s, &r0, threads, None);
         let beta = pnorm(threads, &r);
         if beta / bnorm <= tol {
-            return (x.iter().map(|&v| v as f32).collect(), beta / bnorm);
+            return (x.iter().map(|&v| v as f32).collect(), beta / bnorm, total_iters);
         }
 
         let m = restart;
@@ -735,6 +738,7 @@ pub fn banded_gmres_t(
                 break;
             }
         }
+        total_iters += k_used as u32;
 
         let kk = k_used;
         let mut y = vec![0.0f64; kk];
@@ -752,7 +756,11 @@ pub fn banded_gmres_t(
         let ax = spmv_t(a, nx, ny, s, &x, threads);
         let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
         if pnorm(threads, &res) / bnorm <= tol {
-            return (x.iter().map(|&v| v as f32).collect(), pnorm(threads, &res) / bnorm);
+            return (
+                x.iter().map(|&v| v as f32).collect(),
+                pnorm(threads, &res) / bnorm,
+                total_iters,
+            );
         }
     }
     let ax = spmv_t(a, nx, ny, s, &x, threads);
@@ -763,7 +771,7 @@ pub fn banded_gmres_t(
             "[banded] MAXED max_outer={max_outer} restart={restart} rel_res={rel:.3e} (tol={tol:.1e} not reached)"
         );
     }
-    (x.iter().map(|&v| v as f32).collect(), rel)
+    (x.iter().map(|&v| v as f32).collect(), rel, total_iters)
 }
 
 /// Restarted, RIGHT-preconditioned FLEXIBLE GMRES — FGMRES(`restart`) — for the
@@ -784,11 +792,14 @@ fn banded_fgmres(
     tol: f64,
     threads: usize,
     amg_cache: Option<&StructuredAmgCache>,
-) -> (Vec<f32>, f64) {
+) -> (Vec<f32>, f64, u32) {
     let n = nx * ny * s;
     let b64: Vec<f64> = b.iter().map(|&v| v as f64).collect();
     let bnorm = pnorm(threads, &b64).max(1e-30);
     let mut x = vec![0.0f64; n];
+    // Total inner (Arnoldi) iterations across restart cycles — the GMRES iteration
+    // count reported to the GUI "Linear: iters=.." readout.
+    let mut total_iters = 0u32;
 
     // Best-iterate / monotonicity guard (mirrors the unstructured fgmres). A
     // data-dependent preconditioner — the Schur heavy-ball safeguard, or the AMG
@@ -850,14 +861,18 @@ fn banded_fgmres(
         if !beta.is_finite() || beta > best_beta * RESTART_GROWTH_TOL {
             let ax = spmv_t(a, nx, ny, s, &best_x, threads);
             let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-            return (best_x.iter().map(|&v| v as f32).collect(), pnorm(threads, &res) / bnorm);
+            return (
+                best_x.iter().map(|&v| v as f32).collect(),
+                pnorm(threads, &res) / bnorm,
+                total_iters,
+            );
         }
         if beta < best_beta {
             best_beta = beta;
             best_x.copy_from_slice(&x);
         }
         if beta / bnorm <= tol {
-            return (x.iter().map(|&v| v as f32).collect(), beta / bnorm);
+            return (x.iter().map(|&v| v as f32).collect(), beta / bnorm, total_iters);
         }
 
         let m = restart;
@@ -907,6 +922,7 @@ fn banded_fgmres(
                 break;
             }
         }
+        total_iters += k_used as u32;
 
         // Back-substitute for y, update x = x + Z y (preconditioned basis).
         let kk = k_used;
@@ -925,7 +941,7 @@ fn banded_fgmres(
         let ax = spmv(a, nx, ny, s, &x);
         let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
         if norm(&res) / bnorm <= tol {
-            return (x.iter().map(|&v| v as f32).collect(), norm(&res) / bnorm);
+            return (x.iter().map(|&v| v as f32).collect(), norm(&res) / bnorm, total_iters);
         }
     }
     let ax = spmv(a, nx, ny, s, &x);
@@ -936,7 +952,7 @@ fn banded_fgmres(
             "[banded] MAXED max_outer={max_outer} restart={restart} rel_res={rel:.3e} (tol={tol:.1e} not reached)"
         );
     }
-    (x.iter().map(|&v| v as f32).collect(), rel)
+    (x.iter().map(|&v| v as f32).collect(), rel, total_iters)
 }
 
 /// A model's declared Schur block layout, extracted once so a solver can rebuild
@@ -948,6 +964,23 @@ pub struct SchurLayout {
     pub p: usize,
     pub omega: f32,
     pub sweeps_cap: u32,
+}
+
+/// Per-step convergence telemetry surfaced to the GUI by the structured banded
+/// solvers (CPU [`StructuredModelSolver`] and GPU `StructuredGpuSolver`). Lives
+/// here — in the always-compiled solve module, not the feature-gated `cpu`
+/// module — so both backends can produce it. Mirrors what the unstructured
+/// `step_stats()` reports: `outer_iters`, the last inner solve's linear
+/// rel-residual, and the L-infinity coupled-increment (Picard) residuals over
+/// the velocity / pressure slots.
+#[derive(Default, Clone, Copy)]
+pub struct StructuredStepStats {
+    pub outer_iters: u32,
+    /// Inner GMRES iterations of the last outer's linear solve.
+    pub linear_iters: u32,
+    pub linear_res: f32,
+    pub outer_du: f32,
+    pub outer_dp: f32,
 }
 
 impl BandedPrecond {

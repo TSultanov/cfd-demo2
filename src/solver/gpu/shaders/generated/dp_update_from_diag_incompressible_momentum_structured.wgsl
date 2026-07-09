@@ -28,5 +28,6 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let rho = max(constants.density, 0.000000000001);
     let dt = max(constants.dt, 0.0);
     let d_p = constants.alpha_u * dt / rho;
-    state[base + 3u] = d_p;
+    let d_p_ibm = d_p / (1.0 + abs(state[base + 8u]) * d_p);
+    state[base + 3u] = d_p_ibm;
 }

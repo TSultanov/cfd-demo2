@@ -754,6 +754,30 @@ fn generate_dp_update_from_diag_kernel_program(
 
     match dp_formulation {
         DpFormulation::ClosedForm => {
+            // Immersed-boundary (Brinkman) obstacles carry a per-cell momentum
+            // penalty field `ibm_penalty_U` (large NEGATIVE inside the solid,
+            // 0 in the fluid — see incompressible_momentum.rs). Where it is
+            // present, the Rhie-Chow coupling `d_p` MUST collapse to ~0 inside
+            // the solid: otherwise the pressure-Laplacian coupling (`rho*d_p`),
+            // the RC face-flux `d_p*grad(p)` term, AND the post-solve velocity
+            // correction all read a full-strength fluid `d_p` and leak
+            // pressure-driven flow THROUGH the obstacle (interior pressure spot,
+            // nonzero interior velocity, and a fluid/solid-interface checkerboard
+            // — the documented requirement at incompressible_momentum.rs:74-76).
+            //
+            // Rather than switch to the assembled-diagonal `d_p = V/a_P` (which
+            // regresses coupled MMS u-order / outer-loop stability in the clean
+            // case — see incompressible_momentum.rs:271), keep the closed form
+            // and multiply by the analytic Brinkman mask
+            //   d_p <- d_p / (1 + |Sp|·d_p),
+            // which is EXACTLY the closed form in the fluid (Sp=0 ⇒ mask=1, so
+            // MMS order and stability are untouched) and collapses to ~1/|Sp| ≈ 0
+            // where the penalty inflates the momentum diagonal. `|Sp|·d_p` is
+            // dimensionless (|Sp| has units Density/Time, d_p = α_u·dt/ρ).
+            // Field name matches `IBM_MOMENTUM_PENALTY_FIELD` (kept a literal to
+            // stay resolvable in the build.rs `include!()` codegen context).
+            let ibm_penalty_offset = registry.state_layout().offset_for("ibm_penalty_U");
+
             let mut program = KernelProgram::new(
                 "dp_update_from_diag",
                 DispatchDomain::Cells,
@@ -761,7 +785,7 @@ fn generate_dp_update_from_diag_kernel_program(
                 rhie_chow_state_bindings(),
             );
             let indexing_stmts = vec![dsl::let_expr("base", Expr::ident("idx") * stride)];
-            let preamble_stmts = vec![
+            let mut preamble_stmts = vec![
                 dsl::let_expr(
                     "rho",
                     dsl::max(
@@ -779,9 +803,22 @@ fn generate_dp_update_from_diag_kernel_program(
                         / Expr::ident("rho"),
                 ),
             ];
+            // The value written to `d_p`: the plain closed form, or the
+            // Brinkman-masked closed form when an IBM penalty field exists.
+            let write_ident = if let Some(ibm_off) = ibm_penalty_offset {
+                let sp_abs = dsl::abs(dsl::array_access(
+                    "state",
+                    Expr::ident("base") + ibm_off,
+                ));
+                let denom = Expr::lit_f32(1.0) + sp_abs * Expr::ident("d_p");
+                preamble_stmts.push(dsl::let_expr("d_p_ibm", Expr::ident("d_p") / denom));
+                "d_p_ibm"
+            } else {
+                "d_p"
+            };
             let body_stmts = vec![dsl::assign_expr(
                 dsl::array_access("state", Expr::ident("base") + d_p_offset),
-                Expr::ident("d_p"),
+                Expr::ident(write_ident),
             )];
             program.indexing = indexing_stmts;
             program.preamble = preamble_stmts;
@@ -790,6 +827,13 @@ fn generate_dp_update_from_diag_kernel_program(
                 .side_effects
                 .read_set
                 .insert(EffectResource::binding(0, 1));
+            if let Some(ibm_off) = ibm_penalty_offset {
+                // The masked form reads the (static, host-set) penalty field.
+                program
+                    .side_effects
+                    .read_set
+                    .insert(EffectResource::component(0, 0, format!("state:{ibm_off}")));
+            }
             program
                 .side_effects
                 .write_set

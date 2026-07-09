@@ -58,6 +58,12 @@ pub struct StepOutcome {
     pub step_time_ms: f32,
     pub linear_stats: Vec<LinearSolverStats>,
     pub outer_iters: Option<u32>,
+    /// Outer (Picard) residuals for the GUI "Coupled: U/P" readout. Populated by
+    /// the structured banded path (whose solver is not a [`UnifiedSolver`], so the
+    /// worker cannot read them off `step_stats()`); `None` on the unstructured path,
+    /// where the worker sources them from the `UnifiedSolver` directly.
+    pub outer_residual_u: Option<f32>,
+    pub outer_residual_p: Option<f32>,
     pub diverged: Option<DivergeReason>,
     pub should_stop: bool,
     pub readback: Option<Readback>,

@@ -667,6 +667,8 @@ impl SolverDriver {
                     step_time_ms,
                     linear_stats: Vec::new(),
                     outer_iters: None,
+                    outer_residual_u: None,
+                    outer_residual_p: None,
                     diverged: Some(DivergeReason::StepError(err)),
                     should_stop: false,
                     readback: None,
@@ -704,6 +706,9 @@ impl SolverDriver {
             step_time_ms,
             linear_stats,
             outer_iters,
+            // The unstructured worker reads outer residuals off `step_stats()`.
+            outer_residual_u: None,
+            outer_residual_p: None,
             diverged,
             should_stop,
             readback,

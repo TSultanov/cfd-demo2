@@ -1172,15 +1172,18 @@ impl CFDApp {
         self.selected_scheme = d.advection_scheme;
         self.time_scheme = d.time_scheme;
         self.selected_preconditioner = d.preconditioner;
-        // STRUCTURED coupled preconditioner defaults (fast path first):
-        // saddle models (incompressible / all-Mach thermal) → Schur+AMG — the
-        // h-independent pressure solve that beat unstructured in the channel
-        // benchmark (~30 ms/step vs block-Jacobi ~285 ms/step at 120×40). From-rest
-        // safety comes from the adaptive AMG latch (heavy-ball until A_pp is
-        // well-conditioned, then AMG). Density-based compressible has no Schur
-        // layout → block-Jacobi. User can override via the radio.
+        // STRUCTURED coupled preconditioner defaults:
+        // - pure incompressible saddle → Schur+AMG (h-independent pressure solve;
+        //   adaptive AMG latch covers from-rest). Measured ~30 ms/step vs BJ ~285
+        //   at 120×40.
+        // - all-Mach thermal → BlockJacobi: psi_precond already stabilizes the
+        //   pressure diagonal (faster than Schur+AMG in the fair channel benchmark).
+        //   Schur's heavy-ball path STALLS when a wake hits an immersed obstacle
+        //   (lin iters 7 → 800+, multi-second steps) because the stall latch only
+        //   watched residual>0.7, not "converges but takes hundreds of iters".
+        // - compressible → BlockJacobi (no Schur layout).
         self.structured_precond = match self.model_id {
-            "incompressible_momentum_structured" | "allmach_thermal_structured" => {
+            "incompressible_momentum_structured" => {
                 crate::solver::banded_schur::CoupledPrecondKind::SchurAmg
             }
             _ => crate::solver::banded_schur::CoupledPrecondKind::BlockJacobi,

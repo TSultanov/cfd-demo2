@@ -871,7 +871,12 @@ impl StructuredModelSolver {
             );
             if counting_stalls {
                 applies += 1;
-                if res > 0.7 {
+                // Residual stall (near-total non-progress) OR slow-but-eventual
+                // convergence: heavy-ball is h-dependent and can burn hundreds of
+                // FGMRES iters once a wake hits an immersed obstacle, yet still
+                // reach tol — residual>0.7 alone never fires, AMG never latches,
+                // and the GUI "freezes". Count high iteration counts as stalls too.
+                if res > 0.7 || iters > 60 {
                     stalls += 1;
                 }
             }

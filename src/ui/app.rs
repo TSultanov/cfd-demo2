@@ -5,7 +5,9 @@ use crate::solver::mesh::{
     BoundarySides, BoundaryType, ChannelWithObstacle, LloydConfig, Mesh, Nozzle,
 };
 use crate::solver::model::{
-    all_models, compressible_model_with_eos, ModelPreconditionerSpec, ModelSpec,
+    allmach_pressure_ale_model, allmach_pressure_model, allmach_thermal_ale_model,
+    allmach_thermal_model, compressible_model_with_eos, incompressible_momentum_ale_model,
+    incompressible_momentum_model, ModelPreconditionerSpec, ModelSpec,
 };
 use crate::solver::scheme::Scheme;
 use crate::solver::cpu::structured::StructuredModelSolver;
@@ -486,17 +488,23 @@ impl SolverMode {
         }
     }
 
-    /// Apply live runtime params. Structured supports fluid + dt; the unstructured
-    /// arms route to the full `SolverDriver::apply_params`.
+    /// Apply live runtime params. Structured supports fluid + dt + outer Picard
+    /// knobs; the unstructured arms route to the full `SolverDriver::apply_params`.
     fn apply_params_any(&mut self, params: &RuntimeParams) {
         match self {
             SolverMode::Structured(s) => {
                 s.set_dt(params.requested_dt as f64);
                 s.set_fluid(params.density as f64, params.viscosity as f64);
+                s.set_outer_iters(params.outer_iters.max(1) as usize);
+                s.set_outer_auto_converge(params.outer_auto_converge);
             }
             SolverMode::StructuredCpu(s) => {
                 s.solver.set_dt(params.requested_dt as f64);
                 s.solver.set_fluid(params.density as f64, params.viscosity as f64);
+                s.solver
+                    .set_outer_iters(params.outer_iters.max(1) as usize);
+                s.solver
+                    .set_outer_auto_converge(params.outer_auto_converge);
             }
             _ => self.driver_mut().apply_params(params),
         }
@@ -1151,17 +1159,19 @@ impl CFDApp {
         self.selected_scheme = d.advection_scheme;
         self.time_scheme = d.time_scheme;
         self.selected_preconditioner = d.preconditioner;
-        // STRUCTURED coupled preconditioner default = block-Jacobi (per-cell s×s
-        // inverse) for ALL models: it develops the channel cleanly FROM REST and is
-        // fast with the transpiled kernels (~27ms/step at 60×20). The Schur variants
-        // are more fragile on the from-rest startup transient — plain Schur's
-        // heavy-ball pressure solve is h-dependent (slow at GUI grid sizes) and
-        // Schur+AMG's V-cycle blows up transiently before recovering, because
-        // (unlike the unstructured SchurPrecond) it lacks the ADAPTIVE ACTIVATION
-        // that delays AMG until A_pp is well-conditioned. Porting that is the path
-        // to a fast h-independent structured default; block-Jacobi is the robust
-        // one meanwhile. The user can still override via the radio.
-        self.structured_precond = crate::solver::banded_schur::CoupledPrecondKind::BlockJacobi;
+        // STRUCTURED coupled preconditioner defaults (fast path first):
+        // saddle models (incompressible / all-Mach thermal) → Schur+AMG — the
+        // h-independent pressure solve that beat unstructured in the channel
+        // benchmark (~30 ms/step vs block-Jacobi ~285 ms/step at 120×40). From-rest
+        // safety comes from the adaptive AMG latch (heavy-ball until A_pp is
+        // well-conditioned, then AMG). Density-based compressible has no Schur
+        // layout → block-Jacobi. User can override via the radio.
+        self.structured_precond = match self.model_id {
+            "incompressible_momentum_structured" | "allmach_thermal_structured" => {
+                crate::solver::banded_schur::CoupledPrecondKind::SchurAmg
+            }
+            _ => crate::solver::banded_schur::CoupledPrecondKind::BlockJacobi,
+        };
         self.alpha_u = d.alpha_u;
         self.alpha_p = d.alpha_p;
         self.outer_iters = d.outer_iters;
@@ -1332,12 +1342,12 @@ impl CFDApp {
         }
     }
 
-    /// The physical models the GUI Model dropdown offers. `all_models()` also
-    /// contains MMS / biharmonic / demo *verification* variants which carry the
-    /// velocity+pressure ports (so `UiPortSet::is_complete()` alone would expose
-    /// them) but only ever reproduce a manufactured solution — never a physical
-    /// flow a user would want to run. The dropdown is therefore restricted to the
-    /// genuine flow models; the completeness check is kept as a secondary guard.
+    /// The physical models the GUI Model dropdown offers. Static lists only —
+    /// never call `all_models()` here: that rebuilds every registered model
+    /// (including ~120 ms compressible flux-module kernel programs ×4) and was
+    /// measured at ~485 ms per call, paid on every UI frame that painted this
+    /// panel. Verification variants (`*_mms*`, `*biharmonic*`, `*demo*`) are
+    /// intentionally excluded.
     fn supported_ui_models(mesh_mode: MeshMode) -> Vec<(&'static str, &'static str)> {
         // Structured mode offers exactly the models with a `TopologyMode::Structured2D`
         // variant (dense-Cartesian, immersed obstacles) — a fixed short list.
@@ -1349,41 +1359,23 @@ impl CFDApp {
             ];
         }
         // Only physical-flow models belong in the GUI (these are exactly the ones
-        // `model_label` names). Verification variants (`*_mms*`, `*biharmonic*`,
-        // `*demo*`) are excluded.
-        const GUI_PHYSICAL_MODELS: &[&str] = &[
-            "incompressible_momentum",
-            "compressible",
-            "allmach_pressure",
-            "allmach_thermal",
-        ];
-        let mut out = Vec::new();
-        for model in all_models().expect("failed to build model definitions") {
-            if !GUI_PHYSICAL_MODELS.contains(&model.id) {
-                continue;
-            }
-            // Use UiPortSet to check for required fields (validates types too)
-            let ui_ports = UiPortSet::from_layout(&model.state_layout);
-            if !ui_ports.is_complete() {
-                continue;
-            }
-            out.push((model.id, CFDApp::model_label(model.id)));
-        }
-        out.sort_by_key(|(id, _)| *id);
-        out
+        // `model_label` names). Sorted by id so the ComboBox order is stable.
+        vec![
+            ("allmach_pressure", CFDApp::model_label("allmach_pressure")),
+            ("allmach_thermal", CFDApp::model_label("allmach_thermal")),
+            ("compressible", CFDApp::model_label("compressible")),
+            (
+                "incompressible_momentum",
+                CFDApp::model_label("incompressible_momentum"),
+            ),
+        ]
     }
 
     fn build_selected_model(&self) -> Result<ModelSpec, String> {
         if self.mesh_mode == MeshMode::Structured2D {
             return structured_model_by_id(self.model_id);
         }
-        if self.model_id == "compressible" {
-            return compressible_model_with_eos(self.current_fluid.eos);
-        }
-        all_models()?
-            .into_iter()
-            .find(|m| m.id == self.model_id)
-            .ok_or_else(|| format!("unknown model id '{}'", self.model_id))
+        unstructured_model_by_id(self.model_id, self.current_fluid.eos)
     }
 
     fn refresh_model_caps(&mut self) {
@@ -2489,14 +2481,7 @@ impl CFDApp {
             Some(format!("cells={n_cells}")),
         );
 
-        let model = if request.model_id == "compressible" {
-            compressible_model_with_eos(request.current_fluid.eos)?
-        } else {
-            all_models()?
-                .into_iter()
-                .find(|m| m.id == request.model_id)
-                .ok_or_else(|| format!("unknown model id '{}'", request.model_id))?
-        };
+        let model = unstructured_model_by_id(request.model_id, request.current_fluid.eos)?;
         let model_caps = CFDApp::model_ui_caps(&model);
 
         // The shared driver derives the `SolverConfig` (stepping mode + effective
@@ -2619,6 +2604,8 @@ impl CFDApp {
             cpu.set_engine(engine, threads);
             cpu.set_fluid(density, viscosity);
             cpu.set_preconditioner(precond);
+            cpu.set_outer_iters(outer);
+            cpu.set_outer_auto_converge(request.params.outer_auto_converge);
             seed_structured_state(&mut cpu, request.model_id);
             seed_structured_freestream(&mut cpu, request.model_id, u_in);
             seed_structured_ibm(&mut cpu, request.selected_geometry, lx, ly);
@@ -2641,6 +2628,8 @@ impl CFDApp {
             // Coupled-solve preconditioner: the model-owned SIMPLE Schur (if the
             // model declares a layout) or block-Jacobi. No-op where unsupported.
             solver.set_preconditioner(precond);
+            solver.set_outer_iters(outer);
+            solver.set_outer_auto_converge(request.params.outer_auto_converge);
             seed_structured_state(&mut solver, request.model_id);
             // Uniform-freestream momentum IC (compressible: rho_u = rho*u_in) so the
             // channel starts from a moving state — the stable configuration; a rest
@@ -2710,10 +2699,7 @@ impl CFDApp {
         // programming error (surfaced as an init Err, not a wrong-physics run).
         let ale_id = CFDApp::ale_model_for(request.model_id)
             .ok_or_else(|| format!("model '{}' has no moving-mesh (ALE) variant", request.model_id))?;
-        let model = all_models()?
-            .into_iter()
-            .find(|m| m.id == ale_id)
-            .ok_or_else(|| format!("unknown ALE model id '{ale_id}'"))?;
+        let model = ale_model_by_id(ale_id)?;
         let model_caps = CFDApp::model_ui_caps(&model);
 
         // The SOLVER-side adaptive dt stays off for the ALE seam (its
@@ -5239,6 +5225,33 @@ fn structured_model_by_id(id: &str) -> Result<ModelSpec, String> {
         "compressible_structured" => crate::solver::model::compressible_structured_model()?,
         other => return Err(format!("no structured model for id '{other}'")),
     })
+}
+
+/// Resolve a static (non-ALE) unstructured physical model by id. Dispatches to
+/// the individual builders — never through `all_models()`, which pays for every
+/// registered model (~0.5 s, dominated by compressible flux-module generation).
+fn unstructured_model_by_id(
+    id: &str,
+    eos: crate::solver::model::eos::EosSpec,
+) -> Result<ModelSpec, String> {
+    match id {
+        "incompressible_momentum" => incompressible_momentum_model(),
+        "compressible" => compressible_model_with_eos(eos),
+        "allmach_pressure" => allmach_pressure_model(),
+        "allmach_thermal" => allmach_thermal_model(),
+        other => Err(format!("unknown model id '{other}'")),
+    }
+}
+
+/// Resolve a moving-mesh (ALE) model by id. Same direct-dispatch rule as
+/// [`unstructured_model_by_id`] — only the three ALE variants the GUI can select.
+fn ale_model_by_id(id: &str) -> Result<ModelSpec, String> {
+    match id {
+        "incompressible_momentum_ale" => incompressible_momentum_ale_model(),
+        "allmach_pressure_ale" => allmach_pressure_ale_model(),
+        "allmach_thermal_ale" => allmach_thermal_ale_model(),
+        other => Err(format!("unknown ALE model id '{other}'")),
+    }
 }
 
 /// Seed the non-solved state fields a structured model needs (all-Mach `psi`/`rho`

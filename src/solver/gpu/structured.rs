@@ -437,6 +437,14 @@ pub struct StructuredGpuSolver {
     schur_layout: Option<crate::solver::banded_schur::SchurLayout>,
 
     outer_iters: usize,
+    /// When true, the Picard loop may exit early once the coupled increment
+    /// residuals fall below [`Self::outer_tol`] (GUI `outer_auto_converge`).
+    outer_auto_converge: bool,
+    /// Absolute L∞ coupled-increment threshold for opportunistic outer early-exit
+    /// (`1e-3` default). Uses the host-solve `outer_du`/`outer_dp` so the break
+    /// needs no extra GPU state readback (CPU structured uses a relative state
+    /// norm instead — same checkbox, slightly different residual definition).
+    outer_tol: f32,
     dt: f64,
     /// Model id (for the GUI's model-echo / caps) and accumulated sim time.
     model_id: &'static str,
@@ -663,6 +671,8 @@ impl StructuredGpuSolver {
             solver,
             schur_layout: crate::solver::banded_schur::schur_layout_from_model(model),
             outer_iters: outer_iters.max(1),
+            outer_auto_converge: false,
+            outer_tol: 1e-3,
             dt,
             model_id: model.id,
             time: 0.0,
@@ -873,6 +883,7 @@ impl StructuredGpuSolver {
         self.dispatch_ids(&prep);
 
         let mut solve_stats = crate::solver::banded_schur::StructuredStepStats::default();
+        let mut outers_done = 0u32;
         for _outer in 0..self.outer_iters {
             // state_iter <- state, then flux/gradients/assembly.
             self.copy_submit("state", "state_iter", n * sstride);
@@ -895,8 +906,20 @@ impl StructuredGpuSolver {
             // Update: state <- f(x).
             let upd = self.update.clone();
             self.dispatch_ids(&upd);
+            outers_done += 1;
+            // Opportunistic Picard early-exit: host-solve already reports L∞ ΔU/Δp
+            // of the coupled increment — break when both fall under outer_tol.
+            // (No extra GPU→host state readback; absolute on the increment, not a
+            // relative state norm like the CPU path.)
+            if self.outer_auto_converge
+                && self.outer_tol > 0.0
+                && solve_stats.outer_du <= self.outer_tol
+                && solve_stats.outer_dp <= self.outer_tol
+            {
+                break;
+            }
         }
-        solve_stats.outer_iters = self.outer_iters as u32;
+        solve_stats.outer_iters = outers_done;
         self.last_stats = solve_stats;
         self.time += self.dt;
     }
@@ -963,6 +986,21 @@ impl StructuredGpuSolver {
     /// Set the implicit time-step size (GUI timestep slider).
     pub fn set_dt(&mut self, dt: f64) {
         self.dt = dt;
+    }
+
+    /// Cap on Picard (outer) sweeps per time step.
+    pub fn set_outer_iters(&mut self, n: usize) {
+        self.outer_iters = n.max(1);
+    }
+
+    /// Enable opportunistic Picard early-exit on small coupled increments.
+    pub fn set_outer_auto_converge(&mut self, enable: bool) {
+        self.outer_auto_converge = enable;
+    }
+
+    /// Absolute L∞ ΔU/Δp threshold for outer early-exit (`1e-3` default).
+    pub fn set_outer_tolerance(&mut self, tol: f32) {
+        self.outer_tol = tol.max(0.0);
     }
 
     /// Select the coupled-solve preconditioner: block-Jacobi, the model-owned

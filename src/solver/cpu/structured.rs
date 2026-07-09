@@ -408,6 +408,13 @@ pub struct StructuredModelSolver {
     buffers: Buffers,
     constants: GpuConstants,
     outer_iters: usize,
+    /// When true, the Picard loop may exit early once the relative state change
+    /// drops below [`Self::outer_tol`] (mirrors unstructured `outer_auto_converge`).
+    outer_auto_converge: bool,
+    /// Relative correction-norm threshold for opportunistic outer early-exit
+    /// (GPU generic-coupled default is `1e-3`; `0` disables the break even when
+    /// `outer_auto_converge` is set).
+    outer_tol: f32,
     dt: f64,
     threads: usize,
     /// Kernel engine: the interpreter (default, correctness oracle) or the
@@ -584,6 +591,8 @@ impl StructuredModelSolver {
             buffers,
             constants,
             outer_iters: outer_iters.max(1),
+            outer_auto_converge: false,
+            outer_tol: 1e-3,
             dt,
             threads: 1,
             engine: crate::solver::cpu::CpuEngine::Interpreter,
@@ -604,6 +613,23 @@ impl StructuredModelSolver {
     pub fn set_engine(&mut self, engine: crate::solver::cpu::CpuEngine, threads: usize) {
         self.engine = engine;
         self.threads = threads.max(1);
+    }
+
+    /// Cap on Picard (outer) sweeps per time step.
+    pub fn set_outer_iters(&mut self, n: usize) {
+        self.outer_iters = n.max(1);
+    }
+
+    /// Enable opportunistic Picard early-exit when the relative state change
+    /// falls below [`Self::set_outer_tolerance`].
+    pub fn set_outer_auto_converge(&mut self, enable: bool) {
+        self.outer_auto_converge = enable;
+    }
+
+    /// Relative correction-norm threshold for outer early-exit (`1e-3` default,
+    /// matching the unstructured GPU generic-coupled gate).
+    pub fn set_outer_tolerance(&mut self, tol: f32) {
+        self.outer_tol = tol.max(0.0);
     }
 
     /// Select the coupled-solve preconditioner (block-Jacobi / Schur / Schur+AMG).
@@ -786,6 +812,7 @@ impl StructuredModelSolver {
         };
         let (mut last_res, mut last_du, mut last_dp) = (0f32, 0f32, 0f32);
         let mut last_iters = 0u32;
+        let mut outers_done = 0u32;
         for _outer in 0..self.outer_iters {
             let snap = self.buffers.f32_vec("state");
             self.buffers.copy_into_f32("state_iter", &snap);
@@ -835,12 +862,29 @@ impl StructuredModelSolver {
             for id in &upd {
                 self.run(id, n, &ctx);
             }
+            outers_done += 1;
+            // Opportunistic Picard early-exit (unstructured parity): relative
+            // L∞(state − state_iter) / L∞(|state|) ≤ outer_tol. state_iter is the
+            // pre-update snapshot, so this measures the actual applied change
+            // (including under-relaxation).
+            if self.outer_auto_converge && self.outer_tol > 0.0 {
+                let st = self.buffers.f32_vec("state");
+                let it = self.buffers.f32_vec("state_iter");
+                let (mut maxd, mut maxs) = (0.0f32, 0.0f32);
+                for i in 0..st.len() {
+                    maxd = maxd.max((st[i] - it[i]).abs());
+                    maxs = maxs.max(st[i].abs());
+                }
+                if (maxd as f64) <= (self.outer_tol as f64) * (maxs as f64 + 1e-30) {
+                    break;
+                }
+            }
         }
         if counting_stalls && applies > 0 && stalls * 2 >= applies {
             self.amg_active.store(true, std::sync::atomic::Ordering::Relaxed);
         }
         self.last_stats = StructuredStepStats {
-            outer_iters: self.outer_iters as u32,
+            outer_iters: outers_done,
             linear_iters: last_iters,
             linear_res: last_res,
             outer_du: last_du,

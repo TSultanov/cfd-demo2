@@ -327,7 +327,11 @@ pub const ALLMACH_THERMAL_NOZZLE: ModelGuiDefaults = ModelGuiDefaults {
 /// Unknown ids fall back to the incompressible defaults, which is the GUI's
 /// startup model.
 pub fn gui_defaults_for(model_id: &str) -> ModelGuiDefaults {
-    match model_id {
+    // Structured model ids are `*_structured` siblings of the same physics —
+    // map them to the base family's knobs so outer_auto_converge / schemes /
+    // relaxation match the unstructured defaults.
+    let base = model_id.strip_suffix("_structured").unwrap_or(model_id);
+    match base {
         "compressible" => COMPRESSIBLE,
         // The thermal variant shares the gauge-pressure knobs; the nozzle case
         // overrides via `ALLMACH_THERMAL_NOZZLE` when the nozzle geometry is selected.

@@ -641,21 +641,28 @@ impl SolverDriver {
                     sound_speed.min(adv_speed.max(c_floor))
                 }
             };
-            // All-Mach: the pressure-row ddt uses psi_precond with Turkel
-            // pseudo-sound-speed β = k·max(U_in, uref_min). That β is ≫ |U| at
-            // the near-incompressible GUI defaults (uref_min≈1, U_in≈0.01), so a
-            // pure-convective CFL would run the pressure system at Courant
-            // β/|U| ≫ 1 → checkerboard / frozen wake. Count β as the acoustic
-            // contribution (same k as allmach_psi_precond).
-            let acoustic = if self.allmach && self.params.compressibility_psi > 0.0 {
-                let u_ref = (self.params.inlet_velocity.abs() as f64).max(
-                    allmach_precond_uref_target(self.params.allmach_precond_uref_min as f64),
-                );
-                ALLMACH_PRECOND_MACH_K * u_ref
-            } else {
-                effective_sound_speed
-            };
-            let wave_speed = adv_speed + acoustic;
+            // NB the all-Mach Turkel pseudo-sound-speed β = k·max(U_in, uref_min)
+            // deliberately does NOT enter here. The pressure row is solved
+            // IMPLICITLY (coupled block), so its pseudo-acoustic Courant number need
+            // not be ≤ 1 — and resolving it is actively harmful. Write the ratio of
+            // the acoustic mass term to the pressure Laplacian on a uniform grid:
+            //
+            //   R = (psi_precond·V/dt) / (Σ_f ρ·d_p·A/d) = h²/(4·α_u·β²·dt²)
+            //     = 1/(4·α_u·CFL_β²),        CFL_β = β·dt/h
+            //
+            // R is a function of CFL_β ALONE. Pinning CFL_β ≈ target_cfl pins R ≈ 0.4:
+            // the acoustic mass term becomes comparable to the pressure Laplacian, the
+            // pressure stops being elliptic, and pressure information crawls ~1 cell
+            // per step. The channel then needs O((L/h)²) steps to establish a pressure
+            // field and drifts (mass creation, standing long-wave p/U oscillation,
+            // slow divergence). It also defeats `allmach_precond_uref_target`, whose
+            // whole purpose is to raise β so `psi_precond = 1/β²` is SMALL: a β-CFL
+            // shrinks dt in exact proportion, leaving R unchanged.
+            //
+            // At the convective dt the same psi_precond gives R ~ 1e-4 (elliptic
+            // pressure) and the preconditioner does its job — damping the acoustic
+            // transient without being resolved in time.
+            let wave_speed = adv_speed + effective_sound_speed;
             if self.min_cell_size > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
                 let current_dt = self.solver.dt() as f64;
                 let mut next_dt = self.params.target_cfl * self.min_cell_size / wave_speed;

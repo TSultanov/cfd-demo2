@@ -814,6 +814,33 @@ pub(crate) fn model_unknown_state_offsets(
     Ok(unknown_state_offsets)
 }
 
+/// [`model_unknown_state_offsets`] grouped by equation TARGET: one inner `Vec` per
+/// solved field, holding that field's component state offsets (`[Ux, Uy]`, `[p]`,
+/// `[T]`, …).
+///
+/// The Picard outer-convergence residual must be measured per FIELD, not per
+/// component: a nearly-symmetric flow has `max|Uy| ≈ 0`, so a per-component
+/// relative residual `|ΔUy| / max|Uy|` never falls below tolerance and would stall
+/// the loop at its iteration cap forever. Both components of `U` share the
+/// velocity scale.
+pub(crate) fn model_unknown_state_offset_groups(
+    model: &crate::solver::model::ModelSpec,
+) -> Result<Vec<Vec<u32>>, String> {
+    let slots = resolved_slots_from_layout(&model.state_layout);
+    let mut groups: Vec<Vec<u32>> = Vec::new();
+    for eq in model.system.equations() {
+        let target = eq.target();
+        let base = resolve_offset_from_slots(&slots, target.name())
+            .ok_or_else(|| format!("no state slot for unknown '{}'", target.name()))?;
+        groups.push(
+            (0..target.kind().component_count())
+                .map(|c| base + c as u32)
+                .collect(),
+        );
+    }
+    Ok(groups)
+}
+
 /// Resolve a state offset by field name, supporting component suffixes (e.g., "rho_u_x").
 fn resolve_offset_from_slots(slots: &ResolvedStateSlotsSpec, name: &str) -> Option<u32> {
     fn find_slot<'a>(

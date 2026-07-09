@@ -983,6 +983,53 @@ pub struct StructuredStepStats {
     pub outer_dp: f32,
 }
 
+/// Per-FIELD Picard (outer) residual of a structured step, shared by the CPU and
+/// GPU structured solvers so their early-exit decisions cannot drift apart.
+///
+/// `groups` are the state offsets of each solved field's components (see
+/// `model_unknown_state_offset_groups`). Returns, per field, the L-infinity
+/// applied correction `max|state − state_iter|` divided by that field's OWN
+/// L-infinity scale `max|state|`.
+///
+/// The scale is NOT floored at 1.0. A `max(scale, 1.0)` floor (the convention the
+/// GPU `OuterConvergenceMonitor` inherited) silently turns the relative test into
+/// an ABSOLUTE one for any field whose magnitude is below unity — and the shipped
+/// GUI channel flow has `max|U| ≈ 0.02` and gauge `max|p| ≈ 2e-3`. At `tol = 1e-3`
+/// the pressure was then allowed to move by half its own range and still count as
+/// converged, so the loop exited after the 2-iteration minimum with an
+/// under-solved field: non-monotone stagnation velocity at an immersed boundary,
+/// pressure inside the Brinkman solid an order of magnitude outside the fluid
+/// range, and ~10% mass-flux imbalance. Only the near-zero case needs a guard, and
+/// there the correction is near-zero too, so a tiny floor suffices.
+pub fn structured_outer_residuals(
+    state: &[f32],
+    state_iter: &[f32],
+    stride: usize,
+    groups: &[Vec<usize>],
+) -> Vec<f32> {
+    /// Guards `0/0` for a field that is identically zero (its correction is zero
+    /// too, so the ratio is 0 and the field reads as converged).
+    const SCALE_FLOOR: f32 = 1e-30;
+
+    let n_cells = state.len() / stride.max(1);
+    groups
+        .iter()
+        .map(|comps| {
+            let (mut delta, mut scale) = (0.0f32, 0.0f32);
+            for cell in 0..n_cells {
+                let base = cell * stride;
+                for &off in comps {
+                    let a = state[base + off];
+                    let b = state_iter[base + off];
+                    delta = delta.max((a - b).abs());
+                    scale = scale.max(a.abs());
+                }
+            }
+            delta / scale.max(SCALE_FLOOR)
+        })
+        .collect()
+}
+
 impl BandedPrecond {
     /// Build a Schur preconditioner from a [`SchurLayout`], picking the inner
     /// pressure solve (`pressure_amg`: AMG V-cycle vs safeguarded heavy-ball).

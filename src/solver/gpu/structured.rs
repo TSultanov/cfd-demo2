@@ -437,9 +437,9 @@ pub struct StructuredGpuSolver {
     schur_layout: Option<crate::solver::banded_schur::SchurLayout>,
 
     /// State-layout offsets of the solved unknowns (not auxiliaries like
-    /// `ibm_penalty_U`). Drives the applied Picard residual — same set the
-    /// CPU structured solver uses.
-    unknown_state_offsets: Vec<usize>,
+    /// `ibm_penalty_U`), GROUPED by solved field. Drives the applied Picard
+    /// residual — same set and grouping the CPU structured solver uses.
+    unknown_state_groups: Vec<Vec<usize>>,
 
     outer_iters: usize,
     /// When true, the Picard loop may exit early once every unknown's
@@ -659,10 +659,10 @@ impl StructuredGpuSolver {
 
         let solver = BandedGpuLinAlg::new(dev, grid.nx as u32, grid.ny as u32, s as u32);
 
-        let unknown_state_offsets: Vec<usize> =
-            crate::solver::model::kernel::model_unknown_state_offsets(model)?
+        let unknown_state_groups: Vec<Vec<usize>> =
+            crate::solver::model::kernel::model_unknown_state_offset_groups(model)?
                 .into_iter()
-                .map(|o| o as usize)
+                .map(|g| g.into_iter().map(|o| o as usize).collect())
                 .collect();
 
         // Pack each kernel's `constants` uniform to its own `Constants` layout.
@@ -688,7 +688,7 @@ impl StructuredGpuSolver {
             low_mach_buf,
             solver,
             schur_layout: crate::solver::banded_schur::schur_layout_from_model(model),
-            unknown_state_offsets,
+            unknown_state_groups,
             outer_iters: outer_iters.max(1),
             outer_auto_converge: false,
             outer_tol: 1e-3,
@@ -943,45 +943,31 @@ impl StructuredGpuSolver {
             self.dispatch_ids(&upd);
             outers_done += 1;
 
-            // Applied Picard residual (CPU parity): |state − state_iter| scaled
-            // PER UNKNOWN. Absolute |x| is NOT a residual — freestream U ~ O(0.01)
-            // and T≈1 both look "converged" or "huge" for the wrong reasons, and
-            // all-Mach previously reported U residual ≈ 1 from T living in the
-            // Schur u-block. Host-side banded solve already read the matrix back
-            // this outer, so the extra state/state_iter readback is not the cost.
+            // Applied Picard residual (CPU parity): per-FIELD |state − state_iter|
+            // relative to that field's own scale. Absolute |x| is NOT a residual —
+            // freestream U ~ O(0.01) and T≈1 both look "converged" or "huge" for the
+            // wrong reasons. See `structured_outer_residuals`. Host-side banded solve
+            // already read the matrix back this outer, so the extra state/state_iter
+            // readback is not the cost.
             let st = self.read_f32("state", n * sstride);
             let it = self.read_f32("state_iter", n * sstride);
-            let n_unk = self.unknown_state_offsets.len();
-            let mut maxd_per = vec![0.0f32; n_unk];
-            let mut maxs_per = vec![0.0f32; n_unk];
-            for cell in 0..n {
-                let base = cell * sstride;
-                for (i, &off) in self.unknown_state_offsets.iter().enumerate() {
-                    let a = st[base + off];
-                    let b = it[base + off];
-                    maxd_per[i] = maxd_per[i].max((a - b).abs());
-                    maxs_per[i] = maxs_per[i].max(a.abs());
-                }
-            }
-            let scaled: Vec<f32> = maxd_per
-                .iter()
-                .zip(maxs_per.iter())
-                .map(|(&d, &s)| d / s.max(1.0))
-                .collect();
+            let scaled = crate::solver::banded_schur::structured_outer_residuals(
+                &st,
+                &it,
+                sstride,
+                &self.unknown_state_groups,
+            );
 
-            // GUI "Coupled: U / P": velocity components only (state offs 0,1),
+            // GUI "Coupled: U / P": the velocity field's residual (state offs 0,1),
             // not T; pressure via schur p rank / offset 2.
             let (mut du, mut dp) = (0.0f32, 0.0f32);
-            for (i, &off) in self.unknown_state_offsets.iter().enumerate() {
-                if off == 0 || off == 1 {
-                    du = du.max(scaled[i]);
+            for (g, comps) in self.unknown_state_groups.iter().enumerate() {
+                if comps.first() == Some(&0) {
+                    du = du.max(scaled[g]);
                 }
-                if let Some(ps) = p_slot {
-                    if off == ps {
-                        dp = dp.max(scaled[i]);
-                    }
-                } else if off == 2 {
-                    dp = dp.max(scaled[i]);
+                let p_off = p_slot.unwrap_or(2);
+                if comps.first() == Some(&p_off) {
+                    dp = dp.max(scaled[g]);
                 }
             }
             solve_stats.outer_du = du;

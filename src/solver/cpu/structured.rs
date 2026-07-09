@@ -423,11 +423,12 @@ pub struct StructuredModelSolver {
     step_count: u64,
     /// Requested time scheme (BDF2 falls back to Euler on step 0).
     time_scheme: TimeScheme,
-    /// State-layout offsets of the coupled unknowns (equation targets only).
-    /// Used for outer residual / early-exit so storage fields like
-    /// `ibm_penalty_U` (~1e5) cannot dominate max|state| and force a false
-    /// 1-outer exit on immersed-obstacle cases.
-    unknown_state_offsets: Vec<usize>,
+    /// State-layout offsets of the coupled unknowns, GROUPED by solved field
+    /// (`[[Ux, Uy], [p], [T]]`). Used for the outer residual / early-exit, so that
+    /// storage fields like `ibm_penalty_U` (~1e5) cannot dominate `max|state|` and
+    /// force a false 1-outer exit on immersed-obstacle cases, and so each field is
+    /// measured against its own scale.
+    unknown_state_groups: Vec<Vec<usize>>,
     threads: usize,
     /// Kernel engine: the interpreter (default, correctness oracle) or the
     /// compiled-Rust transpiled kernels (speed path; `generated::lookup_structured`
@@ -591,10 +592,10 @@ impl StructuredModelSolver {
             constants.alpha_u = 0.7;
         }
 
-        let unknown_state_offsets: Vec<usize> =
-            crate::solver::model::kernel::model_unknown_state_offsets(model)?
+        let unknown_state_groups: Vec<Vec<usize>> =
+            crate::solver::model::kernel::model_unknown_state_offset_groups(model)?
                 .into_iter()
-                .map(|o| o as usize)
+                .map(|g| g.into_iter().map(|o| o as usize).collect())
                 .collect();
 
         Ok(Self {
@@ -615,7 +616,7 @@ impl StructuredModelSolver {
             dt_old: dt,
             step_count: 0,
             time_scheme,
-            unknown_state_offsets,
+            unknown_state_groups,
             threads: 1,
             engine: crate::solver::cpu::CpuEngine::Interpreter,
             precond: crate::solver::banded_schur::BandedPrecond::BlockJacobi,
@@ -893,54 +894,30 @@ impl StructuredModelSolver {
             outers_done += 1;
 
             // Picard residual = APPLIED under-relaxed change |state − state_iter|,
-            // scaled PER UNKNOWN (unstructured OuterConvergenceMonitor parity).
-            //
-            // Two bugs previously produced "outers=1, U residual=1.0" and an
-            // unphysical under-solved field:
-            // 1. Reporting max|x| over schur u_idx — for all-Mach thermal that
-            //    includes T≈1, so "U residual" was always ~1 regardless of flow.
-            // 2. A single global max|Δ|/max|φ| across all unknowns — T≈1
-            //    dominated the scale, so U/p only needed |Δ|≲1e-3 to look
-            //    "converged" and the outer loop exited after one sweep.
+            // per FIELD, relative to that field's own scale (see
+            // `structured_outer_residuals` for why the scale must NOT be floored
+            // at 1.0, and why `Ux`/`Uy` share one scale).
             let st = self.buffers.f32_vec("state");
             let it = self.buffers.f32_vec("state_iter");
-            let stride = self.state_stride;
-            let n_unk = self.unknown_state_offsets.len();
-            let mut maxd_per = vec![0.0f32; n_unk];
-            let mut maxs_per = vec![0.0f32; n_unk];
-            for cell in 0..n {
-                let base = cell * stride;
-                for (i, &off) in self.unknown_state_offsets.iter().enumerate() {
-                    let a = st[base + off];
-                    let b = it[base + off];
-                    maxd_per[i] = maxd_per[i].max((a - b).abs());
-                    maxs_per[i] = maxs_per[i].max(a.abs());
-                }
-            }
-            let scaled: Vec<f32> = maxd_per
-                .iter()
-                .zip(maxs_per.iter())
-                .map(|(&d, &s)| d / s.max(1.0))
-                .collect();
+            let scaled = crate::solver::banded_schur::structured_outer_residuals(
+                &st,
+                &it,
+                self.state_stride,
+                &self.unknown_state_groups,
+            );
 
-            // GUI "Coupled: U / P": velocity components only (not T), and p.
-            // U lives at the first two unknown offsets for every current model
-            // (Ux, Uy); p is the schur pressure rank mapped to state via
-            // unknown_state_offsets when present, else offset 2.
+            // GUI "Coupled: U / P": the velocity field's residual (not T), and p.
             let (mut du, mut dp) = (0.0f32, 0.0f32);
-            for (i, &off) in self.unknown_state_offsets.iter().enumerate() {
+            for (g, comps) in self.unknown_state_groups.iter().enumerate() {
                 // Velocity: state offsets 0 and 1 (U vector2).
-                if off == 0 || off == 1 {
-                    du = du.max(scaled[i]);
+                if comps.first() == Some(&0) {
+                    du = du.max(scaled[g]);
                 }
-                if let Some(ps) = p_slot {
-                    // p_slot is the COUPLED rank; for pressure-based models it
-                    // equals the state offset of p (2). Compare to state off.
-                    if off == ps {
-                        dp = dp.max(scaled[i]);
-                    }
-                } else if off == 2 {
-                    dp = dp.max(scaled[i]);
+                // p_slot is the COUPLED rank; for pressure-based models it equals
+                // the state offset of p (2).
+                let p_off = p_slot.unwrap_or(2);
+                if comps.first() == Some(&p_off) {
+                    dp = dp.max(scaled[g]);
                 }
             }
             last_du = du;

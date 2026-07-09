@@ -5165,21 +5165,13 @@ impl StructuredSteppable for StructuredModelSolver {
     }
 }
 
-/// Turkel low-Mach precond reference-velocity scale (same `k` as
-/// `sim::driver::ALLMACH_PRECOND_MACH_K`). The preconditioned pressure equation
-/// propagates at pseudo-sound-speed `β ≈ k·u_ref`, not at the physical `c` and
-/// not at |U| — adaptive CFL must count it or the pressure CFL blows past 1.
-const ALLMACH_PRECOND_MACH_K: f64 = 2.0;
-
-/// Pin `dt` for one structured step — same CFL policy as
-/// [`crate::sim::SolverDriver::step`], plus the all-Mach pseudo-sound floor that
-/// the driver currently omits on the barotropic/thermal path (see below).
+/// Pin `dt` for one structured step — the same CFL policy as
+/// [`crate::sim::SolverDriver::step`].
 fn structured_pin_dt(
     s: &mut impl StructuredSteppable,
     params: &RuntimeParams,
     prev_max_vel: f64,
     supports_sound_speed: bool,
-    allmach_precond_cfl: bool,
 ) {
     if params.adaptive_dt {
         let sound_speed = if supports_sound_speed {
@@ -5197,21 +5189,13 @@ fn structured_pin_dt(
                 sound_speed.min(adv_speed.max(c_floor))
             }
         };
-        // All-Mach: psi_precond = max(psi, 1/β²) with β = k·max(U_in, uref_min).
-        // The pressure-row ddt term therefore supports waves at speed β, which at
-        // the GUI near-incompressible defaults (U_in≈0.01, uref_min=1) is
-        // β≈2 ≫ |U|. Using only |U| for the adaptive CFL (as a pure incompressible
-        // model would) yields pressure CFL = β·dt/h ≈ (β/|U|)·target_cfl ≫ 1 →
-        // checkerboard pressure, frozen wake, no Kármán street. Count β as the
-        // acoustic contribution so target_cfl is the true pressure Courant number.
-        let acoustic = if allmach_precond_cfl && params.compressibility_psi > 0.0 {
-            let u_ref = (params.inlet_velocity.abs() as f64)
-                .max(params.allmach_precond_uref_min as f64);
-            ALLMACH_PRECOND_MACH_K * u_ref
-        } else {
-            effective_sound_speed
-        };
-        let wave_speed = adv_speed + acoustic;
+        // The all-Mach Turkel pseudo-sound-speed β = k·max(U_in, uref_min) does NOT
+        // enter the CFL — see the derivation on `SolverDriver::step`. The pressure
+        // row is solved implicitly, so pinning the pseudo-acoustic Courant number to
+        // target_cfl only makes the acoustic mass term `psi_precond·V/dt` comparable
+        // to the pressure Laplacian (R = 1/(4·α_u·CFL_β²)), which de-ellipticises the
+        // pressure and stalls/destabilises the flow.
+        let wave_speed = adv_speed + effective_sound_speed;
         let min_h = s.st_min_cell_size();
         if min_h > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
             let current_dt = s.st_dt();
@@ -5233,12 +5217,6 @@ fn structured_supports_sound_speed(model_id: &str) -> bool {
     model_id == "compressible_structured" || model_id == "compressible"
 }
 
-/// All-Mach gauge-pressure models run Turkel `psi_precond` — adaptive CFL must
-/// use the pseudo-sound floor (see [`structured_pin_dt`]).
-fn structured_allmach_precond_cfl(model_id: &str) -> bool {
-    model_id.contains("allmach")
-}
-
 fn structured_step(
     s: &mut impl StructuredSteppable,
     params: &RuntimeParams,
@@ -5246,13 +5224,7 @@ fn structured_step(
     model_id: &str,
     readback: bool,
 ) -> StepOutcome {
-    structured_pin_dt(
-        s,
-        params,
-        *prev_max_vel,
-        structured_supports_sound_speed(model_id),
-        structured_allmach_precond_cfl(model_id),
-    );
+    structured_pin_dt(s, params, *prev_max_vel, structured_supports_sound_speed(model_id));
 
     let t0 = std::time::Instant::now();
     s.st_step();

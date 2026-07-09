@@ -101,6 +101,11 @@ name = "profile_mesh_ordering"
 path = "examples/profile_mesh_ordering.rs"
 required-features = ["meshgen"]
 
+[[example]]
+name = "diag_allmach_struct"
+path = "examples/diag_allmach_struct.rs"
+required-features = ["cpu"]
+
 [[test]]
 name = "amg_test"
 path = "tests/amg_test.rs"

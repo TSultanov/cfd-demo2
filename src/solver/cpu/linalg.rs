@@ -833,12 +833,19 @@ impl<'a, T: Real> SchurPrecond<'a, T> {
                 let scalar_offset = a.scalar_offset(cell);
                 let num_neighbors = a.num_neighbors(cell);
                 let diag_rank = a.diagonal_indices[cell] as usize - scalar_offset;
-                // diag(A_uu) per velocity component
+                // diag(A_uu) per velocity component. Guard on a POSITIVE
+                // diagonal, not |du| (parity with banded_schur::build): the
+                // momentum diagonal can transiently go NEGATIVE during a
+                // through-flow startup (bounded-Gauss net-outflux correction
+                // exceeds ddt+diffusion), and 1/du with du<0 is a wrong-sign,
+                // AMPLIFYING preconditioner. Zeroing leaves those few cells
+                // unpreconditioned (safe). Bit-identical for the well-posed
+                // du>0 case.
                 for (i, &u) in u_idx.iter().enumerate() {
                     let base_u = a.start_row(cell, u) + diag_rank * s;
                     let du = a.values[base_u + u] as f64;
                     du_chunk[li * u_len + i] =
-                        T::from_f64(if du.abs() > 1e-30 { 1.0 / du } else { 0.0 });
+                        T::from_f64(if du > 1e-30 { 1.0 / du } else { 0.0 });
                 }
                 // A_pp scalar-CSR row (one value per neighbour block), plus the
                 // compact A_pu / A_up sub-operator rows (see the field docs).

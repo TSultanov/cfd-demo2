@@ -256,12 +256,14 @@ struct SchurData {
 }
 
 /// Cross-solve cache for the structured Schur AMG pressure hierarchy. The
-/// hierarchy (aggregation + Galerkin scatter maps) is SPARSITY-only — a fixed
-/// 5-point stencil on the fixed `nx×ny` grid — so it is built ONCE from a
-/// canonical Poisson seed (independent of any solve's values) and reused across
-/// every solve and step; only the Galerkin VALUES are re-assembled each solve
-/// from the current `A_pp`. Structured mirror of `CpuSolver::amg_hier`.
-/// Empty / no-op without the `cpu` feature.
+/// hierarchy (aggregation + Galerkin scatter maps) lives on the fixed 5-point
+/// stencil of the fixed `nx×ny` grid, so it is built ONCE — at the first
+/// AMG-active solve, from that solve's REAL M-matrix-clamped `A_pp` values
+/// (value-aware strength-of-connection aggregation; see
+/// [`build_pressure_amg_hierarchy_from`]) — and reused across every solve and
+/// step; only the Galerkin VALUES are re-assembled each solve from the current
+/// `A_pp`. Structured mirror of `CpuSolver::amg_hier`. Empty / no-op without
+/// the `cpu` feature.
 #[derive(Default)]
 pub struct StructuredAmgCache {
     // `OnceLock` (not `cell::OnceCell`) so the enclosing solvers stay `Sync` — the
@@ -381,23 +383,72 @@ fn build(a: &[f32], nx: usize, ny: usize, s: usize, prec: &BandedPrecond) -> Bui
 /// real `A_pp` values enter per solve via [`amg_csr_values`] + `AmgSolver::assemble`.
 #[cfg(feature = "cpu")]
 fn build_pressure_amg_hierarchy(nx: usize, ny: usize) -> crate::solver::cpu::amg::AmgHierarchy {
-    let ncells = nx * ny;
-    let mut row_offsets = Vec::with_capacity(ncells + 1);
-    let mut col_indices: Vec<u32> = Vec::with_capacity(ncells * 5);
-    let mut values: Vec<f32> = Vec::with_capacity(ncells * 5);
-    row_offsets.push(0u32);
+    let (row_offsets, col_indices) = pressure_csr_pattern(nx, ny);
+    let mut values: Vec<f32> = Vec::with_capacity(col_indices.len());
     for j in 0..ny {
         for i in 0..nx {
             let nb = neighbors(i, j, nx, ny);
             let ndeg = nb.len - 1; // in-grid neighbours (the diagonal is push #0)
-            for &(band, q) in nb.iter() {
-                col_indices.push(q as u32);
+            for &(band, _q) in nb.iter() {
                 values.push(if band == BAND_DIAG { ndeg as f32 } else { -1.0 });
+            }
+        }
+    }
+    crate::solver::cpu::amg::AmgHierarchy::build(&row_offsets, &col_indices, &values)
+}
+
+/// The structured pressure Poisson's fixed 5-point CSR pattern, in the exact
+/// per-row order `neighbors()` yields (diagonal first, then in-grid S/W/E/N) —
+/// the shared layout contract between [`build_pressure_amg_hierarchy`],
+/// [`build_pressure_amg_hierarchy_from`] and [`amg_csr_values`].
+#[cfg(feature = "cpu")]
+fn pressure_csr_pattern(nx: usize, ny: usize) -> (Vec<u32>, Vec<u32>) {
+    let ncells = nx * ny;
+    let mut row_offsets = Vec::with_capacity(ncells + 1);
+    let mut col_indices: Vec<u32> = Vec::with_capacity(ncells * 5);
+    row_offsets.push(0u32);
+    for j in 0..ny {
+        for i in 0..nx {
+            for &(_band, q) in neighbors(i, j, nx, ny).iter() {
+                col_indices.push(q as u32);
             }
             row_offsets.push(col_indices.len() as u32);
         }
     }
-    crate::solver::cpu::amg::AmgHierarchy::build(&row_offsets, &col_indices, &values)
+    (row_offsets, col_indices)
+}
+
+/// Build the pressure AMG hierarchy from the REAL (M-matrix-clamped) `A_pp`
+/// values of the current solve, so the strength-of-connection aggregation SEES
+/// coefficient contrast. The canonical Poisson seed is value-blind: on an
+/// immersed-Brinkman case the fluid/masked `A_pp` face coefficients differ by
+/// ~4 decades (Rhie–Chow `d_p` is penalty-suppressed in the solid), and
+/// canonical aggregates straddling that interface leave the coarse correction
+/// useless for the interface pressure modes — iteration counts stay
+/// h-dependent, which is exactly what the AMG latch was meant to cure.
+///
+/// The anti-hang rationale for the canonical seed (see
+/// [`build_pressure_amg_hierarchy`]) only applies when no REAL solve exists
+/// (an ~all-zero first-outer `A_pp` aggregates into singletons and the build
+/// bails with zero levels): callers reach this function at AMG-latch time, when
+/// the operator is developed — and a degenerate build still falls back to the
+/// canonical seed, so the hang cannot return. The Brinkman mask is static, so
+/// building ONCE at latch (the `StructuredAmgCache` `OnceLock`) is sound; the
+/// Galerkin VALUES still re-assemble every solve.
+#[cfg(feature = "cpu")]
+fn build_pressure_amg_hierarchy_from(
+    nx: usize,
+    ny: usize,
+    values: &[f32],
+) -> crate::solver::cpu::amg::AmgHierarchy {
+    let (row_offsets, col_indices) = pressure_csr_pattern(nx, ny);
+    let hier = crate::solver::cpu::amg::AmgHierarchy::build(&row_offsets, &col_indices, values);
+    if hier.num_levels() == 0 {
+        // Degenerate aggregation (no real operator yet) — canonical seed.
+        build_pressure_amg_hierarchy(nx, ny)
+    } else {
+        hier
+    }
 }
 
 /// Finest-level CSR VALUES of the current `A_pp`, in the exact per-row order
@@ -865,22 +916,29 @@ fn banded_fgmres(
     let mut proj_broke_early = false;
     let mut distrust_rel = f64::INFINITY;
 
-    // Reuse the CACHED AMG hierarchy (aggregation is sparsity-only, built once from
-    // a canonical Poisson seed — see `build_pressure_amg_hierarchy`) and re-Galerkin
-    // only the CURRENT `A_pp` values this solve. A per-call fallback hierarchy covers
-    // no-cache callers (`banded_gmres`, one-off tests). The assembled `AmgSolver`
-    // V-cycle is then reused across every preconditioner apply in this solve.
+    // Reuse the CACHED AMG hierarchy and re-Galerkin only the CURRENT `A_pp`
+    // values this solve. The cached hierarchy is built ONCE, at the FIRST
+    // AMG-active solve (= AMG-latch time), from that solve's real M-matrix-
+    // clamped `A_pp` values, so the strength-of-connection aggregation respects
+    // coefficient contrast (Brinkman interfaces — see
+    // `build_pressure_amg_hierarchy_from`). A per-call fallback hierarchy
+    // covers no-cache callers (`banded_gmres`, one-off tests) with the
+    // canonical Poisson seed (no latch context there). The assembled
+    // `AmgSolver` V-cycle is then reused across every preconditioner apply in
+    // this solve.
     let ncells = nx * ny;
     #[cfg(feature = "cpu")]
     let mut fallback_hier: Option<crate::solver::cpu::amg::AmgHierarchy> = None;
     #[cfg(feature = "cpu")]
     let amg_solver = match built {
         Built::Schur(sd) if sd.pressure_amg => {
+            let csr = amg_csr_values(&sd.a_pp, nx, ny);
             let hier: &crate::solver::cpu::amg::AmgHierarchy = match amg_cache {
-                Some(cache) => cache.hier.get_or_init(|| build_pressure_amg_hierarchy(nx, ny)),
+                Some(cache) => cache
+                    .hier
+                    .get_or_init(|| build_pressure_amg_hierarchy_from(nx, ny, &csr)),
                 None => fallback_hier.insert(build_pressure_amg_hierarchy(nx, ny)),
             };
-            let csr = amg_csr_values(&sd.a_pp, nx, ny);
             Some(crate::solver::cpu::amg::AmgSolver::assemble(hier, &csr, threads, false))
         }
         _ => None,

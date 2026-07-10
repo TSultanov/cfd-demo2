@@ -77,6 +77,35 @@ fn cells_mut<F: Fn(usize, &mut [f64])>(_n: usize, _w: usize, _t: usize, y: &mut 
     f(0, y);
 }
 
+/// Like [`cells_mut`], but fills TWO disjoint cell-major outputs (widths
+/// `w1`/`w2`) per chunk — the Schur predict pass writes `z` and `gp` together.
+#[cfg(feature = "cpu")]
+#[inline]
+fn cells_mut2<F: Fn(usize, &mut [f64], &mut [f64]) + Sync>(
+    ncells: usize,
+    w1: usize,
+    w2: usize,
+    threads: usize,
+    y1: &mut [f64],
+    y2: &mut [f64],
+    f: F,
+) {
+    crate::solver::cpu::parallel::parallel_cell_chunks_mut2(ncells, w1, w2, threads, y1, y2, f);
+}
+#[cfg(not(feature = "cpu"))]
+#[inline]
+fn cells_mut2<F: Fn(usize, &mut [f64], &mut [f64])>(
+    _n: usize,
+    _w1: usize,
+    _w2: usize,
+    _t: usize,
+    y1: &mut [f64],
+    y2: &mut [f64],
+    f: F,
+) {
+    f(0, y1, y2);
+}
+
 /// Parallel dot product (deterministic per fixed 8192-chunk).
 #[cfg(feature = "cpu")]
 #[inline]
@@ -91,6 +120,42 @@ fn pdot(_threads: usize, a: &[f64], b: &[f64]) -> f64 {
 #[inline]
 fn pnorm(threads: usize, a: &[f64]) -> f64 {
     pdot(threads, a, a).sqrt()
+}
+
+/// Parallel `y += a x` — element-wise over disjoint chunks, so BIT-IDENTICAL
+/// to the serial [`axpy`] regardless of `threads` (no reduction reorder).
+#[cfg(feature = "cpu")]
+#[inline]
+fn paxpy(threads: usize, y: &mut [f64], a: f64, x: &[f64]) {
+    crate::solver::cpu::parallel::par_update(threads, y, |i, yi| *yi += a * x[i]);
+}
+#[cfg(not(feature = "cpu"))]
+#[inline]
+fn paxpy(_threads: usize, y: &mut [f64], a: f64, x: &[f64]) {
+    axpy(y, a, x);
+}
+
+/// Parallel element-wise map-into (bit-identical to the serial loop; each
+/// element produced by exactly one worker with the same arithmetic).
+#[cfg(feature = "cpu")]
+#[inline]
+fn pmap<T: Send, F: Fn(usize) -> T + Sync>(threads: usize, out: &mut [T], f: F) {
+    crate::solver::cpu::parallel::par_map_into(threads, out, f);
+}
+#[cfg(not(feature = "cpu"))]
+#[inline]
+fn pmap<T, F: Fn(usize) -> T>(_threads: usize, out: &mut [T], f: F) {
+    for (i, o) in out.iter_mut().enumerate() {
+        *o = f(i);
+    }
+}
+
+/// Parallel `out = a * s` (element-wise; bit-identical to serial [`scale`]).
+#[inline]
+fn pscale(threads: usize, a: &[f64], s: f64) -> Vec<f64> {
+    let mut out = vec![0.0f64; a.len()];
+    pmap(threads, &mut out, |i| a[i] * s);
+    out
 }
 
 /// `matrix_values[p*5*s*s + 5*s*r + band*s + c]` as f64.
@@ -283,6 +348,29 @@ fn default_pressure_sweeps(num_cells: usize, sweeps_cap: u32) -> usize {
         })
 }
 
+/// GMRES restart length for the structured COUPLED solve (both the CPU Picard
+/// loop and the GPU host solve route through this one function, so the two
+/// backends stay bit-identical).
+///
+/// - **Schur / Schur+AMG: 20**, not the historical 60. The restart HEAD is
+///   where the true per-block convergence check (and the monotonicity/trust
+///   guards) run — a warm-started solve's in-cycle projection thresholds are
+///   relative to the (small) initial residual, so long cycles ground on far
+///   past head-criterion convergence. Schur contracts fast enough that the
+///   shallower Krylov space costs nothing (GUI-regime fields byte-comparable,
+///   ~20% faster).
+/// - **BlockJacobi: 60.** The weak preconditioner genuinely needs the deep
+///   Krylov space on the saddle system: at restart 20 the all-Mach GUI probe's
+///   wake development went physically wrong (solid-interior velocity leaked to
+///   1.5e-5, near-obstacle pressure ptp grew 100×) because heads exited on the
+///   loose middle-outer forcing tolerance with a 6× worse actual residual.
+pub fn coupled_restart(precond: &BandedPrecond) -> usize {
+    match precond {
+        BandedPrecond::BlockJacobi => 60,
+        BandedPrecond::Schur { .. } => 20,
+    }
+}
+
 /// Relative-residual tolerance for the coupled banded inner solve inside the
 /// Picard/outer loop. INEXACT-PICARD: the outer loop re-linearizes every sweep,
 /// so driving each linearization past ~1e-4 of its initial residual is wasted
@@ -309,20 +397,22 @@ fn heavy_ball_omega(model_omega: f32) -> f64 {
         .unwrap_or(base) as f64
 }
 
-fn build(a: &[f32], nx: usize, ny: usize, s: usize, prec: &BandedPrecond) -> Built {
+fn build(a: &[f32], nx: usize, ny: usize, s: usize, prec: &BandedPrecond, threads: usize) -> Built {
     let ncells = nx * ny;
     match prec {
         BandedPrecond::BlockJacobi => {
+            // Per-cell block inversions are independent — parallel map, bit-
+            // identical to the serial loop.
             let mut minv = vec![Vec::new(); ncells];
-            for p in 0..ncells {
+            pmap(threads, &mut minv, |p| {
                 let mut m = vec![0.0f64; s * s];
                 for r in 0..s {
                     for c in 0..s {
                         m[r * s + c] = block(a, s, p, BAND_DIAG, r, c);
                     }
                 }
-                minv[p] = invert_block(&m, s);
-            }
+                invert_block(&m, s)
+            });
             Built::BlockJacobi { minv }
         }
         BandedPrecond::Schur { u_idx, p: pp, omega, sweeps_cap, pressure_amg } => {
@@ -612,18 +702,23 @@ fn apply(
         Built::Schur(sd) => {
             let ncells = nx * ny;
             let (u_idx, p, u_len) = (&sd.u_idx, sd.p, sd.u_len);
-            // Identity on any unknown that is neither velocity-like nor pressure.
-            let mut z = r.to_vec();
-
-            // 1./2. velocity predict + Schur RHS g_p = r_p − A_pu diag(A_uu)⁻¹ r_u.
+            let mut z = vec![0.0f64; ncells * s];
             let mut gp = vec![0.0f64; ncells];
-            for j in 0..ny {
-                for i in 0..nx {
-                    let cell = j * nx + i;
-                    for (ii, &u) in u_idx.iter().enumerate() {
-                        z[cell * s + u] = sd.diag_u_inv[cell * u_len + ii] * r[cell * s + u];
+
+            // 1./2. velocity predict + Schur RHS g_p = r_p − A_pu diag(A_uu)⁻¹ r_u;
+            // identity on any unknown that is neither velocity-like nor pressure.
+            // Parallel over disjoint cell chunks (same values as the serial loop).
+            cells_mut2(ncells, s, 1, threads, &mut z, &mut gp, |cell0, zc, gc| {
+                for li in 0..gc.len() {
+                    let cell = cell0 + li;
+                    let (i, j) = (cell % nx, cell / nx);
+                    for c in 0..s {
+                        zc[li * s + c] = r[cell * s + c];
                     }
-                    z[cell * s + p] = 0.0;
+                    for (ii, &u) in u_idx.iter().enumerate() {
+                        zc[li * s + u] = sd.diag_u_inv[cell * u_len + ii] * r[cell * s + u];
+                    }
+                    zc[li * s + p] = 0.0;
                     let mut g = r[cell * s + p];
                     for &(band, q) in neighbors(i, j, nx, ny).iter() {
                         for (ii, &u) in u_idx.iter().enumerate() {
@@ -631,9 +726,9 @@ fn apply(
                             g -= a_pu * sd.diag_u_inv[q * u_len + ii] * r[q * s + u];
                         }
                     }
-                    gp[cell] = g;
+                    gc[li] = g;
                 }
-            }
+            });
 
             // 3. inner pressure solve  Ŝ psol = g_p   (Ŝ = A_pp): the pre-built
             //    AMG V-cycle if supplied (assembled ONCE per outer solve), else
@@ -645,19 +740,20 @@ fn apply(
             };
 
             // 4. velocity correct  z_u -= diag(A_uu)⁻¹ A_up psol ;  z_p = psol.
-            for j in 0..ny {
-                for i in 0..nx {
-                    let cell = j * nx + i;
+            cells_mut(ncells, s, threads, &mut z, |cell0, zc| {
+                for li in 0..zc.len() / s {
+                    let cell = cell0 + li;
+                    let (i, j) = (cell % nx, cell / nx);
                     for (ii, &u) in u_idx.iter().enumerate() {
                         let mut corr = 0.0;
                         for &(band, q) in neighbors(i, j, nx, ny).iter() {
                             corr += block(a, s, cell, band, u, p) * psol[q];
                         }
-                        z[cell * s + u] -= sd.diag_u_inv[cell * u_len + ii] * corr;
+                        zc[li * s + u] -= sd.diag_u_inv[cell * u_len + ii] * corr;
                     }
-                    z[cell * s + p] = psol[cell];
+                    zc[li * s + p] = psol[cell];
                 }
-            }
+            });
             z
         }
     }
@@ -672,10 +768,7 @@ fn dot(a: &[f64], b: &[f64]) -> f64 {
 fn norm(a: &[f64]) -> f64 {
     dot(a, a).sqrt()
 }
-#[inline]
-fn scale(a: &[f64], s: f64) -> Vec<f64> {
-    a.iter().map(|&x| x * s).collect()
-}
+#[cfg(not(feature = "cpu"))]
 #[inline]
 fn axpy(y: &mut [f64], a: f64, x: &[f64]) {
     for (yi, &xi) in y.iter_mut().zip(x) {
@@ -770,8 +863,22 @@ pub fn banded_gmres_opts(
     precond: &BandedPrecond,
     opts: &BandedSolveOpts,
 ) -> (Vec<f32>, f64, u32) {
-    let built = build(a, nx, ny, s, precond);
-    banded_fgmres(a, nx, ny, s, b, &built, opts)
+    let profile = std::env::var("CFD2_STRUCT_SOLVE_PROFILE").is_ok();
+    let t0 = profile.then(std::time::Instant::now);
+    let built = build(a, nx, ny, s, precond, opts.threads);
+    if let Some(t0) = t0 {
+        eprintln!("[solve-profile] build {:.2}ms", t0.elapsed().as_secs_f64() * 1e3);
+    }
+    let t1 = profile.then(std::time::Instant::now);
+    let out = banded_fgmres(a, nx, ny, s, b, &built, opts);
+    if let Some(t1) = t1 {
+        eprintln!(
+            "[solve-profile] fgmres {:.2}ms (iters {})",
+            t1.elapsed().as_secs_f64() * 1e3,
+            out.2
+        );
+    }
+    out
 }
 
 /// TOTAL Arnoldi-iteration budget for one banded coupled solve. The budget used
@@ -932,6 +1039,9 @@ fn banded_fgmres(
     #[cfg(feature = "cpu")]
     let amg_solver = match built {
         Built::Schur(sd) if sd.pressure_amg => {
+            let tp = std::env::var("CFD2_STRUCT_SOLVE_PROFILE")
+                .is_ok()
+                .then(std::time::Instant::now);
             let csr = amg_csr_values(&sd.a_pp, nx, ny);
             let hier: &crate::solver::cpu::amg::AmgHierarchy = match amg_cache {
                 Some(cache) => cache
@@ -939,7 +1049,11 @@ fn banded_fgmres(
                     .get_or_init(|| build_pressure_amg_hierarchy_from(nx, ny, &csr)),
                 None => fallback_hier.insert(build_pressure_amg_hierarchy(nx, ny)),
             };
-            Some(crate::solver::cpu::amg::AmgSolver::assemble(hier, &csr, threads, false))
+            let solver = crate::solver::cpu::amg::AmgSolver::assemble(hier, &csr, threads, false);
+            if let Some(tp) = tp {
+                eprintln!("[solve-profile] amg-assemble {:.2}ms", tp.elapsed().as_secs_f64() * 1e3);
+            }
+            Some(solver)
         }
         _ => None,
     };
@@ -969,7 +1083,8 @@ fn banded_fgmres(
     // the common converged/budget exits reuse the head's residual).
     let rel_at = |xv: &[f64]| -> f64 {
         let ax = spmv_t(a, nx, ny, s, xv, threads);
-        let r: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
+        let mut r = vec![0.0f64; n];
+        pmap(threads, &mut r, |i| b64[i] - ax[i]);
         block_rel_residual(&r, &blk_scales, s)
     };
 
@@ -978,7 +1093,8 @@ fn banded_fgmres(
         // monotonicity decision is made here (the in-cycle projection may only
         // PROPOSE a cycle break, verified at the next head).
         let ax = spmv_t(a, nx, ny, s, &x, threads);
-        let r0: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
+        let mut r0 = vec![0.0f64; n];
+        pmap(threads, &mut r0, |i| b64[i] - ax[i]);
         let beta = pnorm(threads, &r0);
         // Non-finite bail (unstructured linalg::fgmres parity): a poisoned
         // operator/rhs must not run the remaining budget nor leak NaN into the
@@ -1047,7 +1163,7 @@ fn banded_fgmres(
 
         let m = restart;
         let mut v: Vec<Vec<f64>> = Vec::with_capacity(m + 1);
-        v.push(scale(&r0, 1.0 / beta));
+        v.push(pscale(threads, &r0, 1.0 / beta));
         let mut z: Vec<Vec<f64>> = Vec::with_capacity(m); // preconditioned basis
         let mut h = vec![vec![0.0f64; m]; m + 1];
         let mut g = vec![0.0f64; m + 1];
@@ -1063,7 +1179,7 @@ fn banded_fgmres(
             z.push(zk);
             for i in 0..=k {
                 h[i][k] = pdot(threads, &w, &v[i]);
-                axpy(&mut w, -h[i][k], &v[i]);
+                paxpy(threads, &mut w, -h[i][k], &v[i]);
             }
             h[k + 1][k] = pnorm(threads, &w);
             if !h[k + 1][k].is_finite() {
@@ -1073,7 +1189,7 @@ fn banded_fgmres(
                 break;
             }
             if h[k + 1][k] > 1e-14 {
-                v.push(scale(&w, 1.0 / h[k + 1][k]));
+                v.push(pscale(threads, &w, 1.0 / h[k + 1][k]));
             } else {
                 v.push(vec![0.0f64; n]);
             }
@@ -1119,7 +1235,7 @@ fn banded_fgmres(
             y[i] = if h[i][i].abs() > 1e-300 { sm / h[i][i] } else { 0.0 };
         }
         for i in 0..kk {
-            axpy(&mut x, y[i], &z[i]);
+            paxpy(threads, &mut x, y[i], &z[i]);
         }
         if kk == 0 {
             // Breakdown with no progress: the head would loop forever on the

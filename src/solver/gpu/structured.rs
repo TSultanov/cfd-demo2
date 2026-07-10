@@ -1578,7 +1578,11 @@ impl BandedGpuLinAlg {
             &b,
             &effective,
             &crate::solver::banded_schur::BandedSolveOpts {
-                restart: self.restart.max(1),
+                // coupled_restart (not the on-device `self.restart`): CPU
+                // Picard-loop parity — see `banded_schur::coupled_restart`.
+                restart: crate::solver::banded_schur::coupled_restart(&effective)
+                    .min(self.ndof as usize)
+                    .max(1),
                 max_outer: 200,
                 tol,
                 threads,

@@ -872,12 +872,29 @@ impl StructuredModelSolver {
         let default_tol = crate::solver::banded_schur::default_step_tol();
         let ew_hi = 1e-2f64.max(default_tol);
         let mut prev_err: Option<f64> = None;
+        // Coarse per-phase wall-time profile (CFD2_STRUCT_PROFILE=1).
+        let profile = std::env::var("CFD2_STRUCT_PROFILE").is_ok();
+        let (mut t_asm, mut t_solve, mut t_upd, mut t_res) = (0.0f64, 0.0, 0.0, 0.0);
+        macro_rules! timed {
+            ($acc:ident, $e:expr) => {{
+                if profile {
+                    let t0 = std::time::Instant::now();
+                    let out = $e;
+                    $acc += t0.elapsed().as_secs_f64();
+                    out
+                } else {
+                    $e
+                }
+            }};
+        }
         for outer in 0..self.outer_iters {
             let snap = self.buffers.f32_vec("state");
             self.buffers.copy_into_f32("state_iter", &snap);
-            for id in &per {
-                self.run(id, n, &ctx);
-            }
+            timed!(t_asm, {
+                for id in &per {
+                    self.run(id, n, &ctx);
+                }
+            });
             let lin_tol = match prev_err {
                 Some(e) if outer > 0 && outer + 1 < self.outer_iters && e.is_finite() => {
                     (0.1 * e).clamp(default_tol, ew_hi)
@@ -890,21 +907,28 @@ impl StructuredModelSolver {
             // solution (see `prev_x`).
             let a = self.buffers.f32_vec("matrix_values");
             let b = self.buffers.f32_vec("rhs");
-            let (x, res, iters) = crate::solver::banded_schur::banded_gmres_opts(
-                &a,
-                self.grid.nx,
-                self.grid.ny,
-                self.s,
-                &b,
-                &precond,
-                &crate::solver::banded_schur::BandedSolveOpts {
-                    restart: 60,
-                    max_outer: 200,
-                    tol: lin_tol,
-                    threads: self.threads,
-                    amg_cache: Some(&self.amg_cache),
-                    x0: self.prev_x.as_deref(),
-                },
+            let (x, res, iters) = timed!(
+                t_solve,
+                crate::solver::banded_schur::banded_gmres_opts(
+                    &a,
+                    self.grid.nx,
+                    self.grid.ny,
+                    self.s,
+                    &b,
+                    &precond,
+                    &crate::solver::banded_schur::BandedSolveOpts {
+                        // .min(ndof): tiny grids must match the GPU host solve
+                        // exactly (same clamp there).
+                        restart: crate::solver::banded_schur::coupled_restart(&precond)
+                            .min(n * self.s)
+                            .max(1),
+                        max_outer: 200,
+                        tol: lin_tol,
+                        threads: self.threads,
+                        amg_cache: Some(&self.amg_cache),
+                        x0: self.prev_x.as_deref(),
+                    },
+                )
             );
             // NON-FINITE system (e.g. a NaN auxiliary poisoning the assembly —
             // the observed case: an un-seeded `u_ref` makes the on-device
@@ -941,9 +965,11 @@ impl StructuredModelSolver {
             // Cache the RAW solution as the next solve's warm start BEFORE the
             // update kernel overwrites the `x` buffer with the applied value.
             self.prev_x = Some(x);
-            for id in &upd {
-                self.run(id, n, &ctx);
-            }
+            timed!(t_upd, {
+                for id in &upd {
+                    self.run(id, n, &ctx);
+                }
+            });
             outers_done += 1;
 
             // Picard residual = APPLIED under-relaxed change |state − state_iter|,
@@ -952,11 +978,14 @@ impl StructuredModelSolver {
             // at 1.0, and why `Ux`/`Uy` share one scale).
             let st = self.buffers.f32_vec("state");
             let it = self.buffers.f32_vec("state_iter");
-            let scaled = crate::solver::banded_schur::structured_outer_residuals(
-                &st,
-                &it,
-                self.state_stride,
-                &self.unknown_state_groups,
+            let scaled = timed!(
+                t_res,
+                crate::solver::banded_schur::structured_outer_residuals(
+                    &st,
+                    &it,
+                    self.state_stride,
+                    &self.unknown_state_groups,
+                )
             );
 
             // GUI "Coupled: U / P": the velocity field's residual (not T), and p.
@@ -1002,6 +1031,16 @@ impl StructuredModelSolver {
             {
                 break;
             }
+        }
+        if profile {
+            eprintln!(
+                "[struct-profile] step {}: asm {:.1}ms solve {:.1}ms upd {:.1}ms res {:.1}ms (outers {outers_done})",
+                self.step_count,
+                t_asm * 1e3,
+                t_solve * 1e3,
+                t_upd * 1e3,
+                t_res * 1e3
+            );
         }
         self.last_stats = StructuredStepStats {
             outer_iters: outers_done,

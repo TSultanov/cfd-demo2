@@ -77,6 +77,46 @@ fn validate_ale_unified_assembly(system: &DiscreteSystem, _slots: &ResolvedState
     }
 }
 
+/// The per-cell Brinkman momentum-penalty mask carried by immersed-boundary
+/// (structured IBM) models. Field-name gate — literal to mirror the dp_update
+/// Brinkman mask (src/solver/model/modules/rhie_chow.rs) and the flux
+/// derivation's min-based face d_p (src/solver/model/flux_derivation.rs);
+/// non-IBM models never carry this slot, so every gate keyed on it is
+/// byte-inert for them.
+const IBM_PENALTY_SLOT: &str = "ibm_penalty_U";
+
+/// Split an implicit-diffusion coefficient into its unique `D_P`-unit scalar
+/// field factor (the Rhie–Chow pressure-velocity coupling `d_p`) and the
+/// remaining coefficient (`None` when the whole coefficient IS the d_p
+/// field). Returns `None` when the tree carries no `D_P` factor (viscous /
+/// thermal / biharmonic laplacians) — only the pressure Laplacian
+/// `laplacian(rho*d_p, p)` matches.
+fn split_dp_coeff_factor(
+    coeff: &Coefficient,
+) -> Option<(crate::solver::ir::FieldRef, Option<Coefficient>)> {
+    match coeff {
+        Coefficient::Field(f) if f.unit() == cfd2_ir::units::si::D_P => Some((*f, None)),
+        Coefficient::Product(l, r) => {
+            if let Some((f, rest_l)) = split_dp_coeff_factor(l) {
+                let rest = Some(match rest_l {
+                    Some(rl) => Coefficient::Product(Box::new(rl), r.clone()),
+                    None => (**r).clone(),
+                });
+                Some((f, rest))
+            } else if let Some((f, rest_r)) = split_dp_coeff_factor(r) {
+                let rest = Some(match rest_r {
+                    Some(rr) => Coefficient::Product(l.clone(), Box::new(rr)),
+                    None => (**l).clone(),
+                });
+                Some((f, rest))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
 /// `mesh_fluxes` storage binding (group 0 / binding 8): per-face volumetric
 /// swept rate `V̇_f = A_swept(f)/dt` (Volume/Time), signed along the stored
 /// face normal (owner convention, like the `fluxes` mass flux). Computed
@@ -1217,13 +1257,86 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     coefficient_value_expr(slots, diff_op.coeff.as_ref(), "idx", 1.0.into());
                 let kappa_other =
                     coefficient_value_expr(slots, diff_op.coeff.as_ref(), "other_idx", 1.0.into());
+                // IBM (Brinkman) impermeable-wall seal, matching the flux
+                // module's min-based face d_p (flux_derivation.rs `ibm_seal`;
+                // the consistency invariant above is why the two MUST change
+                // together): when the layout carries the `ibm_penalty_U` mask
+                // AND this diffusion coefficient contains the D_P-unit d_p
+                // factor (i.e. this is the pressure Laplacian), the interior
+                // face value on FLUID rows uses min(d_p_own, d_p_neigh) in
+                // place of the distance-weighted d_p blend. The dp_update
+                // Brinkman mask collapses d_p to ~0 INSIDE the solid, but an
+                // arithmetic face blend at the solid/fluid jump re-admits half
+                // the fluid-side conductance, so the pressure equation leaks
+                // mass through the immersed wall (interface velocity speckle).
+                // A wall is a SERIES conductance — the blocked side must
+                // dominate — and min is exactly that. The remaining factor
+                // (rho) keeps the existing lambda_f blend. Fluid-interior
+                // faces see min(a,a) == a for the uniform ClosedForm d_p, so
+                // the fluid operator is unchanged; non-IBM models (no
+                // `ibm_penalty_U` slot) emit byte-identical code.
+                let ibm_dp_seal = find_slot(slots, IBM_PENALTY_SLOT).and_then(|pen_slot| {
+                    diff_op
+                        .coeff
+                        .as_ref()
+                        .and_then(split_dp_coeff_factor)
+                        .map(|split| (pen_slot, split))
+                });
+                let kappa_interior = if let Some((pen_slot, (dp_field, rest))) = &ibm_dp_seal {
+                    let dp_slot = find_slot(slots, dp_field.name()).unwrap_or_else(|| {
+                        panic!(
+                            "IBM d_p seal: missing '{}' in resolved state slots",
+                            dp_field.name()
+                        )
+                    });
+                    let dp_own = state_component_slot(slots.stride, "state", "idx", dp_slot, 0);
+                    let dp_neigh =
+                        state_component_slot(slots.stride, "state", "other_idx", dp_slot, 0);
+                    let dp_min = dsl::min(dp_own, dp_neigh);
+                    let sealed = match rest {
+                        Some(rest) => {
+                            let rest_own =
+                                coefficient_value_expr(slots, Some(rest), "idx", 1.0.into());
+                            let rest_other =
+                                coefficient_value_expr(slots, Some(rest), "other_idx", 1.0.into());
+                            (rest_own * Expr::ident("lambda_f")
+                                + rest_other * (Expr::from(1.0) - Expr::ident("lambda_f")))
+                                * dp_min
+                        }
+                        None => dp_min,
+                    };
+                    // ROW-DEPENDENT conductance (the anchor half of the seal):
+                    // SOLID rows (|Sp_own| > 0) keep the ORIGINAL unsealed
+                    // blend, so a solid cell's pressure stays strongly slaved
+                    // to its neighbours (p_S ~ conductance-weighted average;
+                    // its face flux is sealed to 0, so nothing forces the row).
+                    // Without this the sealed solid block is only ~1/|Sp|-
+                    // coupled and becomes a pressure RESONATOR: fluid momentum
+                    // reads solid p directly through the Green-Gauss pressure
+                    // force, and under the all-Mach ddt(psi_precond, p) the
+                    // sloshing solid p drives a bounded interface limit cycle
+                    // (GUI-regime probe: ring mean|U| ~ 16x inlet). FLUID rows
+                    // take the sealed min, keeping the wall impermeable in the
+                    // fluid continuity (matrix matches the sealed flux to
+                    // O(d_p_solid)). The pressure block becomes nonsymmetric
+                    // at mixed faces ONLY — solid-solid and fluid-fluid faces
+                    // agree on both rows (min == blend for uniform d_p).
+                    let sp_own_abs = dsl::abs(state_component_slot(
+                        slots.stride,
+                        "state",
+                        "idx",
+                        pen_slot,
+                        0,
+                    ));
+                    let unsealed = kappa_own.clone() * Expr::ident("lambda_f")
+                        + kappa_other.clone() * (Expr::from(1.0) - Expr::ident("lambda_f"));
+                    dsl::select(sealed, unsealed, sp_own_abs.gt(0.0))
+                } else {
+                    kappa_own.clone() * Expr::ident("lambda_f")
+                        + kappa_other * (Expr::from(1.0) - Expr::ident("lambda_f"))
+                };
                 // Distance-weighted for interior faces; owner value at boundaries.
-                let kappa = dsl::select(
-                    kappa_own.clone(),
-                    kappa_own * Expr::ident("lambda_f")
-                        + kappa_other * (Expr::from(1.0) - Expr::ident("lambda_f")),
-                    !Expr::ident("is_boundary"),
-                );
+                let kappa = dsl::select(kappa_own, kappa_interior, !Expr::ident("is_boundary"));
 
                 // Single-op name `diff_coeff_<target>`; disambiguate by field
                 // only when an equation carries more than one implicit

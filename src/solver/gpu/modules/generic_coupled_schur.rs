@@ -323,4 +323,26 @@ impl PreconditionerModule for GenericCoupledSchurPreconditioner {
     ) {
         PreconditionerModule::encode_apply(&mut self.schur, device, encoder, ctx, input, output);
     }
+
+    fn begin_in_pass_applies(&mut self, device: &wgpu::Device) -> bool {
+        PreconditionerModule::begin_in_pass_applies(&mut self.schur, device)
+    }
+
+    fn encode_apply_in_pass(
+        &mut self,
+        device: &wgpu::Device,
+        pass: &mut wgpu::ComputePass<'_>,
+        ctx: &PrecondContext<'_>,
+        input: wgpu::BindingResource<'_>,
+        output: wgpu::BindingResource<'_>,
+    ) {
+        PreconditionerModule::encode_apply_in_pass(
+            &mut self.schur,
+            device,
+            pass,
+            ctx,
+            input,
+            output,
+        );
+    }
 }

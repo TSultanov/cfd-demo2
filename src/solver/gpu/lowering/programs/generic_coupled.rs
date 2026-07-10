@@ -1657,6 +1657,8 @@ pub(crate) fn spec_set_bc_values_per_face(
 }
 
 pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
+    let profile = std::env::var("CFD2_PROFILE_FGMRES").is_ok();
+    let t0 = profile.then(std::time::Instant::now);
     plan.step_linear_stats.clear();
     plan.step_graph_timings.clear();
     plan.outer_iterations = 0;
@@ -1716,6 +1718,9 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
     crate::count_submission!("Generic Coupled", "pre_step_copy");
     r.time_integration
         .prepare_step(&mut r.fields.constants, &queue);
+    if let Some(t) = t0 {
+        eprintln!("[prepare-step] {:.2}ms", t.elapsed().as_secs_f64() * 1e3);
+    }
 }
 
 pub(crate) fn host_finalize_step(plan: &mut GpuProgramPlan) {
@@ -2003,6 +2008,8 @@ pub(crate) fn try_host_coupled_solve_fused(plan: &mut GpuProgramPlan) -> bool {
     if !coupled_host_fusion_active(plan) {
         return false;
     }
+    let profile = std::env::var("CFD2_PROFILE_FGMRES").is_ok();
+    let fn_start = profile.then(std::time::Instant::now);
 
     let device = plan.context.device.clone();
     let context = crate::solver::gpu::context::GpuContext {
@@ -2251,6 +2258,12 @@ pub(crate) fn try_host_coupled_solve_fused(plan: &mut GpuProgramPlan) -> bool {
     plan.pending_outer_delta = delta_read.filter(|d| d.len() == num_targets);
     if let Some(m) = monitor {
         res_mut(plan).outer_convergence = Some(m);
+    }
+    if let Some(start) = fn_start {
+        eprintln!(
+            "[fused-solve] total={:.2}ms",
+            start.elapsed().as_secs_f64() * 1e3
+        );
     }
     true
 }

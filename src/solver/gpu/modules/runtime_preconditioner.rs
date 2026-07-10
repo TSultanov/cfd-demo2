@@ -387,6 +387,90 @@ impl PreconditionerModule for RuntimePreconditionerModule {
         let _ = self.encode_prepare_impl(device, queue, encoder, ctx);
     }
 
+    /// Jacobi and BlockJacobi applies are single dispatches; anything that can
+    /// fall back to the identity copy (missing pipelines/resources) or the AMG
+    /// v-cycle (encoder-level copies) keeps the per-iteration pass fallback.
+    fn begin_in_pass_applies(&mut self, device: &wgpu::Device) -> bool {
+        match self.kind {
+            PreconditionerType::Jacobi => {
+                self.ensure_jacobi_pipelines(device);
+                self.pipeline_apply_diag_inv.is_some()
+            }
+            PreconditionerType::BlockJacobi => {
+                if self.block_jacobi_block_size().is_none() {
+                    self.ensure_jacobi_pipelines(device);
+                    return self.pipeline_apply_diag_inv.is_some();
+                }
+                self.ensure_block_jacobi_resources(device);
+                self.pipeline_block_jacobi_apply.is_some() && self.bg_block_inv.is_some()
+            }
+            _ => false,
+        }
+    }
+
+    fn encode_apply_in_pass(
+        &mut self,
+        device: &wgpu::Device,
+        pass: &mut wgpu::ComputePass<'_>,
+        ctx: &PrecondContext<'_>,
+        input: wgpu::BindingResource<'_>,
+        output: wgpu::BindingResource<'_>,
+    ) {
+        // BlockJacobi with a supported block size and complete resources; the
+        // conditions were validated by `begin_in_pass_applies` for this solve.
+        if self.kind == PreconditionerType::BlockJacobi
+            && self.block_jacobi_block_size().is_some()
+        {
+            let pipeline = self
+                .pipeline_block_jacobi_apply
+                .as_ref()
+                .expect("validated by begin_in_pass_applies");
+            let bg_block_inv = self
+                .bg_block_inv
+                .as_ref()
+                .expect("validated by begin_in_pass_applies");
+            let vector_bg = ctx.create_vector_bind_group(
+                device,
+                input,
+                output.clone(),
+                ctx.scratch_b.as_entire_binding(),
+                "runtime_preconditioner:block_jacobi_apply_vectors",
+            );
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, &vector_bg, &[]);
+            pass.set_bind_group(1, ctx.matrix_bg, &[]);
+            pass.set_bind_group(2, bg_block_inv, &[]);
+            pass.set_bind_group(3, ctx.params_bg, &[]);
+            pass.dispatch_workgroups_indirect(
+                ctx.indirect_args,
+                PrecondContext::INDIRECT_DISPATCH_CELLS_OFFSET,
+            );
+            return;
+        }
+
+        // Diagonal Jacobi (also the BlockJacobi unsupported-block-size fallback).
+        let pipeline = self
+            .pipeline_apply_diag_inv
+            .as_ref()
+            .expect("validated by begin_in_pass_applies");
+        let vector_bg = ctx.create_vector_bind_group(
+            device,
+            input,
+            output.clone(),
+            output.clone(),
+            "runtime_preconditioner:jacobi_apply_vectors",
+        );
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(0, &vector_bg, &[]);
+        pass.set_bind_group(1, ctx.matrix_bg, &[]);
+        pass.set_bind_group(2, ctx.precond_bg, &[]);
+        pass.set_bind_group(3, ctx.params_bg, &[]);
+        pass.dispatch_workgroups_indirect(
+            ctx.indirect_args,
+            PrecondContext::INDIRECT_DISPATCH_DOFS_OFFSET,
+        );
+    }
+
     fn encode_apply(
         &mut self,
         device: &wgpu::Device,

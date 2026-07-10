@@ -3,8 +3,9 @@ use crate::solver::gpu::linear_solver::fgmres::{
     encode_fgmres_seed_basis0_from_system, encode_fgmres_solve_once_with_preconditioner,
     encode_rhs_norm_into_scalars, encode_write_params, read_solver_scalars_after_submit,
     solve_once_from_encoded_status, submit_fgmres_encoded_pass, FgmresSolveOnceConfig,
-    FgmresSolveOnceResult, FgmresWorkspace, IterParams, RawFgmresParams, FGMRES_SCALAR_CONVERGED,
-    FGMRES_SCALAR_RESIDUAL_EST, FGMRES_SCALAR_STOP_PUB, FGMRES_SCALAR_TOTAL_ITERS,
+    FgmresSolveOnceResult, FgmresWorkspace, IterParams, PrecondTarget, RawFgmresParams,
+    FGMRES_SCALAR_CONVERGED, FGMRES_SCALAR_RESIDUAL_EST, FGMRES_SCALAR_STOP_PUB,
+    FGMRES_SCALAR_TOTAL_ITERS,
 };
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, PreconditionerModule};
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
@@ -227,6 +228,11 @@ impl<P: PreconditionerModule> KrylovSolveModule<P> {
         } else {
             None
         };
+        // In-pass preconditioner applies let the restart loop encode as one
+        // long compute pass (see `PreconditionerModule::begin_in_pass_applies`).
+        let precond_in_pass = !std::env::var("CFD2_FGMRES_MEGA_PASS")
+            .is_ok_and(|v| v == "0")
+            && self.precond.begin_in_pass_applies(&context.device);
         let core = self.fgmres.core(&context.device, &context.queue);
         let encoded = encode_fgmres_solve_once_with_preconditioner(
             &core,
@@ -239,17 +245,31 @@ impl<P: PreconditionerModule> KrylovSolveModule<P> {
             capture_solver_scalars,
             preserve_convergence_state,
             rhs_norm_system,
-            |_j, encoder, vj, z_buf| {
-                encoder.push_debug_group(precond_label);
+            precond_in_pass,
+            |_j, target, vj, z_buf| {
                 let ctx = self.fgmres.precond_context(dispatch);
-                self.precond.encode_apply(
-                    &context.device,
-                    encoder,
-                    &ctx,
-                    vj,
-                    z_buf,
-                );
-                encoder.pop_debug_group();
+                match target {
+                    PrecondTarget::Encoder(encoder) => {
+                        encoder.push_debug_group(precond_label);
+                        self.precond.encode_apply(
+                            &context.device,
+                            encoder,
+                            &ctx,
+                            vj,
+                            z_buf,
+                        );
+                        encoder.pop_debug_group();
+                    }
+                    PrecondTarget::Pass(pass) => {
+                        self.precond.encode_apply_in_pass(
+                            &context.device,
+                            pass,
+                            &ctx,
+                            vj,
+                            z_buf,
+                        );
+                    }
+                }
             },
         );
         encoded.max_restart

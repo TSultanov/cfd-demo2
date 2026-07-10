@@ -775,21 +775,22 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
             last_submission_index = Some(sub_idx);
         }
     }
-    if profile_fgmres {
-        eprintln!(
-            "[fgmres-cpu] chunks={num_chunks} encode={:.2}ms finish={:.2}ms submit={:.2}ms ({})",
-            encode_ns as f64 / 1e6,
-            finish_ns as f64 / 1e6,
-            submit_ns as f64 / 1e6,
-            precond_label,
-        );
-    }
-
     // Read back solver scalars from the last chunk to produce a meaningful
     // LinearSolverStats with the real GPU-computed residual.
     if let Some(sub_idx) = last_submission_index {
+        let readback_start = profile_fgmres.then(Instant::now);
         let (stats, info) =
             krylov.read_last_solver_stats(context, sub_idx, encoded_total as u32, start.elapsed());
+        if let Some(rs) = readback_start {
+            eprintln!(
+                "[fgmres-cpu] chunks={num_chunks} encode={:.2}ms finish={:.2}ms submit={:.2}ms wait={:.2}ms ({})",
+                encode_ns as f64 / 1e6,
+                finish_ns as f64 / 1e6,
+                submit_ns as f64 / 1e6,
+                rs.elapsed().as_secs_f64() * 1e3,
+                precond_label,
+            );
+        }
         // AUTO CGS2 arming for the NEXT solve (see `Cgs2Mode`).
         krylov.cgs2_auto_engaged =
             cgs2_auto_update(krylov.cgs2_auto_engaged, info.actual_iters, max_iters);

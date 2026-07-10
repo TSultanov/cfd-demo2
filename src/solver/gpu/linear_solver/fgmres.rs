@@ -144,6 +144,14 @@ pub struct FgmresCore<'a> {
     scale_bgs: &'a [wgpu::BindGroup],
     norm_bg: &'a wgpu::BindGroup,
     reduce_bg: &'a wgpu::BindGroup,
+    /// Per-column param bind groups (see [`ColumnParamBgs`]).
+    params_bgs: &'a [wgpu::BindGroup],
+    params_reduce_bgs: &'a [wgpu::BindGroup],
+    cgs_bgs: &'a [wgpu::BindGroup],
+    logic_params_bgs: &'a [wgpu::BindGroup],
+    /// Byte strides of the per-iteration param tables (see `FgmresWorkspace`).
+    pub params_table_stride: u64,
+    pub iter_table_stride: u64,
 
     pub pipeline_spmv: &'a wgpu::ComputePipeline,
     pub pipeline_axpby: &'a wgpu::ComputePipeline,
@@ -171,6 +179,11 @@ pub struct FgmresWorkspace {
     num_dot_groups: u32,
     basis_stride: u64,
     z_stride: u64,
+    /// Byte stride of one entry in the per-iteration param tables (padded to
+    /// `min_uniform_buffer_offset_alignment` so the per-column bind groups can
+    /// bind table slots directly).
+    params_table_stride: u64,
+    iter_table_stride: u64,
     solution_update_strategy: FgmresSolutionUpdateStrategy,
 
     b_basis: wgpu::Buffer,
@@ -207,6 +220,9 @@ pub struct FgmresWorkspace {
     /// Per-Arnoldi-column vector bind groups, built once at construction and
     /// reused by every solve (see [`VectorBgCache`]).
     vector_bg_cache: VectorBgCache,
+    /// Per-Arnoldi-column PARAM bind groups binding the param tables at static
+    /// offsets, replacing the four per-iteration table-select blit copies.
+    column_param_bgs: ColumnParamBgs,
     bgl_matrix: wgpu::BindGroupLayout,
     bgl_precond: wgpu::BindGroupLayout,
     bgl_params: wgpu::BindGroupLayout,
@@ -417,29 +433,48 @@ impl FgmresWorkspace {
             mapped_at_creation: false,
         });
 
+        // The per-iteration param tables are bound DIRECTLY (at a per-column
+        // static offset) by the per-column bind groups below, so the inner
+        // restart loop needs no table-select copies at all. Uniform bindings
+        // require the offset be a multiple of `min_uniform_buffer_offset_alignment`,
+        // so the tables are padded to that stride.
+        let uniform_align = device.limits().min_uniform_buffer_offset_alignment as u64;
+        let params_table_stride =
+            FGMRES_PARAMS_STRIDE_BYTES.div_ceil(uniform_align) * uniform_align;
+        let iter_table_stride =
+            FGMRES_ITER_PARAMS_STRIDE_BYTES.div_ceil(uniform_align) * uniform_align;
+
         let table_capacity = max_restart.max(1) as u64;
         let b_params_table_iter = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label_prefix} FGMRES params table iter")),
-            size: table_capacity * FGMRES_PARAMS_STRIDE_BYTES,
-            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            size: table_capacity * params_table_stride,
+            usage: wgpu::BufferUsages::UNIFORM
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let b_params_table_reduce = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label_prefix} FGMRES params table reduce")),
-            size: table_capacity * FGMRES_PARAMS_STRIDE_BYTES,
-            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            size: table_capacity * params_table_stride,
+            usage: wgpu::BufferUsages::UNIFORM
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let b_iter_table_j = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label_prefix} FGMRES iter table j")),
-            size: table_capacity * FGMRES_ITER_PARAMS_STRIDE_BYTES,
-            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            size: table_capacity * iter_table_stride,
+            usage: wgpu::BufferUsages::UNIFORM
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let b_iter_table_hessenberg = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(&format!("{label_prefix} FGMRES iter table hessenberg")),
-            size: table_capacity * FGMRES_ITER_PARAMS_STRIDE_BYTES,
-            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::COPY_DST,
+            size: table_capacity * iter_table_stride,
+            usage: wgpu::BufferUsages::UNIFORM
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
@@ -681,6 +716,137 @@ impl FgmresWorkspace {
             max_restart,
         );
 
+        // Per-column PARAM bind groups binding the tables at static offsets —
+        // byte-for-byte substitutes for the old "copy table[j] into the
+        // dedicated b_params/b_iter_params buffers" scheme, minus the four
+        // blit copies per Arnoldi iteration (which forced a blit/compute
+        // encoder round-trip per iteration on Metal).
+        let column_param_bgs = {
+            fn table_binding(
+                buf: &wgpu::Buffer,
+                j: u64,
+                stride: u64,
+                size: u64,
+            ) -> wgpu::BindingResource<'_> {
+                wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: buf,
+                    offset: j * stride,
+                    size: std::num::NonZeroU64::new(size),
+                })
+            }
+            let mut params = Vec::with_capacity(max_restart);
+            let mut params_reduce = Vec::with_capacity(max_restart);
+            let mut cgs = Vec::with_capacity(max_restart);
+            let mut logic_params = Vec::with_capacity(max_restart);
+            for j in 0..max_restart as u64 {
+                let params_iter_j = table_binding(
+                    &b_params_table_iter,
+                    j,
+                    params_table_stride,
+                    FGMRES_PARAMS_STRIDE_BYTES,
+                );
+                let params_reduce_j = table_binding(
+                    &b_params_table_reduce,
+                    j,
+                    params_table_stride,
+                    FGMRES_PARAMS_STRIDE_BYTES,
+                );
+                let iter_j = table_binding(
+                    &b_iter_table_j,
+                    j,
+                    iter_table_stride,
+                    FGMRES_ITER_PARAMS_STRIDE_BYTES,
+                );
+                let iter_hess_j = table_binding(
+                    &b_iter_table_hessenberg,
+                    j,
+                    iter_table_stride,
+                    FGMRES_ITER_PARAMS_STRIDE_BYTES,
+                );
+
+                let registry = ResourceRegistry::new()
+                    .with_resource("params", params_iter_j.clone())
+                    .with_resource("iter_params", iter_j.clone())
+                    .with_buffer("scalars", &b_scalars)
+                    .with_buffer("hessenberg", &b_hessenberg)
+                    .with_buffer("y_sol", &b_y);
+                params.push(
+                    wgsl_reflect::create_bind_group_from_bindings(
+                        device,
+                        &format!("{label_prefix} FGMRES params BG (col)"),
+                        &bgl_params,
+                        ops_bindings,
+                        3,
+                        |name| registry.resolve(name),
+                    )
+                    .map_err(|e| format!("FGMRES params (col) BG creation failed: {e}"))?,
+                );
+
+                let registry = ResourceRegistry::new()
+                    .with_resource("params", params_reduce_j)
+                    .with_resource("iter_params", iter_hess_j)
+                    .with_buffer("scalars", &b_scalars)
+                    .with_buffer("hessenberg", &b_hessenberg)
+                    .with_buffer("y_sol", &b_y);
+                params_reduce.push(
+                    wgsl_reflect::create_bind_group_from_bindings(
+                        device,
+                        &format!("{label_prefix} FGMRES params BG (col reduce)"),
+                        &bgl_params,
+                        ops_bindings,
+                        3,
+                        |name| registry.resolve(name),
+                    )
+                    .map_err(|e| {
+                        format!("FGMRES params (col reduce) BG creation failed: {e}")
+                    })?,
+                );
+
+                let registry = ResourceRegistry::new()
+                    .with_resource("params", params_iter_j)
+                    .with_buffer("b_basis", &b_basis)
+                    .with_buffer("b_w", &b_w)
+                    .with_buffer("b_dot_partial", &b_dot_partial)
+                    .with_buffer("b_hessenberg", &b_hessenberg)
+                    .with_buffer("scalars", &b_scalars);
+                cgs.push(
+                    wgsl_reflect::create_bind_group_from_bindings(
+                        device,
+                        &format!("{label_prefix} FGMRES cgs BG (col)"),
+                        &bgl_cgs,
+                        cgs_calc_src.bindings,
+                        0,
+                        |name| registry.resolve(name),
+                    )
+                    .map_err(|e| format!("FGMRES cgs (col) BG creation failed: {e}"))?,
+                );
+
+                let registry = ResourceRegistry::new()
+                    .with_resource("iter_params", iter_j)
+                    .with_buffer("scalars", &b_scalars)
+                    .with_buffer("indirect_args", &b_indirect_args);
+                logic_params.push(
+                    wgsl_reflect::create_bind_group_from_bindings(
+                        device,
+                        &format!("{label_prefix} FGMRES logic params BG (col)"),
+                        &bgl_logic_params,
+                        logic_update_src.bindings,
+                        1,
+                        |name| registry.resolve(name),
+                    )
+                    .map_err(|e| {
+                        format!("FGMRES logic params (col) BG creation failed: {e}")
+                    })?,
+                );
+            }
+            ColumnParamBgs {
+                params,
+                params_reduce,
+                cgs,
+                logic_params,
+            }
+        };
+
         Ok(Self {
             max_restart,
             n,
@@ -688,6 +854,8 @@ impl FgmresWorkspace {
             num_dot_groups,
             basis_stride,
             z_stride,
+            params_table_stride,
+            iter_table_stride,
             solution_update_strategy,
             b_basis,
             b_z_storage,
@@ -714,6 +882,7 @@ impl FgmresWorkspace {
             bgl_vectors,
             vector_bindings: ops_bindings,
             vector_bg_cache,
+            column_param_bgs,
             bgl_matrix,
             bgl_precond,
             bgl_params,
@@ -792,6 +961,12 @@ impl FgmresWorkspace {
             scale_bgs: &self.vector_bg_cache.scale,
             norm_bg: &self.vector_bg_cache.norm,
             reduce_bg: &self.vector_bg_cache.reduce,
+            params_bgs: &self.column_param_bgs.params,
+            params_reduce_bgs: &self.column_param_bgs.params_reduce,
+            cgs_bgs: &self.column_param_bgs.cgs,
+            logic_params_bgs: &self.column_param_bgs.logic_params,
+            params_table_stride: self.params_table_stride,
+            iter_table_stride: self.iter_table_stride,
             pipeline_spmv: &self.pipeline_spmv,
             pipeline_axpby: &self.pipeline_axpby,
             pipeline_scale: &self.pipeline_scale,
@@ -1467,6 +1642,24 @@ fn create_vector_bind_group<'a>(
 /// them per iteration was the dominant CPU cost of the coupled solve. Because a
 /// `wgpu::BindGroup` is an owned Arc handle (not a Rust borrow) these can live on
 /// the workspace and be indexed by `j` in the hot loop instead.
+/// Per-Arnoldi-column param bind groups (see the construction site in
+/// [`FgmresWorkspace::new`]): each binds the param TABLES at column `j`'s
+/// static offset, so the inner restart loop selects per-iteration params by
+/// bind group index instead of blit-copying table entries into dedicated
+/// buffers (4 copies per iteration, each forcing a blit/compute encoder
+/// round-trip on Metal).
+struct ColumnParamBgs {
+    /// Group-3 ops bind group: `params`→iter table\[j\], `iter_params`→j table\[j\].
+    params: Vec<wgpu::BindGroup>,
+    /// Group-3 ops bind group for Reduce-Final: `params`→reduce table\[j\],
+    /// `iter_params`→hessenberg-index table\[j\].
+    params_reduce: Vec<wgpu::BindGroup>,
+    /// Group-0 CGS bind group with `params`→iter table\[j\].
+    cgs: Vec<wgpu::BindGroup>,
+    /// Group-1 logic bind group with `iter_params`→j table\[j\].
+    logic_params: Vec<wgpu::BindGroup>,
+}
+
 struct VectorBgCache {
     /// SpMV input `(vec_x=z_storage[j], vec_y=w, vec_z=temp)`, one per column `j`.
     spmv: Vec<wgpu::BindGroup>,
@@ -2097,6 +2290,105 @@ pub(crate) fn read_solver_scalars_after_submit(
     out
 }
 
+/// Encoding target handed to the preconditioner-apply callback of
+/// [`encode_fgmres_solve_once_with_preconditioner`]: either the raw command
+/// encoder (per-iteration pass fallback) or the restart loop's single long
+/// compute pass (when the preconditioner declared in-pass support).
+pub enum PrecondTarget<'e, 'p> {
+    Encoder(&'e mut wgpu::CommandEncoder),
+    Pass(&'e mut wgpu::ComputePass<'p>),
+}
+
+/// Encode the Arnoldi iteration body (SpMV, CGS orthogonalization, norm,
+/// normalize, Hessenberg/Givens update) for column `j` as dispatches into an
+/// existing compute pass. Sets every bind group each pipeline needs, so it
+/// composes with preconditioner dispatches in the same pass.
+///
+/// Per-iteration params come from the per-column bind groups (which bind the
+/// param tables at column j's static offset — see `ColumnParamBgs`), so the
+/// iteration encodes as compute-only work: each dispatch is its own WebGPU
+/// usage scope (storage writes stay visible to the next dispatch), making one
+/// pass with pipeline switches semantically identical to one pass per
+/// dispatch, minus the per-pass encoder begin/end cost that dominates Metal
+/// encode/finish and GPU pass-transition time for these tiny grids.
+fn encode_arnoldi_iteration_dispatches(
+    core: &FgmresCore<'_>,
+    pass: &mut wgpu::ComputePass<'_>,
+    j: usize,
+    enable_cgs2: bool,
+) {
+    // Cached bind groups: `spmv_bg` per column `(vec_x=z_storage[j], vec_y=w,
+    // vec_z=temp)`; `norm_bg` column-independent `(vec_x=w, vec_y=temp,
+    // vec_z=dot_partial)`; `reduce_bg` column-independent `(vec_x=dot_partial,
+    // vec_y=temp, vec_z=temp)`; `scale_bg` per column `(vec_x=w,
+    // vec_y=basis[j+1], vec_z=temp)`.
+    let spmv_bg = &core.spmv_bgs[j];
+    let norm_bg = core.norm_bg;
+    let reduce_bg = core.reduce_bg;
+    let scale_bg = &core.scale_bgs[j];
+    let params_bg_j = &core.params_bgs[j];
+    let params_reduce_bg_j = &core.params_reduce_bgs[j];
+    let cgs_bg_j = &core.cgs_bgs[j];
+    let logic_params_bg_j = &core.logic_params_bgs[j];
+
+    pass.set_pipeline(core.pipeline_spmv);
+    pass.set_bind_group(0, spmv_bg, &[]);
+    pass.set_bind_group(1, core.bg_matrix, &[]);
+    pass.set_bind_group(2, core.bg_precond, &[]);
+    pass.set_bind_group(3, params_bg_j, &[]);
+    pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
+
+    pass.set_pipeline(core.pipeline_calc_dots_cgs);
+    pass.set_bind_group(0, cgs_bg_j, &[]);
+    pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
+
+    pass.set_pipeline(core.pipeline_reduce_dots_cgs);
+    pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_SCALAR_OFFSET);
+
+    pass.set_pipeline(core.pipeline_update_w_cgs);
+    pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
+
+    if enable_cgs2 {
+        // CGS2: re-project the corrected w against the basis. The pass-2
+        // reduce ACCUMULATES into the Hessenberg entries (H = d1 + d2)
+        // and stashes the pass-2 coefficients in b_dot_partial, which
+        // the pass-2 update_w reads (subtracting H again would
+        // double-project).
+        pass.set_pipeline(core.pipeline_calc_dots_cgs);
+        pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
+
+        pass.set_pipeline(core.pipeline_reduce_dots_cgs_reortho);
+        pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_SCALAR_OFFSET);
+
+        pass.set_pipeline(core.pipeline_update_w_cgs_reortho);
+        pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
+    }
+
+    pass.set_pipeline(core.pipeline_norm_sq);
+    pass.set_bind_group(0, norm_bg, &[]);
+    pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
+
+    // Reduce-Final reads the *reduce* params (n=num_dot_groups) and the
+    // hessenberg-index iter_params — supplied by the per-column reduce
+    // bind group (reduce table / hessenberg-index table at slot j).
+    pass.set_pipeline(core.pipeline_reduce_final_and_finish_norm);
+    pass.set_bind_group(0, reduce_bg, &[]);
+    pass.set_bind_group(3, params_reduce_bg_j, &[]);
+    pass.dispatch_workgroups(1, 1, 1);
+
+    // Normalize reads params.n = n — the per-column ITER params.
+    pass.set_pipeline(core.pipeline_scale);
+    pass.set_bind_group(0, scale_bg, &[]);
+    pass.set_bind_group(3, params_bg_j, &[]);
+    pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
+
+    pass.set_pipeline(core.pipeline_update_hessenberg);
+    pass.set_bind_group(0, core.bg_logic, &[]);
+    pass.set_bind_group(1, logic_params_bg_j, &[]);
+    pass.dispatch_workgroups(1, 1, 1);
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
     core: &FgmresCore<'a>,
     encoder: &mut wgpu::CommandEncoder,
@@ -2113,9 +2405,14 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
     // written beta = ||r0|| into `hessenberg[0]`.  The function saves/restores
     // `hessenberg[0]` around the norm computation.
     rhs_norm_system: Option<LinearSystemView<'a>>,
+    // Whether `precondition` encodes into the restart loop's single long
+    // compute pass (`PrecondTarget::Pass`) — see
+    // `PreconditionerModule::begin_in_pass_applies` — or needs the raw encoder
+    // (`PrecondTarget::Encoder`, one pass per iteration).
+    precond_in_pass: bool,
     mut precondition: impl FnMut(
         usize,
-        &mut wgpu::CommandEncoder,
+        PrecondTarget<'_, '_>,
         wgpu::BindingResource<'a>,
         wgpu::BindingResource<'a>,
     ),
@@ -2310,12 +2607,23 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
         })
         .collect();
 
+    // Write the param tables at the padded per-column stride the static-offset
+    // bind groups expect (see `ColumnParamBgs`).
+    fn pad_table<T: bytemuck::Pod>(entries: &[T], stride: usize) -> Vec<u8> {
+        let entry_size = std::mem::size_of::<T>();
+        let mut bytes = vec![0u8; entries.len() * stride];
+        for (j, entry) in entries.iter().enumerate() {
+            bytes[j * stride..j * stride + entry_size]
+                .copy_from_slice(bytemuck::bytes_of(entry));
+        }
+        bytes
+    }
     encode_write_buffer_from_bytes(
         core.device,
         encoder,
         core.b_params_table_iter,
         0,
-        bytemuck::cast_slice(&params_iter_table),
+        &pad_table(&params_iter_table, core.params_table_stride as usize),
         "FGMRES params table iter",
     );
     encode_write_buffer_from_bytes(
@@ -2323,7 +2631,7 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
         encoder,
         core.b_params_table_reduce,
         0,
-        bytemuck::cast_slice(&params_reduce_table),
+        &pad_table(&params_reduce_table, core.params_table_stride as usize),
         "FGMRES params table reduce",
     );
     encode_write_buffer_from_bytes(
@@ -2331,7 +2639,7 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
         encoder,
         core.b_iter_table_j,
         0,
-        bytemuck::cast_slice(&iter_table_j),
+        &pad_table(&iter_table_j, core.iter_table_stride as usize),
         "FGMRES iter table j",
     );
     encode_write_buffer_from_bytes(
@@ -2339,222 +2647,46 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
         encoder,
         core.b_iter_table_hessenberg,
         0,
-        bytemuck::cast_slice(&iter_table_hessenberg),
+        &pad_table(&iter_table_hessenberg, core.iter_table_stride as usize),
         "FGMRES iter table hessenberg",
     );
 
-    for j in 0..max_restart {
-        let params_offset = (j as u64) * FGMRES_PARAMS_STRIDE_BYTES;
-        let iter_offset = (j as u64) * FGMRES_ITER_PARAMS_STRIDE_BYTES;
-
-        // Select this column's params into their dedicated buffers in one batched
-        // blit section at the iteration top. Each concurrently-live value has its
-        // own buffer (b_params=iter, b_params_reduce=reduce, b_iter_params=j,
-        // b_iter_params_hess=hessenberg-index), so nothing has to be swapped or
-        // restored mid-iteration and all the compute passes below run as one
-        // uninterrupted compute-encoder run. Only the reduce-final pass rebinds to
-        // the dedicated buffers, via `bg_params_reduce`.
-        encoder.copy_buffer_to_buffer(
-            core.b_params_table_iter,
-            params_offset,
-            core.b_params,
-            0,
-            FGMRES_PARAMS_STRIDE_BYTES,
-        );
-        encoder.copy_buffer_to_buffer(
-            core.b_params_table_reduce,
-            params_offset,
-            core.b_params_reduce,
-            0,
-            FGMRES_PARAMS_STRIDE_BYTES,
-        );
-        encoder.copy_buffer_to_buffer(
-            core.b_iter_table_j,
-            iter_offset,
-            core.b_iter_params,
-            0,
-            FGMRES_ITER_PARAMS_STRIDE_BYTES,
-        );
-        encoder.copy_buffer_to_buffer(
-            core.b_iter_table_hessenberg,
-            iter_offset,
-            core.b_iter_params_hess,
-            0,
-            FGMRES_ITER_PARAMS_STRIDE_BYTES,
-        );
-
-        let z_buf = z_storage_binding(core.b_z_storage, core.z_stride, vector_bytes, j);
-        let vj = basis_binding(core.b_basis, core.basis_stride, vector_bytes, j);
-
-        precondition(j, encoder, vj, z_buf.clone());
-
-        // Cached per-column bind group `(vec_x=z_storage[j], vec_y=w, vec_z=temp)`.
-        let spmv_bg = &core.spmv_bgs[j];
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("FGMRES SpMV"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(core.pipeline_spmv);
-            pass.set_bind_group(0, spmv_bg, &[]);
-            pass.set_bind_group(1, core.bg_matrix, &[]);
-            pass.set_bind_group(2, core.bg_precond, &[]);
-            pass.set_bind_group(3, core.bg_params, &[]);
-            pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
-        }
-
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("FGMRES CGS Calc"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(core.pipeline_calc_dots_cgs);
-            pass.set_bind_group(0, core.bg_cgs, &[]);
-            pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
-        }
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("FGMRES CGS Reduce"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(core.pipeline_reduce_dots_cgs);
-            pass.set_bind_group(0, core.bg_cgs, &[]);
-            pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_SCALAR_OFFSET);
-        }
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("FGMRES CGS Update W"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(core.pipeline_update_w_cgs);
-            pass.set_bind_group(0, core.bg_cgs, &[]);
-            pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
-        }
-        if config.enable_cgs2 {
-            // CGS2: re-project the corrected w against the basis. The pass-2
-            // reduce ACCUMULATES into the Hessenberg entries (H = d1 + d2)
-            // and stashes the pass-2 coefficients in b_dot_partial, which
-            // the pass-2 update_w reads (subtracting H again would
-            // double-project). b_params still holds params_table_iter[j].
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("FGMRES CGS2 Calc"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(core.pipeline_calc_dots_cgs);
-                pass.set_bind_group(0, core.bg_cgs, &[]);
-                pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
-            }
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("FGMRES CGS2 Reduce"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(core.pipeline_reduce_dots_cgs_reortho);
-                pass.set_bind_group(0, core.bg_cgs, &[]);
-                pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_SCALAR_OFFSET);
-            }
-            {
-                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("FGMRES CGS2 Update W"),
-                    timestamp_writes: None,
-                });
-                pass.set_pipeline(core.pipeline_update_w_cgs_reortho);
-                pass.set_bind_group(0, core.bg_cgs, &[]);
-                pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
-            }
-        }
-
-        // Cached column-independent bind group `(vec_x=w, vec_y=temp, vec_z=dot_partial)`.
-        let norm_bg = core.norm_bg;
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("FGMRES Norm Partial"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(core.pipeline_norm_sq);
-            pass.set_bind_group(0, norm_bg, &[]);
-            pass.set_bind_group(1, core.bg_matrix, &[]);
-            pass.set_bind_group(2, core.bg_precond, &[]);
-            pass.set_bind_group(3, core.bg_params, &[]);
-            pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
-        }
-
-        // Cached column-independent bind group `(vec_x=dot_partial, vec_y=temp, vec_z=temp)`.
-        let reduce_bg = core.reduce_bg;
-
-        // Reduce-Final reads the *reduce* params (n=num_dot_groups) and the
-        // hessenberg-index iter_params — supplied by `bg_params_reduce`, which binds
-        // the dedicated `b_params_reduce` / `b_iter_params_hess` buffers written at
-        // the loop top.
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("FGMRES Reduce Final & Finish Norm"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(core.pipeline_reduce_final_and_finish_norm);
-            pass.set_bind_group(0, reduce_bg, &[]);
-            pass.set_bind_group(1, core.bg_matrix, &[]);
-            pass.set_bind_group(2, core.bg_precond, &[]);
-            pass.set_bind_group(3, core.bg_params_reduce, &[]);
-            pass.dispatch_workgroups(1, 1, 1);
-        }
-
-        // Cached per-column bind group `(vec_x=w, vec_y=basis[j+1], vec_z=temp)`.
-        let scale_bg = &core.scale_bgs[j];
-
-        // Normalize reads b_params.n = n (iter value) — still live from the loop-top
-        // copy (b_params was never clobbered because the reduce pass used its own
-        // buffer), and b_iter_params = j (also from the loop top).
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("FGMRES Normalize & Copy"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(core.pipeline_scale);
-            pass.set_bind_group(0, scale_bg, &[]);
-            pass.set_bind_group(1, core.bg_matrix, &[]);
-            pass.set_bind_group(2, core.bg_precond, &[]);
-            pass.set_bind_group(3, core.bg_params, &[]);
-            pass.dispatch_workgroups_indirect(core.b_indirect_args, FGMRES_INDIRECT_DOFS_OFFSET);
-        }
-
-        {
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("FGMRES Update Hessenberg"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(core.pipeline_update_hessenberg);
-            pass.set_bind_group(0, core.bg_logic, &[]);
-            pass.set_bind_group(1, core.bg_logic_params, &[]);
-            pass.dispatch_workgroups(1, 1, 1);
-        }
-    }
-
-    if max_restart > 0 {
-        encoder.copy_buffer_to_buffer(
-            core.b_iter_table_j,
-            0,
-            core.b_iter_params,
-            0,
-            FGMRES_ITER_PARAMS_STRIDE_BYTES,
-        );
-    }
-    {
+    // With the per-column param bind groups (see `ColumnParamBgs`) the loop
+    // encodes NO copies at all, so when the preconditioner can apply in-pass
+    // the ENTIRE restart loop runs as one long compute pass — one Metal
+    // compute encoder for the whole solve instead of two per iteration.
+    if precond_in_pass {
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("FGMRES Solve Triangular"),
+            label: Some("FGMRES Restart Loop"),
             timestamp_writes: None,
         });
-        pass.set_pipeline(core.pipeline_solve_triangular);
-        pass.set_bind_group(0, core.bg_logic, &[]);
-        pass.set_bind_group(1, core.bg_logic_params, &[]);
-        pass.dispatch_workgroups(1, 1, 1);
+        for j in 0..max_restart {
+            let z_buf = z_storage_binding(core.b_z_storage, core.z_stride, vector_bytes, j);
+            let vj = basis_binding(core.b_basis, core.basis_stride, vector_bytes, j);
+            precondition(j, PrecondTarget::Pass(&mut pass), vj, z_buf.clone());
+            encode_arnoldi_iteration_dispatches(core, &mut pass, j, config.enable_cgs2);
+        }
+    } else {
+        for j in 0..max_restart {
+            let z_buf = z_storage_binding(core.b_z_storage, core.z_stride, vector_bytes, j);
+            let vj = basis_binding(core.b_basis, core.basis_stride, vector_bytes, j);
+            precondition(j, PrecondTarget::Encoder(encoder), vj, z_buf.clone());
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("FGMRES Arnoldi Iteration"),
+                timestamp_writes: None,
+            });
+            encode_arnoldi_iteration_dispatches(core, &mut pass, j, config.enable_cgs2);
+        }
     }
 
-    if config.reset_x_before_update {
-        encoder.clear_buffer(x, 0, Some(vector_bytes));
-    }
-
+    // solve_triangular reads `iter_params.max_restart` (hessenberg stride) —
+    // the per-column logic bind group at slot 0 supplies exactly the value the
+    // old trailing "copy iter_table_j[0] → b_iter_params" provided. The fused
+    // update reads the ITER params, identical in every column-independent
+    // field — use the last column's bind group to match the old post-loop
+    // `b_params` contents byte-for-byte.
+    let logic_params_bg0 = &core.logic_params_bgs[0];
+    let params_bg_last = &core.params_bgs[max_restart.saturating_sub(1)];
     let fused_bg = create_vector_bind_group(
         core.device,
         core.bgl_vectors,
@@ -2564,7 +2696,19 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
         core.b_temp.as_entire_binding(),
         "FGMRES Solution Update Fused BG",
     );
-    {
+    if config.reset_x_before_update {
+        // The clear_buffer between them forces separate passes.
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("FGMRES Solve Triangular"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(core.pipeline_solve_triangular);
+            pass.set_bind_group(0, core.bg_logic, &[]);
+            pass.set_bind_group(1, logic_params_bg0, &[]);
+            pass.dispatch_workgroups(1, 1, 1);
+        }
+        encoder.clear_buffer(x, 0, Some(vector_bytes));
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("FGMRES Solution Update Fused"),
             timestamp_writes: None,
@@ -2573,7 +2717,23 @@ pub fn encode_fgmres_solve_once_with_preconditioner<'a>(
         pass.set_bind_group(0, &fused_bg, &[]);
         pass.set_bind_group(1, core.bg_matrix, &[]);
         pass.set_bind_group(2, core.bg_precond, &[]);
-        pass.set_bind_group(3, core.bg_params, &[]);
+        pass.set_bind_group(3, params_bg_last, &[]);
+        pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
+    } else {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("FGMRES Solve Triangular + Solution Update"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(core.pipeline_solve_triangular);
+        pass.set_bind_group(0, core.bg_logic, &[]);
+        pass.set_bind_group(1, logic_params_bg0, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+
+        pass.set_pipeline(core.pipeline_axpy_fused_from_y);
+        pass.set_bind_group(0, &fused_bg, &[]);
+        pass.set_bind_group(1, core.bg_matrix, &[]);
+        pass.set_bind_group(2, core.bg_precond, &[]);
+        pass.set_bind_group(3, params_bg_last, &[]);
         pass.dispatch_workgroups(dispatch_x, dispatch_y, 1);
     }
 

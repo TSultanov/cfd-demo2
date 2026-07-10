@@ -276,6 +276,56 @@ impl CoupledSchurModule {
         );
     }
 
+    /// Encode the Chebyshev/Jacobi Schur apply (predict + pressure relax
+    /// sweeps + velocity correct) as dispatches into an existing compute pass.
+    /// Sets every bind group it depends on, so it composes with surrounding
+    /// solver dispatches in the same pass. `predict_and_form` already writes
+    /// the first Jacobi iterate (p_sol = D^-1 rhs), so one fewer relax
+    /// dispatch is encoded.
+    fn encode_chebyshev_apply_dispatches(
+        &self,
+        pass: &mut wgpu::ComputePass<'_>,
+        ctx: &PrecondContext<'_>,
+        current_bg: &wgpu::BindGroup,
+        swap_bg: &wgpu::BindGroup,
+    ) {
+        let p_iters = self.pressure_sweeps.saturating_sub(1);
+
+        pass.set_bind_group(1, ctx.matrix_bg, &[]);
+        pass.set_bind_group(2, &self.bg_schur_precond, &[]);
+        pass.set_bind_group(3, &self.bg_pressure_matrix, &[]);
+
+        pass.set_pipeline(&self.pipeline_predict_and_form);
+        pass.set_bind_group(0, current_bg, &[]);
+        pass.dispatch_workgroups_indirect(
+            ctx.indirect_args,
+            PrecondContext::INDIRECT_DISPATCH_CELLS_OFFSET,
+        );
+        if p_iters == 0 {
+            return;
+        }
+
+        let mut p_result_in_sol = true;
+        pass.set_pipeline(&self.pipeline_relax_pressure);
+        for _ in 0..p_iters {
+            let bg = if p_result_in_sol { current_bg } else { swap_bg };
+            pass.set_bind_group(0, bg, &[]);
+            pass.dispatch_workgroups_indirect(
+                ctx.indirect_args,
+                PrecondContext::INDIRECT_DISPATCH_CELLS_OFFSET,
+            );
+            p_result_in_sol = !p_result_in_sol;
+        }
+
+        let correct_bg = if p_result_in_sol { current_bg } else { swap_bg };
+        pass.set_pipeline(&self.pipeline_correct_vel);
+        pass.set_bind_group(0, correct_bg, &[]);
+        pass.dispatch_workgroups_indirect(
+            ctx.indirect_args,
+            PrecondContext::INDIRECT_DISPATCH_CELLS_OFFSET,
+        );
+    }
+
     fn create_schur_bg<'a>(
         &'a self,
         device: &wgpu::Device,
@@ -332,17 +382,16 @@ impl PreconditionerModule for CoupledSchurModule {
             "Schur Swap BG",
         );
 
-        self.dispatch_schur(
-            encoder,
-            &self.pipeline_predict_and_form,
-            ctx,
-            &current_bg,
-            ctx.dispatch.cells,
-            "Schur Predict & Form",
-        );
-
         match self.pressure_kind {
             CoupledPressureSolveKind::Amg => {
+                self.dispatch_schur(
+                    encoder,
+                    &self.pipeline_predict_and_form,
+                    ctx,
+                    &current_bg,
+                    ctx.dispatch.cells,
+                    "Schur Predict & Form",
+                );
                 if let Some(amg) = &self.amg {
                     let override_bg = self
                         .amg_level0_state_override
@@ -353,52 +402,15 @@ impl PreconditionerModule for CoupledSchurModule {
                 }
             }
             CoupledPressureSolveKind::Chebyshev => {
-                // `predict_and_form` already wrote the first Jacobi iterate
-                // (p_sol = D^-1 rhs), so encode one fewer relax dispatch.
-                let p_iters = self.pressure_sweeps.saturating_sub(1);
-                if p_iters == 0 {
-                    return;
-                }
-
-                let mut p_result_in_sol = true;
+                // The whole apply (predict + relax sweeps + velocity correct)
+                // runs in ONE compute pass with pipeline switches — see the
+                // pass-merging note in fgmres.rs (dispatch-level usage scopes
+                // keep the semantics of separate passes).
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                    label: Some("Schur Relax P"),
+                    label: Some("Schur Apply"),
                     timestamp_writes: None,
                 });
-                pass.set_pipeline(&self.pipeline_relax_pressure);
-                pass.set_bind_group(1, ctx.matrix_bg, &[]);
-                pass.set_bind_group(2, &self.bg_schur_precond, &[]);
-                pass.set_bind_group(3, &self.bg_pressure_matrix, &[]);
-
-                for _ in 0..p_iters {
-                    let bg = if p_result_in_sol {
-                        &current_bg
-                    } else {
-                        &swap_bg
-                    };
-                    pass.set_bind_group(0, bg, &[]);
-                    pass.dispatch_workgroups_indirect(
-                        ctx.indirect_args,
-                        PrecondContext::INDIRECT_DISPATCH_CELLS_OFFSET,
-                    );
-                    p_result_in_sol = !p_result_in_sol;
-                }
-
-                drop(pass);
-
-                let correct_bg = if p_result_in_sol {
-                    &current_bg
-                } else {
-                    &swap_bg
-                };
-                self.dispatch_schur(
-                    encoder,
-                    &self.pipeline_correct_vel,
-                    ctx,
-                    correct_bg,
-                    ctx.dispatch.cells,
-                    "Schur Correct Vel",
-                );
+                self.encode_chebyshev_apply_dispatches(&mut pass, ctx, &current_bg, &swap_bg);
                 return;
             }
         }
@@ -412,5 +424,39 @@ impl PreconditionerModule for CoupledSchurModule {
             ctx.dispatch.cells,
             "Schur Correct Vel",
         );
+    }
+
+    /// The Chebyshev/Jacobi pressure path is pure dispatches; the AMG v-cycle
+    /// needs encoder-level copies, so it keeps the per-iteration pass fallback.
+    fn begin_in_pass_applies(&mut self, _device: &wgpu::Device) -> bool {
+        self.pressure_kind == CoupledPressureSolveKind::Chebyshev
+    }
+
+    fn encode_apply_in_pass(
+        &mut self,
+        device: &wgpu::Device,
+        pass: &mut wgpu::ComputePass<'_>,
+        ctx: &PrecondContext<'_>,
+        input: wgpu::BindingResource<'_>,
+        output: wgpu::BindingResource<'_>,
+    ) {
+        let aux = ctx.scratch_b.as_entire_binding();
+        let current_bg = self.create_schur_bg(
+            device,
+            input.clone(),
+            output.clone(),
+            self.b_p_sol.as_entire_binding(),
+            aux.clone(),
+            "Schur BG",
+        );
+        let swap_bg = self.create_schur_bg(
+            device,
+            input,
+            output,
+            aux,
+            self.b_p_sol.as_entire_binding(),
+            "Schur Swap BG",
+        );
+        self.encode_chebyshev_apply_dispatches(pass, ctx, &current_bg, &swap_bg);
     }
 }

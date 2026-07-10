@@ -162,4 +162,35 @@ pub trait PreconditionerModule {
         input: wgpu::BindingResource<'_>,
         output: wgpu::BindingResource<'_>,
     );
+
+    /// Whether every `encode_apply` for the CURRENT solve can be encoded into
+    /// an existing compute pass (pure dispatches — no copies, clears, or other
+    /// encoder-level commands). Called once per encoded solve, before the
+    /// restart loop opens its single long compute pass; implementations may
+    /// use it to ensure pipelines exist. Returning `true` commits the solve to
+    /// [`Self::encode_apply_in_pass`] for every iteration.
+    ///
+    /// Default `false`: the solve falls back to encoder-level
+    /// [`Self::encode_apply`] with one pass per Arnoldi iteration.
+    fn begin_in_pass_applies(&mut self, _device: &wgpu::Device) -> bool {
+        false
+    }
+
+    /// Pass-level variant of [`Self::encode_apply`]: encode the application as
+    /// dispatches into `pass`. Must set every bind group it depends on (the
+    /// surrounding solver dispatches will have changed them). Only called when
+    /// [`Self::begin_in_pass_applies`] returned `true` for this solve.
+    fn encode_apply_in_pass(
+        &mut self,
+        _device: &wgpu::Device,
+        _pass: &mut wgpu::ComputePass<'_>,
+        _ctx: &PrecondContext<'_>,
+        _input: wgpu::BindingResource<'_>,
+        _output: wgpu::BindingResource<'_>,
+    ) {
+        unreachable!(
+            "encode_apply_in_pass called on a preconditioner whose begin_in_pass_applies \
+             returned false"
+        );
+    }
 }

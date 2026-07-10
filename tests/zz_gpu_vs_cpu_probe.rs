@@ -205,11 +205,14 @@ fn c_obstacle_gpu_dispatch_census() {
     s.reset();
     s.enable();
     let steps = 10usize;
+    let wall = Instant::now();
     for _ in 0..steps {
         driver.step(false);
     }
+    let no_readback_ms = wall.elapsed().as_secs_f64() * 1e3 / steps as f64;
     c.disable();
     s.disable();
+    println!("=== no-readback steps: {no_readback_ms:.2} ms/step ===");
     let stats = c.get_stats();
     println!("=== dispatch census over {steps} steps (no readback) ===");
     cfd2::solver::gpu::dispatch_counter::DispatchCounter::print_stats_static(&stats);

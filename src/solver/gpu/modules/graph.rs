@@ -96,14 +96,42 @@ impl<M: GpuComputeModule> ModuleGraph<M> {
         Self { nodes }
     }
 
+    /// Encode all nodes into ONE compute pass (pipeline switches between
+    /// dispatches). WebGPU makes each dispatch its own usage scope — storage
+    /// writes are visible to subsequent dispatches in the same pass — so this
+    /// is semantically identical to one pass per node, but avoids the
+    /// per-pass encoder begin/end cost that dominates Metal `encoder.finish`
+    /// and GPU pass-transition time for graphs of tiny dispatches.
     pub fn encode_into(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         module: &M,
         runtime: RuntimeDims,
     ) {
+        if self.nodes.is_empty() {
+            return;
+        }
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("ModuleGraph"),
+            timestamp_writes: None,
+        });
         for node in &self.nodes {
-            node.encode(encoder, module, runtime);
+            match node {
+                ModuleNode::Compute(spec) => {
+                    pass.set_pipeline(module.pipeline(spec.pipeline));
+                    module.bind(spec.bind, &mut pass);
+                    match &spec.dispatch {
+                        DispatchKind::Indirect { buffer, offset } => {
+                            pass.dispatch_workgroups_indirect(buffer, *offset);
+                        }
+                        other => {
+                            let (x, y, z) = module.dispatch(other.clone(), runtime);
+                            pass.dispatch_workgroups(x, y, z);
+                        }
+                    }
+                    crate::count_dispatch!("Kernel Graph", spec.label);
+                }
+            }
         }
     }
 

@@ -360,6 +360,7 @@ impl From<TraceScheme> for Scheme {
 pub enum TraceTimeScheme {
     Euler,
     BDF2,
+    RK4,
 }
 
 impl From<TimeScheme> for TraceTimeScheme {
@@ -367,6 +368,7 @@ impl From<TimeScheme> for TraceTimeScheme {
         match value {
             TimeScheme::Euler => TraceTimeScheme::Euler,
             TimeScheme::BDF2 => TraceTimeScheme::BDF2,
+            TimeScheme::RK4 => TraceTimeScheme::RK4,
         }
     }
 }
@@ -376,6 +378,7 @@ impl From<TraceTimeScheme> for TimeScheme {
         match value {
             TraceTimeScheme::Euler => TimeScheme::Euler,
             TraceTimeScheme::BDF2 => TimeScheme::BDF2,
+            TraceTimeScheme::RK4 => TimeScheme::RK4,
         }
     }
 }

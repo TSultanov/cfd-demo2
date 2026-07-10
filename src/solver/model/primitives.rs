@@ -114,6 +114,44 @@ impl PrimitiveDerivations {
         Self { derivations }
     }
 
+    /// Runtime-EOS primitive closure for the density-based compressible model.
+    ///
+    /// The conservation rows advance `(rho, rho_u, rho_e)`; explicit RK stages
+    /// then recover the local algebraic rows `(u, p, T)` from the same EOS
+    /// constants used by the declared equations.  Keeping this closure in the
+    /// model math avoids any solver-side physics special case.
+    pub fn compressible_runtime_eos() -> Self {
+        let mut derivations = HashMap::new();
+        let safe_rho = Self::safe_rho_expr();
+        let constants = Expr::ident("constants");
+        let gm1 = constants.clone().field("eos_gm1");
+        let dp_drho = constants.clone().field("eos_dp_drho");
+        let p_offset = constants.clone().field("eos_p_offset");
+        let gas_r = Expr::call_named(
+            "max",
+            vec![constants.field("eos_r"), Expr::lit_f32(1.0e-12)],
+        );
+
+        derivations.insert("u_x".into(), Expr::ident("rho_u_x") / safe_rho.clone());
+        derivations.insert("u_y".into(), Expr::ident("rho_u_y") / safe_rho.clone());
+
+        let rho_u_sq = Expr::ident("rho_u_x") * Expr::ident("rho_u_x")
+            + Expr::ident("rho_u_y") * Expr::ident("rho_u_y");
+        let kinetic = Expr::lit_f32(0.5) * rho_u_sq / safe_rho.clone();
+        derivations.insert(
+            "p".into(),
+            gm1 * (Expr::ident("rho_e") - kinetic)
+                + dp_drho * Expr::ident("rho")
+                + p_offset,
+        );
+        derivations.insert(
+            "T".into(),
+            Expr::ident("p") / (safe_rho * gas_r),
+        );
+
+        Self { derivations }
+    }
+
     /// Get the primitive expression for a given field name.
     pub fn get(&self, name: &str) -> Option<&Expr> {
         self.derivations.get(name)

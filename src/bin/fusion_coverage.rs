@@ -5,11 +5,9 @@ use cfd2::solver::model::kernel::{
 };
 use cfd2::solver::scheme::Scheme;
 use cfd2_codegen::solver::codegen::fusion::{
-    synthesize_fused_program, synthesize_fused_program_remapped,
-    synthesize_fused_program_whitelisted,
-    synthesize_fused_program_with_report_remapped,
-    detect_hazards, ExpectedHazard,
-    FusionSafetyPolicy, HazardReport,
+    detect_hazards, synthesize_fused_program, synthesize_fused_program_remapped,
+    synthesize_fused_program_whitelisted, synthesize_fused_program_with_report_remapped,
+    ExpectedHazard, FusionSafetyPolicy, HazardReport,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -91,6 +89,19 @@ fn condition_name(condition: Option<KernelConditionId>) -> &'static str {
         Some(KernelConditionId::RequiresGradState) => "RequiresGradState",
         Some(KernelConditionId::RequiresNoGradState) => "RequiresNoGradState",
         Some(KernelConditionId::RequiresImplicitStepping) => "RequiresImplicitStepping",
+        Some(KernelConditionId::RequiresExplicitStepping) => "RequiresExplicitStepping",
+        Some(KernelConditionId::RequiresGradStateAndImplicitStepping) => {
+            "RequiresGradStateAndImplicitStepping"
+        }
+        Some(KernelConditionId::RequiresNoGradStateAndImplicitStepping) => {
+            "RequiresNoGradStateAndImplicitStepping"
+        }
+        Some(KernelConditionId::RequiresGradStateAndExplicitStepping) => {
+            "RequiresGradStateAndExplicitStepping"
+        }
+        Some(KernelConditionId::RequiresNoGradStateAndExplicitStepping) => {
+            "RequiresNoGradStateAndExplicitStepping"
+        }
         None => "-",
     }
 }
@@ -99,6 +110,7 @@ fn scope_name(scope: Option<KernelWgslScope>) -> &'static str {
     match scope {
         Some(KernelWgslScope::PerModel) => "PerModel",
         Some(KernelWgslScope::Shared) => "Shared",
+        Some(KernelWgslScope::CpuOnly) => "CpuOnly",
         None => "-",
     }
 }

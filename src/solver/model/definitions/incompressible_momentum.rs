@@ -443,6 +443,6 @@ fn incompressible_momentum_model_impl_topo(
             ..Default::default()
         }),
         primitives,
+        explicit_primitives: None,
     })
 }
-

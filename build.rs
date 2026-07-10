@@ -280,8 +280,7 @@ fn main() {
 
     let schemes = solver::model::backend::SchemeRegistry::new(solver::scheme::Scheme::Upwind);
 
-    let models = solver::model::all_models()
-        .expect("failed to build model definitions");
+    let models = solver::model::all_models().expect("failed to build model definitions");
 
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let model_codegen_fingerprint = fingerprint_files(&model_codegen_inputs);
@@ -932,6 +931,21 @@ fn include_kernel_in_schedule(
         solver::model::kernel::KernelConditionId::RequiresImplicitStepping => {
             satisfies_requires_implicit_stepping
         }
+        solver::model::kernel::KernelConditionId::RequiresExplicitStepping => {
+            !satisfies_requires_implicit_stepping
+        }
+        solver::model::kernel::KernelConditionId::RequiresGradStateAndImplicitStepping => {
+            has_grad_state && satisfies_requires_implicit_stepping
+        }
+        solver::model::kernel::KernelConditionId::RequiresNoGradStateAndImplicitStepping => {
+            !has_grad_state && satisfies_requires_implicit_stepping
+        }
+        solver::model::kernel::KernelConditionId::RequiresGradStateAndExplicitStepping => {
+            has_grad_state && !satisfies_requires_implicit_stepping
+        }
+        solver::model::kernel::KernelConditionId::RequiresNoGradStateAndExplicitStepping => {
+            !has_grad_state && !satisfies_requires_implicit_stepping
+        }
     }
 }
 
@@ -989,7 +1003,7 @@ fn collect_per_model_generated_kernel_ids(
         for module in &model.modules {
             let module: &dyn solver::model::module::ModelModule = module;
             for generator in module.kernel_generators() {
-                if generator.scope == solver::model::kernel::KernelWgslScope::PerModel {
+                if generator.scope != solver::model::kernel::KernelWgslScope::Shared {
                     ids.insert(generator.id.as_str().to_string());
                 }
             }
@@ -1359,11 +1373,15 @@ fn emit_transpiled_cpu_kernels(
     // calls that with its grid; the unstructured `lookup` ABI is untouched).
     let mut struct_entries: Vec<(String, String, String)> = Vec::new();
     for model in models {
-        let structured =
-            model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D;
+        let structured = model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D;
         for module in &model.modules {
             let module: &dyn ModelModule = module;
             for spec in module.kernel_generators() {
+                if spec.scope == solver::model::kernel::KernelWgslScope::CpuOnly
+                    && model.validate_explicit_rk4().is_err()
+                {
+                    continue;
+                }
                 let artifact = match (spec.generator)(model, schemes) {
                     Ok(a) => a,
                     Err(_) => continue,
@@ -1374,7 +1392,10 @@ fn emit_transpiled_cpu_kernels(
                         sanitize_ident(model.id),
                         sanitize_ident(spec.id.as_str())
                     );
-                    let dup = entries.iter().chain(&struct_entries).any(|(_, _, f)| f == &fn_name);
+                    let dup = entries
+                        .iter()
+                        .chain(&struct_entries)
+                        .any(|(_, _, f)| f == &fn_name);
                     if dup {
                         continue;
                     }

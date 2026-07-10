@@ -836,6 +836,8 @@ fn compressible_model_impl_topo(
         ),
     };
     let primitives = crate::solver::model::primitives::PrimitiveDerivations::identity();
+    let explicit_primitives =
+        crate::solver::model::primitives::PrimitiveDerivations::compressible_runtime_eos();
 
     let system_for_flux = system.clone();
     let layout_for_flux = layout.clone();
@@ -904,6 +906,7 @@ fn compressible_model_impl_topo(
             None
         },
         primitives,
+        explicit_primitives: (!biharmonic).then_some(explicit_primitives),
     })
 }
 

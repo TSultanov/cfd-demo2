@@ -4,6 +4,25 @@ use crate::solver::ir::ports::{ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
 use crate::solver::units::UnitDim;
 
 use cfd2_ir::ast::ExprNode;
+use cfd2_ir::dimensions::{
+    Density, DivDim, DynamicViscosity, MulDim, Pressure, Temperature, Time, UnitDimension,
+};
+
+fn constant_field_unit(name: &str) -> Option<UnitDim> {
+    type GasConstant = DivDim<Pressure, MulDim<Density, Temperature>>;
+    type CompressibilitySlope = DivDim<Pressure, Density>;
+    match name {
+        "dt" | "dt_old" | "dtau" | "time" => Some(Time::UNIT),
+        "viscosity" => Some(DynamicViscosity::UNIT),
+        "density" => Some(Density::UNIT),
+        "eos_r" => Some(GasConstant::UNIT),
+        "eos_dp_drho" | "eos_theta_ref" => Some(CompressibilitySlope::UNIT),
+        "eos_p_offset" => Some(Pressure::UNIT),
+        "eos_gamma" | "eos_gm1" | "component" | "alpha_p" | "scheme"
+        | "alpha_u" | "stride_x" | "time_scheme" => Some(UnitDim::dimensionless()),
+        _ => None,
+    }
+}
 
 /// Resolve a field name to a slot and component index.
 ///
@@ -154,6 +173,11 @@ pub fn resolve_field_refs_dyn(
         }
 
         ExprNode::Field { base, field } => {
+            if matches!(base.node(), ExprNode::Ident(name) if name == "constants") {
+                if let Some(unit) = constant_field_unit(field) {
+                    return DynExpr::new(expr.clone(), DslType::f32(), unit);
+                }
+            }
             let base_dyn = resolve_field_refs_dyn(base, slots, cell_idx, state_array);
             let combined = base_dyn.expr.field(field.clone());
             DynExpr::new(combined, base_dyn.ty, base_dyn.unit)

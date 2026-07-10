@@ -129,6 +129,7 @@ fn build_diffusion_model_topo(
         ],
         linear_solver: None,
         primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
+        explicit_primitives: None,
     })
 }
 
@@ -261,5 +262,6 @@ pub fn generic_diffusion_demo_structured_ibm_model() -> Result<ModelSpec, String
         ],
         linear_solver: None,
         primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
+        explicit_primitives: None,
     })
 }

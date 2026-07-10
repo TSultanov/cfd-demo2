@@ -75,6 +75,15 @@ pub struct DiscreteOp {
     /// weighting, treating the ddt as an intensive rate at `V^{n+1}` (see
     /// `Term::non_conservative_ale`).
     pub non_conservative_ale: bool,
+    /// Matrix-free method-of-lines lowering of an implicit reaction source.
+    ///
+    /// An implicit `Sp(coeff, field)` contributes `-coeff*field` to the
+    /// assembled operator.  Explicit residual evaluation must therefore add
+    /// `coeff*field` to the right-hand side instead of treating `coeff` as an
+    /// independent source.  This flag is synthesized only by
+    /// [`DiscreteSystem::matrix_free_spatial_residual`]; source models remain
+    /// unchanged and the ordinary implicit kernels never observe it.
+    pub explicit_reaction: bool,
     pub field: FieldRef,
     pub flux: Option<FluxRef>,
     pub coeff: Option<Coefficient>,
@@ -111,6 +120,60 @@ impl DiscreteSystem {
         self.equations
             .iter()
             .any(|eq| eq.ops.iter().any(|op| op.relative_to_mesh))
+    }
+
+    /// Derive the method-of-lines spatial residual from the declared equation
+    /// system without constructing a global matrix.
+    ///
+    /// The source equations are written as `M(q) dq/dt + L(q) = S(q)`.
+    /// This transform removes the time-derivative terms (the RK stage kernel
+    /// consumes their coefficients as the local mass block) and evaluates all
+    /// remaining operators explicitly, producing the volume-integrated
+    /// residual `S(q) - L(q)`.
+    ///
+    /// ALE is deliberately rejected by the caller: mesh-relative terms require
+    /// a stage-consistent geometry history and are outside the initial static
+    /// explicit-solver scope.
+    pub fn matrix_free_spatial_residual(&self) -> Self {
+        let equations = self
+            .equations
+            .iter()
+            .map(|equation| {
+                let ops = equation
+                    .ops
+                    .iter()
+                    .filter(|op| op.kind != DiscreteOpKind::TimeDerivative)
+                    .cloned()
+                    .map(|mut op| {
+                        if op.kind == DiscreteOpKind::Source
+                            && op.discretization == Discretization::Implicit
+                        {
+                            op.explicit_reaction = true;
+                        }
+                        op.discretization = Discretization::Explicit;
+                        // This is an implicit-iteration stabilizer whose matrix
+                        // and deferred RHS cancel at convergence.  A direct
+                        // residual evaluation needs only the physical flux.
+                        op.linearize_pressure_flux = None;
+                        // Explicit ALE is intentionally unsupported.  Kernel
+                        // artifacts are still generated for every registered
+                        // model, so an ALE model's dormant explicit artifact
+                        // is lowered as the corresponding static operator; the
+                        // runtime capability gate prevents it from being used.
+                        op.relative_to_mesh = false;
+                        op
+                    })
+                    .collect();
+                DiscreteEquation {
+                    target: equation.target,
+                    ops,
+                }
+            })
+            .collect();
+        Self {
+            equations,
+            topology: self.topology,
+        }
     }
 }
 
@@ -173,6 +236,7 @@ fn lower_term(target: &FieldRef, term: &Term, schemes: &SchemeRegistry) -> Discr
         relative_to_mesh: term.relative_to_mesh,
         viscous_dissipation: term.viscous_dissipation,
         non_conservative_ale: term.non_conservative_ale,
+        explicit_reaction: false,
         field: term.field,
         flux: term.flux,
         coeff: term.coeff.clone(),

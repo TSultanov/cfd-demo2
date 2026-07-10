@@ -341,5 +341,6 @@ fn buoyant_incompressible_model_impl(with_mms_sources: bool) -> Result<ModelSpec
             ..Default::default()
         }),
         primitives,
+        explicit_primitives: None,
     })
 }

@@ -1,10 +1,8 @@
 use std::sync::Arc;
 
 use cfd2_codegen::solver::codegen::KernelWgsl;
-use cfd2_ir::ports::{
-    ParamSpec, ResolvedStateSlotSpec, ResolvedStateSlotsSpec,
-};
 use cfd2_ir::kernel::StateLayout;
+use cfd2_ir::ports::{ParamSpec, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
 
 /// Stable identifier for a compute kernel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -62,6 +60,12 @@ impl KernelId {
         KernelId("generic_coupled_assembly_grad_state_rhs_only");
     pub const GENERIC_COUPLED_APPLY: KernelId = KernelId("generic_coupled_apply");
     pub const GENERIC_COUPLED_UPDATE: KernelId = KernelId("generic_coupled_update");
+    pub const EXPLICIT_RESIDUAL: KernelId = KernelId("explicit_residual");
+    pub const EXPLICIT_RESIDUAL_GRAD_STATE: KernelId = KernelId("explicit_residual_grad_state");
+    pub const EXPLICIT_RK4_STAGE_1: KernelId = KernelId("explicit_rk4_stage_1");
+    pub const EXPLICIT_RK4_STAGE_2: KernelId = KernelId("explicit_rk4_stage_2");
+    pub const EXPLICIT_RK4_STAGE_3: KernelId = KernelId("explicit_rk4_stage_3");
+    pub const EXPLICIT_RK4_STAGE_4: KernelId = KernelId("explicit_rk4_stage_4");
 
     // Handwritten solver-infrastructure kernels (single-entrypoint compute shaders).
     pub const DOT_PRODUCT: KernelId = KernelId("dot_product");
@@ -163,6 +167,14 @@ pub enum KernelConditionId {
 
     /// Include only when the solver stepping mode is implicit.
     RequiresImplicitStepping,
+
+    /// Include only for fully explicit stepping.
+    RequiresExplicitStepping,
+
+    RequiresGradStateAndImplicitStepping,
+    RequiresNoGradStateAndImplicitStepping,
+    RequiresGradStateAndExplicitStepping,
+    RequiresNoGradStateAndExplicitStepping,
 }
 
 /// A fully specified kernel pass derived from the model + method selection.
@@ -338,6 +350,10 @@ pub(crate) type ModelKernelArtifactGenerator = Arc<
 pub enum KernelWgslScope {
     PerModel,
     Shared,
+    /// Typed program used by the CPU interpreter/transpiler only. It remains a
+    /// first-class model kernel but is not emitted into the committed WGSL or
+    /// GPU pipeline registry.
+    CpuOnly,
 }
 
 #[derive(Clone)]
@@ -423,6 +439,25 @@ impl ModelKernelGeneratorSpec {
             }),
         }
     }
+
+    pub fn new_cpu_dsl(
+        id: KernelId,
+        generator: impl Fn(
+                &crate::solver::model::ModelSpec,
+                &crate::solver::ir::SchemeRegistry,
+            ) -> Result<crate::solver::ir::KernelProgram, String>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        Self {
+            id,
+            scope: KernelWgslScope::CpuOnly,
+            generator: Arc::new(move |model, schemes| {
+                generator(model, schemes).map(ModelKernelArtifact::DslProgram)
+            }),
+        }
+    }
 }
 
 impl std::fmt::Debug for ModelKernelGeneratorSpec {
@@ -485,15 +520,11 @@ fn guard_matches(guard: FusionGuard, ctx: &KernelFusionContext<'_>) -> bool {
 /// True when the model's system declares any transpose_dev2 term (the
 /// assembly then consumes neighbor grad_state values with numerical effect).
 pub fn model_has_neighbor_grad_consumers(model: &crate::solver::model::ModelSpec) -> bool {
-    model
-        .system
-        .equations()
-        .iter()
-        .any(|eq| {
-            eq.terms()
-                .iter()
-                .any(|t| t.transpose_dev2 || t.viscous_dissipation)
-        })
+    model.system.equations().iter().any(|eq| {
+        eq.terms()
+            .iter()
+            .any(|t| t.transpose_dev2 || t.viscous_dissipation)
+    })
 }
 
 fn rule_enabled(rule: &ModelKernelFusionRule, ctx: &KernelFusionContext<'_>) -> bool {
@@ -730,10 +761,12 @@ pub(crate) fn generate_generic_coupled_assembly_rhs_only_kernel_program(
     schemes: &crate::solver::ir::SchemeRegistry,
 ) -> Result<crate::solver::ir::KernelProgram, String> {
     let full = generate_generic_coupled_assembly_kernel_program(model, schemes)?;
-    Ok(cfd2_codegen::solver::codegen::rhs_only::rhs_only_kernel_program(
-        &full,
-        KernelId::GENERIC_COUPLED_ASSEMBLY_RHS_ONLY.as_str(),
-    ))
+    Ok(
+        cfd2_codegen::solver::codegen::rhs_only::rhs_only_kernel_program(
+            &full,
+            KernelId::GENERIC_COUPLED_ASSEMBLY_RHS_ONLY.as_str(),
+        ),
+    )
 }
 
 pub(crate) fn generate_generic_coupled_assembly_grad_state_rhs_only_kernel_program(
@@ -741,11 +774,124 @@ pub(crate) fn generate_generic_coupled_assembly_grad_state_rhs_only_kernel_progr
     schemes: &crate::solver::ir::SchemeRegistry,
 ) -> Result<crate::solver::ir::KernelProgram, String> {
     let full = generate_generic_coupled_assembly_grad_state_kernel_program(model, schemes)?;
-    Ok(cfd2_codegen::solver::codegen::rhs_only::rhs_only_kernel_program(
-        &full,
-        KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY.as_str(),
-    ))
+    Ok(
+        cfd2_codegen::solver::codegen::rhs_only::rhs_only_kernel_program(
+            &full,
+            KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY.as_str(),
+        ),
+    )
 }
+
+fn generate_explicit_residual_kernel_program_impl(
+    kernel_id: KernelId,
+    model: &crate::solver::model::ModelSpec,
+    schemes: &crate::solver::ir::SchemeRegistry,
+    needs_gradients: bool,
+) -> Result<crate::solver::ir::KernelProgram, String> {
+    let discrete = cfd2_codegen::solver::codegen::lower_system_unchecked(&model.system, schemes);
+    let flux_stride = model
+        .flux_module()
+        .map_err(|e| e.to_string())?
+        .map(|_| model.system.unknowns_per_cell())
+        .unwrap_or(0);
+    let slots = resolved_slots_from_layout(&model.state_layout);
+    let eos_params = extract_eos_params(model);
+    cfd2_codegen::solver::codegen::unified_assembly::generate_matrix_free_residual_kernel_program(
+        kernel_id.as_str(),
+        &discrete,
+        &slots,
+        flux_stride,
+        needs_gradients,
+        &eos_params,
+    )
+}
+
+pub(crate) fn generate_explicit_residual_kernel_program(
+    model: &crate::solver::model::ModelSpec,
+    schemes: &crate::solver::ir::SchemeRegistry,
+) -> Result<crate::solver::ir::KernelProgram, String> {
+    generate_explicit_residual_kernel_program_impl(
+        KernelId::EXPLICIT_RESIDUAL,
+        model,
+        schemes,
+        false,
+    )
+}
+
+pub(crate) fn generate_explicit_residual_grad_state_kernel_program(
+    model: &crate::solver::model::ModelSpec,
+    schemes: &crate::solver::ir::SchemeRegistry,
+) -> Result<crate::solver::ir::KernelProgram, String> {
+    generate_explicit_residual_kernel_program_impl(
+        KernelId::EXPLICIT_RESIDUAL_GRAD_STATE,
+        model,
+        schemes,
+        true,
+    )
+}
+
+fn generate_explicit_rk4_stage_kernel_program_impl(
+    kernel_id: KernelId,
+    stage: cfd2_codegen::solver::codegen::explicit_rk::Rk4Stage,
+    model: &crate::solver::model::ModelSpec,
+    schemes: &crate::solver::ir::SchemeRegistry,
+) -> Result<crate::solver::ir::KernelProgram, String> {
+    let discrete = cfd2_codegen::solver::codegen::lower_system_unchecked(&model.system, schemes);
+    let slots = resolved_slots_from_layout(&model.state_layout);
+    let ordered = model
+        .explicit_primitives
+        .as_ref()
+        .unwrap_or(&model.primitives)
+        .ordered()
+        .map_err(|e| format!("explicit primitive recovery ordering failed: {e}"))?;
+    let primitives: Vec<(u32, cfd2_ir::ast::Expr)> = ordered
+        .into_iter()
+        .filter_map(|(name, expr)| {
+            resolve_offset_from_slots(&slots, &name).map(|offset| (offset, expr))
+        })
+        .collect();
+    let eos_params = extract_eos_params(model);
+    cfd2_codegen::solver::codegen::explicit_rk::generate_rk4_stage_kernel_program(
+        kernel_id.as_str(),
+        &discrete,
+        &slots,
+        &primitives,
+        stage,
+        &eos_params,
+    )
+}
+
+macro_rules! explicit_rk4_stage_generator {
+    ($fn_name:ident, $id:expr, $stage:expr) => {
+        pub(crate) fn $fn_name(
+            model: &crate::solver::model::ModelSpec,
+            schemes: &crate::solver::ir::SchemeRegistry,
+        ) -> Result<crate::solver::ir::KernelProgram, String> {
+            generate_explicit_rk4_stage_kernel_program_impl($id, $stage, model, schemes)
+        }
+    };
+}
+
+explicit_rk4_stage_generator!(
+    generate_explicit_rk4_stage_1_kernel_program,
+    KernelId::EXPLICIT_RK4_STAGE_1,
+    cfd2_codegen::solver::codegen::explicit_rk::Rk4Stage::First
+);
+explicit_rk4_stage_generator!(
+    generate_explicit_rk4_stage_2_kernel_program,
+    KernelId::EXPLICIT_RK4_STAGE_2,
+    cfd2_codegen::solver::codegen::explicit_rk::Rk4Stage::Second
+);
+explicit_rk4_stage_generator!(
+    generate_explicit_rk4_stage_3_kernel_program,
+    KernelId::EXPLICIT_RK4_STAGE_3,
+    cfd2_codegen::solver::codegen::explicit_rk::Rk4Stage::Third
+);
+explicit_rk4_stage_generator!(
+    generate_explicit_rk4_stage_4_kernel_program,
+    KernelId::EXPLICIT_RK4_STAGE_4,
+    cfd2_codegen::solver::codegen::explicit_rk::Rk4Stage::Fourth
+);
 
 pub(crate) fn generate_packed_state_gradients_kernel_program(
     model: &crate::solver::model::ModelSpec,
@@ -780,8 +926,8 @@ pub(crate) fn generate_packed_state_gradients_kernel_program(
     // Unknown rank == state offset only for models whose unknowns are a
     // prefix of the state layout; the buoyant model's temperature sits
     // behind d_p/grad_p aux fields.
-    let unknown_state_offsets = model_unknown_state_offsets(model)
-        .map_err(|e| format!("packed_state_gradients: {e}"))?;
+    let unknown_state_offsets =
+        model_unknown_state_offsets(model).map_err(|e| format!("packed_state_gradients: {e}"))?;
     cfd2_codegen::solver::codegen::generate_packed_state_gradients_kernel_program(
         "packed_state_gradients",
         &model.state_layout,
@@ -926,7 +1072,7 @@ fn kernel_generator_for_model_by_id(
     None
 }
 
-fn generate_kernel_artifact_for_model_by_id(
+pub(crate) fn generate_kernel_artifact_for_model_by_id(
     model: &crate::solver::model::ModelSpec,
     schemes: &crate::solver::ir::SchemeRegistry,
     kernel_id: KernelId,
@@ -965,8 +1111,7 @@ pub fn emit_shared_kernels_wgsl_with_ids(
 ) -> std::io::Result<Vec<(KernelId, std::path::PathBuf)>> {
     emit_shared_kernels_wgsl_with_ids_for_models(
         base_dir,
-        &crate::solver::model::all_models()
-            .expect("failed to build model definitions"),
+        &crate::solver::model::all_models().expect("failed to build model definitions"),
         &crate::solver::ir::SchemeRegistry::default(),
     )
 }
@@ -1079,14 +1224,15 @@ fn synthesize_fusion_replacement_wgsl_for_model(
         )?);
     }
 
-    let fused_program = cfd2_codegen::solver::codegen::fusion::synthesize_fused_program_remapped_whitelisted(
-        replacement_id.as_str().to_string(),
-        selected.name,
-        &programs,
-        synthesis_policy,
-        &selected.binding_remaps,
-        &selected.expected_hazards,
-    )?;
+    let fused_program =
+        cfd2_codegen::solver::codegen::fusion::synthesize_fused_program_remapped_whitelisted(
+            replacement_id.as_str().to_string(),
+            selected.name,
+            &programs,
+            synthesis_policy,
+            &selected.binding_remaps,
+            &selected.expected_hazards,
+        )?;
     let wgsl = cfd2_codegen::solver::codegen::fusion::lower_kernel_program_to_wgsl(&fused_program)?;
     Ok(Some(wgsl.to_wgsl()))
 }
@@ -1156,7 +1302,7 @@ pub fn emit_model_kernels_wgsl_with_ids(
             }
             continue;
         };
-        if generator.scope == KernelWgslScope::Shared {
+        if generator.scope != KernelWgslScope::PerModel {
             continue;
         }
 
@@ -1187,8 +1333,7 @@ mod contract_tests {
     use crate::solver::model::module::KernelBundleModule;
     use crate::solver::model::ModelSpec;
     use cfd2_ir::kernel::{
-        BindingAccess, DispatchDomain, KernelBinding,
-        KernelProgram, LaunchSemantics,
+        BindingAccess, DispatchDomain, KernelBinding, KernelProgram, LaunchSemantics,
     };
 
     fn contract_kernel_generator(
@@ -1381,10 +1526,14 @@ mod contract_tests {
                 ModelKernelGeneratorSpec::new(wgsl_id, contract_kernel_generator),
                 ModelKernelGeneratorSpec::new_dsl(
                     dsl_id,
-                    contract_dsl_kernel_generator(dsl_id.as_str(), cfd2_ir::ast::Stmt::Assign {
-                        target: cfd2_ir::ast::Expr::ident("value"),
-                        value: cfd2_ir::ast::Expr::ident("value") + cfd2_ir::ast::Expr::lit_f32(1.0),
-                    }),
+                    contract_dsl_kernel_generator(
+                        dsl_id.as_str(),
+                        cfd2_ir::ast::Stmt::Assign {
+                            target: cfd2_ir::ast::Expr::ident("value"),
+                            value: cfd2_ir::ast::Expr::ident("value")
+                                + cfd2_ir::ast::Expr::lit_f32(1.0),
+                        },
+                    ),
                 ),
             ],
             ..Default::default()
@@ -1450,17 +1599,25 @@ mod contract_tests {
             generators: vec![
                 ModelKernelGeneratorSpec::new_dsl(
                     a_id,
-                    contract_dsl_kernel_generator(a_id.as_str(), cfd2_ir::ast::Stmt::Assign {
-                        target: cfd2_ir::ast::Expr::ident("value"),
-                        value: cfd2_ir::ast::Expr::ident("value") + cfd2_ir::ast::Expr::lit_f32(1.0),
-                    }),
+                    contract_dsl_kernel_generator(
+                        a_id.as_str(),
+                        cfd2_ir::ast::Stmt::Assign {
+                            target: cfd2_ir::ast::Expr::ident("value"),
+                            value: cfd2_ir::ast::Expr::ident("value")
+                                + cfd2_ir::ast::Expr::lit_f32(1.0),
+                        },
+                    ),
                 ),
                 ModelKernelGeneratorSpec::new_dsl(
                     b_id,
-                    contract_dsl_kernel_generator(b_id.as_str(), cfd2_ir::ast::Stmt::Assign {
-                        target: cfd2_ir::ast::Expr::ident("value"),
-                        value: cfd2_ir::ast::Expr::ident("value") + cfd2_ir::ast::Expr::lit_f32(2.0),
-                    }),
+                    contract_dsl_kernel_generator(
+                        b_id.as_str(),
+                        cfd2_ir::ast::Stmt::Assign {
+                            target: cfd2_ir::ast::Expr::ident("value"),
+                            value: cfd2_ir::ast::Expr::ident("value")
+                                + cfd2_ir::ast::Expr::lit_f32(2.0),
+                        },
+                    ),
                 ),
             ],
             fusion_rules: vec![ModelKernelFusionRule {

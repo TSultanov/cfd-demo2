@@ -151,7 +151,8 @@ fn collect_from_scalar_expr(
         FaceScalarExpr::Literal(_)
         | FaceScalarExpr::Builtin(_)
         | FaceScalarExpr::Constant { .. }
-        | FaceScalarExpr::LowMachParam(_) => {}
+        | FaceScalarExpr::LowMachParam(_)
+        | FaceScalarExpr::MeshFlux => {}
 
         FaceScalarExpr::State { name, .. } => {
             out.insert(name.clone());

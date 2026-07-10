@@ -171,9 +171,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (dist_proj > 0.000001) {
             dist = dist_proj;
         }
-        let lam_f_center_v = vec2<f32>(f_center.x, f_center.y);
-        let lam_d_own = distance(vec2<f32>(center.x, center.y), lam_f_center_v);
-        let lam_d_neigh = distance(vec2<f32>(other_center.x, other_center.y), lam_f_center_v);
+        let lam_d_own = abs((f_center.x - center.x) * normal.x + (f_center.y - center.y) * normal.y);
+        let lam_d_neigh = abs((other_center.x - f_center.x) * normal.x + (other_center.y - f_center.y) * normal.y);
         let lam_total = lam_d_own + lam_d_neigh;
         var lambda_f: f32 = 0.5;
         if (lam_total > 0.000001) {

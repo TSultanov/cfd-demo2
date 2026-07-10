@@ -14,7 +14,7 @@ use super::KernelWgsl;
 use crate::solver::codegen::ir::{DiscreteOpKind, DiscreteSystem};
 use crate::solver::codegen::reconstruction::scalar_reconstruction_stmts;
 use crate::solver::gpu::enums::GpuBcKind;
-use crate::solver::ir::ports::{ParamSpec, ResolvedStateSlotsSpec};
+use crate::solver::ir::ports::{ParamSpec, ResolvedStateSlotSpec, ResolvedStateSlotsSpec};
 use crate::solver::ir::{
     Coefficient, Discretization, DispatchDomain, FieldKind, KernelProgram, LaunchSemantics, TermOp,
     TopologyMode,
@@ -55,10 +55,12 @@ fn unified_assembly_needs_mesh_fluxes(system: &DiscreteSystem) -> bool {
 ///   is a variable-density mass flux `phi = rho_f*(U·n)A`, so the mesh-relative
 ///   subtraction must use the SAME face density `rho_f` (not `constants.density`).
 ///   `ale_relative_flux_expr` reconstructs `rho_f` from the per-cell `rho` state
-///   (distance-symmetric face average, uniform-exact so a uniform free stream is
-///   preserved bitwise), keeping the constant-density path byte-identical for
-///   incompressible models. This lifts the former constant-density-only scope to
-///   the all-Mach compressible (`allmach_*_ale`) models.
+///   with the EXACT interpolation the model's flux module uses (central Lerp for
+///   the barotropic family, upwind blend for the `t_ref` thermal family — both
+///   uniform-exact so a uniform free stream is preserved bitwise), keeping the
+///   constant-density path byte-identical for incompressible models. This lifts
+///   the former constant-density-only scope to the all-Mach compressible
+///   (`allmach_*_ale`) models.
 fn validate_ale_unified_assembly(system: &DiscreteSystem, _slots: &ResolvedStateSlotsSpec) {
     for eq in &system.equations {
         for op in &eq.ops {
@@ -118,18 +120,33 @@ fn ale_vols_history_items() -> Vec<Item> {
 /// consistent relative flux. This is the single subtraction point for the
 /// whole assembly; every downstream consumer reads the accumulator.
 ///
-/// `rho_f` is: the constant density coefficient (`constants.density`) when the
-/// state layout has NO `rho` field (constant-density incompressible mass flux
-/// `phi = rho*(U·n)A`); or the variable-density FACE density otherwise —
-/// reconstructed with the DISTANCE-WEIGHTED `lambda_f` Lerp that matches the flux
-/// module's own face interpolation (`rho_f = rho_other + lambda_f*(rho[idx]-rho[other])`),
-/// so `phi` and its mesh-relative subtraction carry the SAME face density on a graded /
-/// deformed / adaptive mesh (a plain 0.5 average mismatches by `O(grad_rho*h)` there). It
-/// is uniform-exact (a uniform density gives `rho_f == rho[other]` bitwise, so a compressible
-/// free stream is preserved) and reduces to the standard average `lambda_f=0.5` on a uniform
-/// mesh. `other_idx == idx` on a boundary face, so the read is always a valid index. The
-/// incompressible path is byte-unchanged (no `rho` slot ⇒ `constants.density`), preserving the
-/// zero-flux equivalence and static-model gates.
+/// `rho_f` is the EXACT face density the model's flux module bakes into the
+/// convective mass flux — that is the load-bearing INVARIANT of this function
+/// (mirrored in `derive_rhie_chow`'s `density_face_expr`,
+/// src/solver/model/flux_derivation.rs): `phi` and its mesh-relative
+/// subtraction must carry the SAME face density, or every face with a density
+/// gradient on a moving mesh gains a spurious mass source
+/// ∝ (rho mismatch) × (mesh velocity). Three family cases, matching the flux
+/// deriver case-for-case:
+///
+/// * no `rho` slot (incompressible): the constant `constants.density` —
+///   byte-unchanged, preserving the zero-flux equivalence and static gates;
+/// * `rho` slot, no `t_ref` (barotropic all-Mach): the flux module's central
+///   distance-weighted Lerp, written `rho_other + lambda_f*(rho[idx]-rho[other])`
+///   so a uniform density reduces to EXACTLY `rho_other` bitwise (free stream
+///   preserved); `other_idx == idx` on a boundary face, so the read is always
+///   a valid index;
+/// * `rho` AND `t_ref` slots (real-EOS thermal): the flux module's UPWIND
+///   blend `0.5*(rho_o+rho_n) + sgn(u_n_rel)*0.5*(rho_o-rho_n)` — precomputed
+///   once per face as the `ale_rho_f` local (see
+///   `ale_thermal_upwind_face_density_stmts`, emitted in the face-loop head).
+///   The former central Lerp here removed a DIFFERENT mass flux than the
+///   upwinding flux module added: an O(rho jump)×(mesh velocity) spurious
+///   source wherever grad(rho) != 0 on a moving mesh.
+///
+/// All three are uniform-exact (uniform density ⇒ `rho_f == rho` bitwise), so
+/// GCL/free-stream preservation is untouched, and multiply `mesh_fluxes ≡ 0`
+/// on a static mesh, so static results are bitwise unchanged.
 fn ale_relative_flux_expr(
     conv_op: &crate::solver::codegen::ir::DiscreteOp,
     flux_val_expr: Expr,
@@ -140,25 +157,154 @@ fn ale_relative_flux_expr(
     }
     let rho_f = match slots.slots.iter().find(|s| s.name == "rho") {
         Some(rho_slot) => {
-            let rho_idx = state_component_slot(slots.stride, "state", "idx", rho_slot, 0);
-            let rho_other = state_component_slot(slots.stride, "state", "other_idx", rho_slot, 0);
-            // Distance-weighted (`lambda_f`) face density, MATCHING the flux module's Lerp
-            // convention (owner weight `lambda_f = d_neigh/(d_own+d_neigh)`, the same weight
-            // the Rhie-Chow d_p face interpolation uses): the assembly's face coeffs must
-            // interpolate identically to the flux module, else the mesh-relative subtraction
-            // carries a density inconsistent with the `phi` it is subtracted from on a
-            // graded / deformed / adaptive mesh (a plain 0.5 average mismatches by
-            // O(grad_rho*h) there). Written `rho_other + lambda_f*(rho_idx - rho_other)` so a
-            // uniform density (`rho_idx == rho_other`) reduces to EXACTLY `rho_other` bitwise
-            // — free stream preserved, and every current uniform/constant-density ALE test is
-            // runtime byte-identical (only the shader TEXT changes, so re-bless the snapshot).
-            // On a uniform mesh `lambda_f = 0.5` recovers the standard average. `lambda_f` is
-            // the per-face weight already emitted into the assembly face loop.
-            rho_other.clone() + Expr::ident("lambda_f") * (rho_idx - rho_other)
+            if ale_thermal_upwind_rho_slot(slots).is_some() {
+                // Real-EOS thermal family: the flux module UPWINDS rho_f, so the
+                // subtraction must too. The blend is hoisted to one per-face local
+                // (every mesh-relative convection site of every equation consumes
+                // the same face density, exactly like the flux module writes the
+                // same rho_f into every component's flux slot).
+                Expr::ident("ale_rho_f")
+            } else {
+                let rho_idx = state_component_slot(slots.stride, "state", "idx", rho_slot, 0);
+                let rho_other =
+                    state_component_slot(slots.stride, "state", "other_idx", rho_slot, 0);
+                // Distance-weighted (`lambda_f`) face density, MATCHING the flux module's
+                // central Lerp for the barotropic family (owner weight `lambda_f =
+                // d_neigh/(d_own+d_neigh)`, the same weight the Rhie-Chow d_p face
+                // interpolation uses). Written `rho_other + lambda_f*(rho_idx - rho_other)`
+                // so a uniform density (`rho_idx == rho_other`) reduces to EXACTLY
+                // `rho_other` bitwise — free stream preserved. On a uniform mesh
+                // `lambda_f = 0.5` recovers the standard average. `lambda_f` is the
+                // per-face weight already emitted into the assembly face loop.
+                rho_other.clone() + Expr::ident("lambda_f") * (rho_idx - rho_other)
+            }
         }
         None => Expr::ident("constants").field("density"),
     };
     flux_val_expr - rho_f * dsl::array_access("mesh_fluxes", Expr::ident("face_idx"))
+}
+
+/// Slots gate for the ALE THERMAL upwind face density: mirrors the flux
+/// deriver's marker check (`density_face_expr` upwinds `rho_f` iff the layout
+/// carries a scalar Temperature `t_ref` field — the real-EOS thermal family).
+/// Returns the `rho` slot when the upwind path is active. Keep this predicate
+/// in lockstep with `derive_rhie_chow`: if the two gates diverge, the
+/// mesh-relative subtraction reconstructs a different face density than the
+/// flux module baked into `phi`.
+fn ale_thermal_upwind_rho_slot(slots: &ResolvedStateSlotsSpec) -> Option<&ResolvedStateSlotSpec> {
+    use cfd2_ir::dimensions::{Temperature, UnitDimension};
+    let rho = find_slot(slots, "rho")?;
+    let t_ref_ok = slots.slots.iter().any(|s| {
+        s.name == "t_ref"
+            && s.kind == crate::solver::ir::ports::PortFieldKind::Scalar
+            && s.unit == <Temperature as UnitDimension>::UNIT
+    });
+    t_ref_ok.then_some(rho)
+}
+
+/// Per-face locals for the ALE THERMAL upwind face density `ale_rho_f`: the
+/// EXACT mirror — same blend, same distance-weighted velocity Lerp, same
+/// mesh-RELATIVE sgn argument, same 1e-12 regularisation — of the face density
+/// the derived Rhie–Chow flux kernel bakes into the mass flux for `t_ref`
+/// layouts (see `density_face_expr` in src/solver/model/flux_derivation.rs and
+/// the INVARIANT documented there and on `ale_relative_flux_expr`).
+///
+/// Emitted in the face-loop head (after `lambda_f`) so every mesh-relative
+/// convection site reads one shared local instead of re-expanding the blend.
+///
+/// Orientation: the flux module evaluates in OWNER orientation (owner-outward
+/// normal, owner-signed `mesh_fluxes`); this face loop runs in `idx`
+/// orientation (`normal` already flipped outward from `idx`). The blend is
+/// orientation-invariant — negating the normal negates both `u_n_rel` (the
+/// mesh flux is re-signed via the `owner == idx` select below) and the
+/// `rho_idx - rho_other` half-jump, and their product is exactly the
+/// owner-oriented value (IEEE negation is exact) — so the idx-oriented locals
+/// reproduce the flux module's face value. Residual sub-ulp differences (the
+/// flux module's `lambda_other = 1.0 - lambda` vs this loop's complementary
+/// weight, `dot()` contraction) can only perturb `sgn` on faces where the
+/// relative normal velocity sits inside f32 rounding noise of zero — where the
+/// upwind side is genuinely ambiguous and the eps-regularised sgn is tiny.
+///
+/// Boundary faces: `other_idx == idx` makes the half-jump exactly 0.0, so
+/// `ale_rho_f == rho[idx]` bitwise regardless of sgn — consistent with the flux
+/// module, whose boundary neighbor rho collapses to the owner value. Uniform
+/// density: avg is exact and the half-jump is 0.0, so `ale_rho_f == rho`
+/// bitwise (free stream/GCL preserved). Static mesh: `mesh_fluxes ≡ 0` makes
+/// `u_n_rel = u_n - 0.0/area = u_n` bitwise AND the whole subtraction inert.
+fn ale_thermal_upwind_face_density_stmts(
+    system: &DiscreteSystem,
+    slots: &ResolvedStateSlotsSpec,
+) -> Vec<Stmt> {
+    let rho_slot = ale_thermal_upwind_rho_slot(slots)
+        .expect("ale_thermal_upwind_face_density_stmts: gate must be checked by the caller");
+    // The advecting velocity: the unique Vector2 coupled target (the momentum
+    // equation) — the same field the flux deriver's `u_face` Lerp reads.
+    let mut vec_targets = system
+        .equations
+        .iter()
+        .map(|eq| &eq.target)
+        .filter(|t| t.kind() == FieldKind::Vector2);
+    let u_target = vec_targets
+        .next()
+        .expect("ALE thermal upwind face density requires a Vector2 momentum target");
+    assert!(
+        vec_targets.next().is_none(),
+        "ALE thermal upwind face density requires a UNIQUE Vector2 target (ambiguous advecting velocity)"
+    );
+    let u_slot = find_slot(slots, u_target.name()).unwrap_or_else(|| {
+        panic!(
+            "ALE thermal upwind face density: momentum target '{}' missing from state slots",
+            u_target.name()
+        )
+    });
+
+    let s = |idx: &str, slot, comp| state_component_slot(slots.stride, "state", idx, slot, comp);
+    let lambda_f = || Expr::ident("lambda_f");
+    let w_other = || Expr::from(1.0) - Expr::ident("lambda_f");
+
+    let mf = dsl::array_access("mesh_fluxes", Expr::ident("face_idx"));
+    vec![
+        // `mesh_fluxes` is owner-signed; re-sign outward from `idx` like `normal`.
+        dsl::let_expr(
+            "ale_mesh_flux_out",
+            dsl::select(
+                -mf.clone(),
+                mf,
+                Expr::ident("owner").eq(Expr::ident("idx")),
+            ),
+        ),
+        // Distance-weighted face velocity (the flux module's `U` Lerp, idx-oriented).
+        dsl::let_expr(
+            "ale_u_f_x",
+            s("idx", u_slot, 0) * lambda_f() + s("other_idx", u_slot, 0) * w_other(),
+        ),
+        dsl::let_expr(
+            "ale_u_f_y",
+            s("idx", u_slot, 1) * lambda_f() + s("other_idx", u_slot, 1) * w_other(),
+        ),
+        // Mesh-RELATIVE face-normal velocity: the convecting speed under ALE.
+        dsl::let_expr(
+            "ale_u_n_rel",
+            Expr::ident("ale_u_f_x") * Expr::ident("normal").field("x")
+                + Expr::ident("ale_u_f_y") * Expr::ident("normal").field("y")
+                - Expr::ident("ale_mesh_flux_out") / Expr::ident("area"),
+        ),
+        // sgn(u_n_rel) = u_n_rel / max(|u_n_rel|, 1e-12) — same regularisation
+        // as the flux module (finite for u_n_rel == 0, so `sgn * 0.0` stays 0.0).
+        dsl::let_expr(
+            "ale_upwind_sgn",
+            Expr::ident("ale_u_n_rel")
+                / dsl::max(dsl::abs(Expr::ident("ale_u_n_rel")), 1.0e-12),
+        ),
+        // rho_f = 0.5*(rho_o+rho_n) + sgn*0.5*(rho_o-rho_n): upwind cell's rho.
+        dsl::let_expr(
+            "ale_rho_f",
+            Expr::from(0.5) * (s("idx", rho_slot, 0) + s("other_idx", rho_slot, 0))
+                + Expr::ident("ale_upwind_sgn")
+                    * (Expr::from(0.5)
+                        * (s("idx", rho_slot, 0) - s("other_idx", rho_slot, 0))),
+        ),
+    ]
 }
 
 pub fn generate_unified_assembly_wgsl(
@@ -945,38 +1091,38 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             None,
         ));
 
-        // Distance-weighted face interpolation weight (owner weight =
-        // d_neigh / (d_own + d_neigh), the standard FV linear weight).
+        // Distance-weighted face interpolation weight (weight of `idx` =
+        // d_other / (d_idx + d_other), the standard FV linear weight).
         // Matches the derived Rhie-Chow flux kernel's Lerp convention —
         // the assembly's face coefficients MUST interpolate identically to
         // the flux module's face d_p or the pressure system loses
         // consistency. On uniform meshes lambda = 0.5.
-        // (Vector2 is the custom STRUCT; convert member-wise for distance().)
-        body.push(dsl::let_expr(
-            "lam_f_center_v",
-            dsl::vec2_f32(
-                Expr::ident("f_center").field("x"),
-                Expr::ident("f_center").field("y"),
-            ),
-        ));
+        //
+        // Distances are the face-normal PROJECTED cell-to-face distances
+        // `|dot(f_center - center, n)|` — the OpenFOAM
+        // `surfaceInterpolation::weights()` form and EXACTLY what the flux
+        // module computes (`d_own`/`d_neigh` in the flux kernels); `abs` makes
+        // the normal's orientation irrelevant. A Euclidean `distance()` (the
+        // former form) is identical on orthogonal meshes but diverges at
+        // O(skew) on CVT/deformed ALE meshes, so the assembly's kappa/rho_f
+        // interpolation carried different weights than the flux it must match.
         body.push(dsl::let_expr(
             "lam_d_own",
-            dsl::distance(
-                dsl::vec2_f32(
-                    Expr::ident("center").field("x"),
-                    Expr::ident("center").field("y"),
-                ),
-                Expr::ident("lam_f_center_v"),
+            dsl::abs(
+                (Expr::ident("f_center").field("x") - Expr::ident("center").field("x"))
+                    * Expr::ident("normal").field("x")
+                    + (Expr::ident("f_center").field("y") - Expr::ident("center").field("y"))
+                        * Expr::ident("normal").field("y"),
             ),
         ));
         body.push(dsl::let_expr(
             "lam_d_neigh",
-            dsl::distance(
-                dsl::vec2_f32(
-                    Expr::ident("other_center").field("x"),
-                    Expr::ident("other_center").field("y"),
-                ),
-                Expr::ident("lam_f_center_v"),
+            dsl::abs(
+                (Expr::ident("other_center").field("x") - Expr::ident("f_center").field("x"))
+                    * Expr::ident("normal").field("x")
+                    + (Expr::ident("other_center").field("y")
+                        - Expr::ident("f_center").field("y"))
+                        * Expr::ident("normal").field("y"),
             ),
         ));
         body.push(dsl::let_expr(
@@ -992,6 +1138,21 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             )]),
             None,
         ));
+
+        // ALE THERMAL upwind face density: per-face locals consumed by
+        // `ale_relative_flux_expr` at every mesh-relative convection site (must
+        // reproduce the flux module's upwinded rho_f EXACTLY — see the invariant
+        // on `ale_relative_flux_expr` / `ale_thermal_upwind_face_density_stmts`).
+        if unified_assembly_needs_mesh_fluxes(system)
+            && ale_thermal_upwind_rho_slot(slots).is_some()
+        {
+            assert!(
+                !structured,
+                "ALE thermal upwind face density is unstructured-only \
+                 (no structured ALE model exists; the structured assembly has no mesh_fluxes)"
+            );
+            body.extend(ale_thermal_upwind_face_density_stmts(system, slots));
+        }
 
         if structured {
             // Off-diagonal band slot for this direction: S=0, W=1, (diag=2),

@@ -63,6 +63,23 @@ fn swirl(p: [f64; 2], t: f64) -> [f64; 2] {
     [cx + c * dx - s * dy, cy + s * dx + c * dy]
 }
 
+/// FAST swirl (5x the amplitude of [`swirl`]): the regression instrument for the
+/// mesh-flux face-DENSITY consistency (see
+/// `allmach_thermal_ale_density_gradient_mesh_flux_consistency_cpu`). Larger
+/// interior mesh velocities make the per-face `rho_f * mesh_flux` subtraction a
+/// leading term while the rho field still carries the ~15% bump gradient, so a
+/// face density INCONSISTENT with the flux module's (the pre-fix central-Lerp
+/// vs upwind mismatch) shows up as a mass drift that grows with mesh speed.
+fn swirl_fast(p: [f64; 2], t: f64) -> [f64; 2] {
+    let (cx, cy) = (0.5 * LX, 0.5 * LY);
+    let bump = (std::f64::consts::PI * p[0] / LX).sin().powi(2)
+        * (std::f64::consts::PI * p[1] / LY).sin().powi(2);
+    let theta = 0.15 * (2.0 * std::f64::consts::PI * t / PERIOD).sin() * bump;
+    let (dx, dy) = (p[0] - cx, p[1] - cy);
+    let (c, s) = (theta.cos(), theta.sin());
+    [cx + c * dx - s * dy, cy + s * dx + c * dy]
+}
+
 /// Static mesh (no motion) — the CONTROL: isolates the base pressure-based solver's mass
 /// conservation from the ALE contribution. Any drift here is NOT an ALE defect.
 fn no_motion(p: [f64; 2], _t: f64) -> [f64; 2] {
@@ -258,6 +275,51 @@ fn allmach_thermal_ale_conserves_mass_closed_box_cpu() {
         "ALE ADDS mass-conservation error on a moving mesh: static {:.3e} vs moving {:.3e}",
         stat.max_total_drift,
         moving.max_total_drift,
+    );
+}
+
+/// HIGH-MESH-SPEED ALE-neutrality gate for the mesh-flux face-density
+/// consistency: the mesh-relative subtraction `phi_rel = phi - rho_f*mesh_flux`
+/// must reconstruct the face density the flux module baked into `phi` (thermal
+/// `t_ref` family: the UPWIND blend; pre-fix the assembly subtracted a CENTRAL
+/// distance-weighted rho_f instead — a spurious per-face mass source
+/// ∝ (rho jump) × (mesh velocity) wherever grad(rho) != 0 on a moving mesh).
+///
+/// Instrument: the same closed-box Gaussian-bump gas as the smooth-motion gate
+/// (rho spans ~14%) under a 5x-faster interior swirl (`swirl_fast`) — mesh
+/// velocity scales every `rho_f*mesh_flux` term while the static control is
+/// untouched. Gate: moving-mesh mass drift within 15% of the static control's.
+///
+/// CALIBRATION HONESTY: measured pre-fix ratio 1.005 and post-fix 1.005 — the
+/// closed-box net-mass observable does NOT resolve the pre-fix face-density
+/// mismatch (its ± sources cancel globally under the antisymmetric swirl, and
+/// at-rest faces multiply a ~zero convective flux), so this test guards
+/// CATASTROPHIC mesh-flux inconsistencies (a wrong rho_f scale, a dropped
+/// subtraction, a broken volume source) at mesh speeds 5x the smooth gate's.
+/// The DISCRIMINATING regression gate for the exact pre-fix defect is
+/// codegen-level: `contract_ale_mesh_flux_face_density_matches_flux_module`
+/// (src/solver/model/kernel.rs), which pins the generated assembly's
+/// subtraction rho_f to the flux module's upwind blend expression.
+#[test]
+fn allmach_thermal_ale_density_gradient_mesh_flux_consistency_cpu() {
+    let stat = run_conservation(no_motion, "densgrad-static");
+    let moving = run_conservation(swirl_fast, "densgrad-fast-swirl");
+    println!(
+        "[ale-compressible-conservation] density-gradient fast-swirl: moving/static \
+         total-drift ratio = {:.3} (static {:.3e}, moving {:.3e})",
+        moving.max_total_drift / stat.max_total_drift.max(1e-12),
+        stat.max_total_drift,
+        moving.max_total_drift,
+    );
+    assert!(
+        moving.max_total_drift <= stat.max_total_drift * 1.15,
+        "mesh-flux face density inconsistent with the flux module: fast-swirl moving drift \
+         {:.3e} exceeds static {:.3e} by {:.2}x (gate 1.15x) — the mesh-relative subtraction \
+         is removing a different mass flux than convection added (see \
+         unified_assembly::ale_relative_flux_expr invariant)",
+        moving.max_total_drift,
+        stat.max_total_drift,
+        moving.max_total_drift / stat.max_total_drift.max(1e-12),
     );
 }
 

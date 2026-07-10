@@ -96,9 +96,20 @@ fn derive_rhie_chow_flux(
 
     let registry = PortRegistry::new(layout.clone());
 
-    fn density_face_expr(registry: &PortRegistry) -> Result<S, String> {
+    fn density_face_expr(registry: &PortRegistry, ale: bool) -> Result<S, String> {
         // Prefer a state-layout density when present; else fall back to the
         // global constant density uniform.
+        //
+        // ALE INVARIANT (do not break): whatever face density `rho_f` this flux
+        // kernel bakes into the mass flux `phi = rho_f*(U_f.n)*A`, the unified
+        // assembly's mesh-relative subtraction `phi_rel = phi - rho_f*mesh_flux`
+        // must reconstruct the EXACT same expression on the same states
+        // (crates/cfd2_codegen .../unified_assembly.rs, `ale_relative_flux_expr`
+        // + `ale_thermal_upwind_face_density_stmts`). If the two sites disagree,
+        // every face with a density gradient on a moving mesh gains a spurious
+        // mass source ∝ (rho mismatch) × (mesh velocity). If you change the
+        // blend, the lambda convention, or the sgn() argument here, change the
+        // assembly mirror in the same commit.
         match registry.validate_scalar_field::<Density>("derive_rhie_chow", "rho") {
             Ok(()) => {
                 let rho_o = S::state(FaceSide::Owner, "rho");
@@ -115,11 +126,25 @@ fn derive_rhie_chow_flux(
                     return Ok(S::Lerp(Box::new(rho_o), Box::new(rho_n)));
                 }
                 // sgn(u_n) = u_n / max(|u_n|, eps),  u_n = U_face . n  (central face U).
+                //
+                // Under ALE the CONVECTING velocity is the mesh-relative
+                // `(U - U_mesh).n = U.n - mesh_flux/A` (the mesh flux is the
+                // owner-signed volumetric swept rate, zero-filled on a static
+                // mesh so `u_n - 0.0/A` is bitwise `u_n` there): where the mesh
+                // outruns the flow through a face, the absolute `U.n` would pick
+                // the DOWNWIND side of the relative transport. The assembly's
+                // subtraction uses the same relative sgn (see invariant above).
                 let u_face = V::Lerp(
                     Box::new(V::state_vec2(FaceSide::Owner, "U")),
                     Box::new(V::state_vec2(FaceSide::Neighbor, "U")),
                 );
-                let u_n = S::Dot(Box::new(u_face), Box::new(V::normal()));
+                let mut u_n = S::Dot(Box::new(u_face), Box::new(V::normal()));
+                if ale {
+                    u_n = S::Sub(
+                        Box::new(u_n),
+                        Box::new(S::Div(Box::new(S::mesh_flux()), Box::new(S::area()))),
+                    );
+                }
                 let sgn = S::Div(
                     Box::new(u_n.clone()),
                     Box::new(S::Max(
@@ -260,7 +285,7 @@ fn derive_rhie_chow_flux(
     //   phi = rho * (u_f · n) * area  -  rho * d_p_f * ((p_N - p_O) / dist) * area
     // The pressure-gradient term uses the same face-normal distance projection
     // (`dist`) as the Laplacian discretization, so the two stay consistent.
-    let rho_face = density_face_expr(&registry)?;
+    let rho_face = density_face_expr(&registry, system.is_ale())?;
 
     let d_p_face = S::Lerp(
         Box::new(S::state(FaceSide::Owner, d_p.clone())),

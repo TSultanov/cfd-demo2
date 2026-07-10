@@ -306,14 +306,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (k1_dist_proj > 0.000001) {
             k1_dist = k1_dist_proj;
         }
-        let k1_lam_f_center_v = vec2<f32>(k1_f_center.x, k1_f_center.y);
-        let k1_lam_d_own = distance(vec2<f32>(k1_center.x, k1_center.y), k1_lam_f_center_v);
-        let k1_lam_d_neigh = distance(vec2<f32>(k1_other_center.x, k1_other_center.y), k1_lam_f_center_v);
+        let k1_lam_d_own = abs((k1_f_center.x - k1_center.x) * k1_normal.x + (k1_f_center.y - k1_center.y) * k1_normal.y);
+        let k1_lam_d_neigh = abs((k1_other_center.x - k1_f_center.x) * k1_normal.x + (k1_other_center.y - k1_f_center.y) * k1_normal.y);
         let k1_lam_total = k1_lam_d_own + k1_lam_d_neigh;
         var k1_lambda_f: f32 = 0.5;
         if (k1_lam_total > 0.000001) {
             k1_lambda_f = k1_lam_d_neigh / k1_lam_total;
         }
+        let k1_ale_mesh_flux_out = select(-mesh_fluxes[k1_face_idx], mesh_fluxes[k1_face_idx], k1_owner == idx);
+        let k1_ale_u_f_x = state[idx * 25u + 0u] * k1_lambda_f + state[k1_other_idx * 25u + 0u] * (1.0 - k1_lambda_f);
+        let k1_ale_u_f_y = state[idx * 25u + 1u] * k1_lambda_f + state[k1_other_idx * 25u + 1u] * (1.0 - k1_lambda_f);
+        let k1_ale_u_n_rel = k1_ale_u_f_x * k1_normal.x + k1_ale_u_f_y * k1_normal.y - k1_ale_mesh_flux_out / k1_area;
+        let k1_ale_upwind_sgn = k1_ale_u_n_rel / max(abs(k1_ale_u_n_rel), 0.000000000001);
+        let k1_ale_rho_f = 0.5 * (state[idx * 25u + 11u] + state[k1_other_idx * 25u + 11u]) + k1_ale_upwind_sgn * 0.5 * (state[idx * 25u + 11u] - state[k1_other_idx * 25u + 11u]);
         let k1_scalar_mat_idx = cell_face_matrix_indices[k1_k];
         let k1_neighbor_rank = k1_scalar_mat_idx - k1_scalar_offset;
         let k1_diff_coeff_U = select(constants.viscosity, constants.viscosity * k1_lambda_f + constants.viscosity * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
@@ -359,7 +364,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let k1_dev2_U_U_mu = select(constants.viscosity, constants.viscosity * k1_lambda_f + constants.viscosity * (1.0 - k1_lambda_f), !k1_is_boundary);
         k1_rhs_0 += k1_dev2_U_U_mu * k1_area * (k1_normal.x * k1_dev2_U_U_gx.x + k1_normal.y * k1_dev2_U_U_gy.x - 0.6666667 * k1_dev2_U_U_div * k1_normal.x);
         k1_rhs_1 += k1_dev2_U_U_mu * k1_area * (k1_normal.x * k1_dev2_U_U_gx.y + k1_normal.y * k1_dev2_U_U_gy.y - 0.6666667 * k1_dev2_U_U_div * k1_normal.y);
-        var k1_phi_0: f32 = fluxes[k1_face_idx * 4u + 0u] - (state[k1_other_idx * 25u + 11u] + k1_lambda_f * (state[idx * 25u + 11u] - state[k1_other_idx * 25u + 11u])) * mesh_fluxes[k1_face_idx];
+        var k1_phi_0: f32 = fluxes[k1_face_idx * 4u + 0u] - k1_ale_rho_f * mesh_fluxes[k1_face_idx];
         if (k1_owner != idx) {
             k1_phi_0 -= k1_phi_0 * 2.0;
         }
@@ -400,7 +405,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 k1_diag_0 += k1_phi_0;
             }
         }
-        var k1_phi_1: f32 = fluxes[k1_face_idx * 4u + 1u] - (state[k1_other_idx * 25u + 11u] + k1_lambda_f * (state[idx * 25u + 11u] - state[k1_other_idx * 25u + 11u])) * mesh_fluxes[k1_face_idx];
+        var k1_phi_1: f32 = fluxes[k1_face_idx * 4u + 1u] - k1_ale_rho_f * mesh_fluxes[k1_face_idx];
         if (k1_owner != idx) {
             k1_phi_1 -= k1_phi_1 * 2.0;
         }
@@ -465,7 +470,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        var k1_phi_2: f32 = fluxes[k1_face_idx * 4u + 2u] - (state[k1_other_idx * 25u + 11u] + k1_lambda_f * (state[idx * 25u + 11u] - state[k1_other_idx * 25u + 11u])) * mesh_fluxes[k1_face_idx];
+        var k1_phi_2: f32 = fluxes[k1_face_idx * 4u + 2u] - k1_ale_rho_f * mesh_fluxes[k1_face_idx];
         if (k1_owner != idx) {
             k1_phi_2 -= k1_phi_2 * 2.0;
         }
@@ -484,7 +489,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        var k1_phi_3: f32 = fluxes[k1_face_idx * 4u + 3u] - (state[k1_other_idx * 25u + 11u] + k1_lambda_f * (state[idx * 25u + 11u] - state[k1_other_idx * 25u + 11u])) * mesh_fluxes[k1_face_idx];
+        var k1_phi_3: f32 = fluxes[k1_face_idx * 4u + 3u] - k1_ale_rho_f * mesh_fluxes[k1_face_idx];
         if (k1_owner != idx) {
             k1_phi_3 -= k1_phi_3 * 2.0;
         }

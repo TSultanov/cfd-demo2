@@ -126,6 +126,7 @@ fn build_scalar_transport_model(
         ],
         linear_solver: None,
         primitives,
+        explicit_primitives: None,
     })
 }
 

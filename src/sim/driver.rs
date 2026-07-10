@@ -287,7 +287,9 @@ impl SolverDriver {
             preconditioner: effective_preconditioner,
             // EOS-aware (compressible) models run a single implicit outer iteration;
             // the saddle-point (incompressible) models run the coupled solver.
-            stepping: if supports_sound_speed {
+            stepping: if params.time_scheme == crate::solver::TimeScheme::RK4 {
+                SteppingMode::Explicit
+            } else if supports_sound_speed {
                 SteppingMode::Implicit { outer_iters: 1 }
             } else {
                 SteppingMode::Coupled
@@ -662,10 +664,50 @@ impl SolverDriver {
             // At the convective dt the same psi_precond gives R ~ 1e-4 (elliptic
             // pressure) and the preconditioner does its job — damping the acoustic
             // transient without being resolved in time.
-            let wave_speed = adv_speed + effective_sound_speed;
-            if self.min_cell_size > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
+            // Explicit RK4 integrates the real acoustic terms directly — there is
+            // no implicit pressure solve and no low-Mach preconditioning of the
+            // residual — so its acoustic CFL MUST use the TRUE sound speed. The
+            // `effective_sound_speed` reduction above is only valid for the
+            // implicit/coupled paths (whose pressure row is solved implicitly);
+            // reusing it here would size dt against a preconditioned c ~10^3–10^4x
+            // too small a wave speed and the explicit step would diverge.
+            let acoustic_speed = if self.params.time_scheme == crate::solver::TimeScheme::RK4 {
+                sound_speed
+            } else {
+                effective_sound_speed
+            };
+            let wave_speed = adv_speed + acoustic_speed;
+            let mut stable_dt = if self.min_cell_size > 1e-12
+                && wave_speed.is_finite()
+                && wave_speed > 1e-12
+            {
+                Some(self.params.target_cfl * self.min_cell_size / wave_speed)
+            } else {
+                None
+            };
+            // An explicit diffusion operator has the additional parabolic
+            // restriction dt=O(h^2/alpha).  The 0.25 coefficient stays inside
+            // classical RK4's negative-real-axis limit on a 2-D FV stencil and
+            // leaves margin for skew/non-orthogonal corrections.  Implicit
+            // schemes deliberately retain the historical wave-CFL-only policy.
+            if self.params.time_scheme == crate::solver::TimeScheme::RK4
+                && self.min_cell_size > 1e-12
+            {
+                let rho = (self.params.density as f64).abs().max(1.0e-12);
+                let mut alpha = (self.params.viscosity as f64).abs() / rho;
+                if self.thermal {
+                    alpha = alpha.max(crate::solver::model::ALLMACH_K_OVER_CP / rho);
+                }
+                if alpha.is_finite() && alpha > 1.0e-14 {
+                    let diffusion_dt = 0.25 * self.params.target_cfl
+                        * self.min_cell_size
+                        * self.min_cell_size
+                        / alpha;
+                    stable_dt = Some(stable_dt.map_or(diffusion_dt, |dt| dt.min(diffusion_dt)));
+                }
+            }
+            if let Some(mut next_dt) = stable_dt {
                 let current_dt = self.solver.dt() as f64;
-                let mut next_dt = self.params.target_cfl * self.min_cell_size / wave_speed;
                 if next_dt > current_dt * 1.2 {
                     next_dt = current_dt * 1.2;
                 }

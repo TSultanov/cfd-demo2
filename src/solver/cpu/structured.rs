@@ -507,12 +507,17 @@ impl StructuredModelSolver {
         scheme: Scheme,
         time_scheme: TimeScheme,
     ) -> Result<Self, String> {
+        let stepping = if time_scheme == TimeScheme::RK4 {
+            SteppingMode::Explicit
+        } else {
+            SteppingMode::Coupled
+        };
         let recipe = SolverRecipe::from_model(
             model,
             scheme,
             time_scheme,
             PreconditionerType::Jacobi,
-            SteppingMode::Coupled,
+            stepping,
         )?;
         let schemes = SchemeRegistry::new(scheme);
         let (programs, _wgsl_only) = model_kernel_programs(model, &schemes)?;
@@ -572,10 +577,15 @@ impl StructuredModelSolver {
         buffers.insert_f32("state_old", vec![0.0; n * state_stride]);
         buffers.insert_f32("state_old_old", vec![0.0; n * state_stride]);
         buffers.insert_f32("state_iter", vec![0.0; n * state_stride]);
-        buffers.insert_f32("matrix_values", vec![0.0; n * BAND_STRIDE * s * s]);
         buffers.insert_f32("rhs", vec![0.0; n * s]);
-        buffers.insert_f32("x", vec![0.0; n * s]);
-        buffers.insert_f32("y", vec![0.0; n * s]);
+        if stepping == SteppingMode::Explicit {
+            buffers.insert_f32("rk_base", vec![0.0; n * s]);
+            buffers.insert_f32("rk_accum", vec![0.0; n * s]);
+        } else {
+            buffers.insert_f32("matrix_values", vec![0.0; n * BAND_STRIDE * s * s]);
+            buffers.insert_f32("x", vec![0.0; n * s]);
+            buffers.insert_f32("y", vec![0.0; n * s]);
+        }
         buffers.insert_f32("fluxes", vec![0.0; n * 4 * flux_stride]);
         buffers.insert_vec2("grad_state", vec![0.0; n * state_stride * 2]);
         buffers.insert_u32("bc_kind", vec![0u32; n * 4 * s]);
@@ -807,7 +817,54 @@ impl StructuredModelSolver {
     /// One implicit time step: `outer_iters` Picard sweeps of
     /// flux → gradients → assembly → banded GMRES → update. Returns the
     /// L-infinity change of the state across the step.
+    fn step_explicit_rk4(&mut self) {
+        let n = self.grid.num_cells();
+        let before = self.buffers.f32_vec("state");
+        let old = self.buffers.f32_vec("state_old");
+        self.buffers.copy_into_f32("state_old_old", &old);
+        self.buffers.copy_into_f32("state_old", &before);
+
+        self.constants.dt = self.dt as f32;
+        self.constants.dt_old = self.dt_old as f32;
+        self.constants.dtau = 0.0;
+        self.constants.time_scheme = TimeScheme::RK4 as u32;
+
+        let stage_ids = [
+            crate::solver::model::KernelId::EXPLICIT_RK4_STAGE_1.as_str(),
+            crate::solver::model::KernelId::EXPLICIT_RK4_STAGE_2.as_str(),
+            crate::solver::model::KernelId::EXPLICIT_RK4_STAGE_3.as_str(),
+            crate::solver::model::KernelId::EXPLICIT_RK4_STAGE_4.as_str(),
+        ];
+        let stage_times = [0.0_f64, 0.5, 0.5, 1.0];
+        let base_time = self.time;
+        let prep: Vec<String> = self
+            .prep
+            .iter()
+            .filter(|id| id.contains("bc_expr"))
+            .cloned()
+            .collect();
+        let per = self.per_iter.clone();
+        for (&stage_id, &c) in stage_ids.iter().zip(stage_times.iter()) {
+            self.constants.time = (base_time + c * self.dt) as f32;
+            let ctx = self.build_ctx();
+            for id in prep.iter().chain(per.iter()) {
+                self.run(id, n, &ctx);
+            }
+            self.run(stage_id, n, &ctx);
+        }
+
+        self.dt_old = self.dt;
+        self.step_count = self.step_count.saturating_add(1);
+        self.time = base_time + self.dt;
+        self.constants.time = self.time as f32;
+        self.last_stats = StructuredStepStats::default();
+    }
+
     pub fn step(&mut self) {
+        if self.time_scheme == TimeScheme::RK4 {
+            self.step_explicit_rk4();
+            return;
+        }
         let n = self.grid.num_cells();
         // Variable-dt BDF2: use the PREVIOUS step's dt as `dt_old` (unstructured
         // CpuSolver parity). Overwriting `dt_old = dt` every step forced r=1 and
@@ -1213,6 +1270,16 @@ impl StructuredModelSolver {
     /// Read a named buffer (debug/parity).
     pub fn read_buffer(&self, name: &str) -> Vec<f32> {
         self.buffers.f32_vec(name)
+    }
+
+    /// True when the structured explicit runtime owns only residual/RK work
+    /// arrays and no banded matrix or Krylov solution vectors.
+    #[doc(hidden)]
+    pub fn debug_is_fully_matrix_free(&self) -> bool {
+        self.time_scheme == TimeScheme::RK4
+            && !self.buffers.contains("matrix_values")
+            && !self.buffers.contains("x")
+            && !self.buffers.contains("y")
     }
 
     /// Run only the Preparation-phase kernels once (including the structured

@@ -1068,6 +1068,20 @@ fn allmach_pressure_model_impl_topo(
     } else {
         PrimitiveDerivations::identity()
     };
+    // The barotropic model keeps rho as a storage field rather than an
+    // equation target.  Implicit stepping refreshes it on the host; explicit
+    // stages need the identical EOS closure locally before the next residual.
+    let explicit_primitives = if thermal {
+        None
+    } else {
+        let mut derivations = HashMap::new();
+        derivations.insert(
+            "rho".to_string(),
+            Expr::ident("constants").field("density")
+                + Expr::ident("psi") * Expr::ident("p"),
+        );
+        Some(PrimitiveDerivations { derivations })
+    };
 
     let layout_for_flux = layout.clone();
     let flux_module_module = crate::solver::model::modules::flux_module::flux_module_module(
@@ -1140,5 +1154,6 @@ fn allmach_pressure_model_impl_topo(
             ..Default::default()
         }),
         primitives,
+        explicit_primitives,
     })
 }

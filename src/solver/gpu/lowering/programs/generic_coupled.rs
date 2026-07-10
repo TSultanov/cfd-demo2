@@ -407,6 +407,7 @@ impl GenericCoupledProgramResources {
         let requested_time_scheme = match recipe.initial_constants.time_scheme {
             0 => crate::solver::gpu::enums::TimeScheme::Euler,
             1 => crate::solver::gpu::enums::TimeScheme::BDF2,
+            2 => crate::solver::gpu::enums::TimeScheme::RK4,
             other => return Err(format!("unknown time_scheme id {other}")),
         };
 
@@ -4092,6 +4093,7 @@ mod tests {
                 ..Default::default()
             }),
             primitives: primitives::PrimitiveDerivations::default(),
+            explicit_primitives: None,
         };
 
         // Test runtime path: create PortRegistry with all fields registered
@@ -4121,6 +4123,7 @@ mod tests {
             modules: vec![],
             linear_solver: None,
             primitives: primitives::PrimitiveDerivations::default(),
+            explicit_primitives: None,
         };
 
         // Create a PortRegistry WITHOUT registering the fields
@@ -4154,6 +4157,7 @@ mod tests {
             modules: vec![],
             linear_solver: None,
             primitives: primitives::PrimitiveDerivations::default(),
+            explicit_primitives: None,
         };
 
         // Create a PortRegistry and register all fields

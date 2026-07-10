@@ -167,6 +167,22 @@ impl CoupledAccumulators {
         }
         stmts
     }
+
+    /// Write only the residual vector, without touching a matrix.
+    ///
+    /// Used by the explicit method-of-lines kernels: their per-cell
+    /// accumulators represent `S(q) - L(q)` directly, so no CSR/banded storage
+    /// exists or is bound.
+    pub fn write_rhs(&self, rhs_array: &str, idx_expr: Expr) -> Vec<Stmt> {
+        (0..self.coupled_stride)
+            .map(|i| {
+                dsl::assign_expr(
+                    dsl::array_access_linear(rhs_array, idx_expr.clone(), self.coupled_stride, i),
+                    self.rhs(i),
+                )
+            })
+            .collect()
+    }
 }
 
 /// Thin wrapper allowing both `u32` literals and pre-computed `u32`

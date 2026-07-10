@@ -164,6 +164,13 @@ impl GpuUnifiedSolver {
             return Self::build_cpu_backend(mesh, model, config, device, queue, cpu_cfg);
         }
 
+        if config.stepping == SteppingMode::Explicit {
+            return Err(
+                "fully explicit RK4 is currently a CPU matrix-free backend; select the CPU backend"
+                    .to_string(),
+            );
+        }
+
         // Model-owned preconditioners (e.g. GenericCoupled+Schur) must remain authoritative.
         crate::solver::gpu::lowering::validate_model_owned_preconditioner_config(
             &model,

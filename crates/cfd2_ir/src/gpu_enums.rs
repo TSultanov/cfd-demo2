@@ -14,6 +14,9 @@ pub enum GpuBoundaryType {
 pub enum TimeScheme {
     Euler = 0,
     BDF2 = 1,
+    /// Classical four-stage explicit Runge--Kutta.  The timestep is selected
+    /// adaptively by the flow/diffusion CFL controller.
+    RK4 = 2,
 }
 
 #[repr(u32)]

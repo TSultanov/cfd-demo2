@@ -4,7 +4,9 @@ use std::collections::HashMap;
 
 use super::coeff_expr::coeff_cell_expr;
 use super::constants::constants_struct;
-use super::wgsl_ast::{AccessMode, Attribute, Expr, Item, StorageClass, Stmt, StructDef, StructField, Type};
+use super::wgsl_ast::{
+    AccessMode, Attribute, Expr, Item, Stmt, StorageClass, StructDef, StructField, Type,
+};
 use super::wgsl_bindings::{storage_var, uniform_var, vector2_struct};
 use crate::solver::codegen::ir::DiscreteSystem;
 use crate::solver::ir::ports::{ParamSpec, ResolvedStateSlotsSpec};
@@ -271,6 +273,63 @@ pub fn base_assembly_items(
         2,
         2,
         AccessMode::Read,
+    ));
+    items.push(Item::Comment(
+        "Group 3: Boundary conditions (per face x unknown)".to_string(),
+    ));
+    items.push(storage_var(
+        "bc_kind",
+        Type::array(Type::U32),
+        3,
+        0,
+        AccessMode::Read,
+    ));
+    items.push(storage_var(
+        "bc_value",
+        Type::array(Type::F32),
+        3,
+        1,
+        AccessMode::Read,
+    ));
+    items
+}
+
+/// Bindings for a matrix-free spatial-residual kernel.
+///
+/// The mesh side deliberately omits every CSR-only buffer
+/// (`cell_face_matrix_indices`, `diagonal_indices`, `scalar_row_offsets`) and
+/// group 2 contains only the residual.  Structured kernels keep their existing
+/// arithmetic grid descriptor and likewise bind no banded-matrix storage.
+pub fn base_matrix_free_residual_items(
+    topology: crate::solver::ir::TopologyMode,
+    needs_gradients: bool,
+    needs_fluxes: bool,
+    eos_params: &[ParamSpec],
+) -> Vec<Item> {
+    let mut items = match topology {
+        crate::solver::ir::TopologyMode::Structured2D => base_mesh_items_structured(eos_params),
+        crate::solver::ir::TopologyMode::Unstructured => {
+            let mut mesh = base_mesh_items(eos_params);
+            mesh.retain(|item| match item {
+                Item::GlobalVar(var) => !matches!(
+                    var.name.as_str(),
+                    "cell_face_matrix_indices" | "diagonal_indices"
+                ),
+                _ => true,
+            });
+            mesh
+        }
+    };
+    items.extend(base_state_items(needs_gradients, needs_fluxes));
+    items.push(Item::Comment(
+        "Group 2: matrix-free spatial residual".to_string(),
+    ));
+    items.push(storage_var(
+        "rhs",
+        Type::array(Type::F32),
+        2,
+        0,
+        AccessMode::ReadWrite,
     ));
     items.push(Item::Comment(
         "Group 3: Boundary conditions (per face x unknown)".to_string(),

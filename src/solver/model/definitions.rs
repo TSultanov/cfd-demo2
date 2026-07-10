@@ -27,9 +27,79 @@ pub struct ModelSpec {
 
     /// Derived primitive recovery expressions (empty if primitives = conserved state)
     pub primitives: crate::solver::model::primitives::PrimitiveDerivations,
+
+    /// Optional primitive closure used specifically by the explicit
+    /// method-of-lines integrator.  This is separate from `primitives` because
+    /// some implicit models deliberately represent local algebraic closures as
+    /// coupled rows, while RK stages must recover those same values directly
+    /// after advancing the conserved variables.
+    pub explicit_primitives: Option<crate::solver::model::primitives::PrimitiveDerivations>,
 }
 
 impl ModelSpec {
+    /// Validate that the model is a static method-of-lines system suitable for
+    /// the fully explicit RK4 path.
+    ///
+    /// Every equation row must either declare an own-variable `ddt` (a
+    /// differential row) or be recoverable from the model's primitive
+    /// derivations (a local algebraic row).  Saddle-point pressure constraints
+    /// therefore fail this gate, while scalar transport/diffusion and the
+    /// compressible differential models pass.  ALE is intentionally excluded
+    /// until stage-consistent moving geometry is defined.
+    pub fn validate_explicit_rk4(&self) -> Result<(), String> {
+        if self.system.is_ale() {
+            return Err(format!(
+                "model '{}' uses ALE/moving-mesh terms; explicit RK4 currently supports static meshes only",
+                self.id
+            ));
+        }
+        // Pressure-based (Rhie–Chow collocated) models carry a `d_p` coupling
+        // coefficient produced by the Update-phase dp_init/dp_update kernels and
+        // read back by the pressure residual as `lap(rho*d_p, p)`. The matrix-free
+        // RK stages never run the Update phase (and there is no assembled diagonal
+        // to derive d_p from), so that elliptic pressure–velocity coupling term
+        // would silently vanish (d_p stays at its zero-init value) and the
+        // collocated pressure field checkerboards. Exclude such models until an
+        // explicit d_p closure is defined.
+        if self
+            .state_layout
+            .fields()
+            .iter()
+            .any(|field| field.name() == "d_p")
+        {
+            return Err(format!(
+                "model '{}' uses Rhie–Chow pressure coupling (a `d_p` field produced only by the implicit Update phase); explicit RK4 has no d_p closure and would lose pressure–velocity coupling",
+                self.id
+            ));
+        }
+        let primitives = self.explicit_primitives.as_ref().unwrap_or(&self.primitives);
+        for equation in self.system.equations() {
+            let target = equation.target();
+            let has_own_ddt = equation.terms().iter().any(|term| {
+                term.op == crate::solver::ir::TermOp::Ddt && term.field == *target
+            });
+            let recoverable = match target.kind() {
+                crate::solver::ir::FieldKind::Scalar => primitives.contains(target.name()),
+                crate::solver::ir::FieldKind::Vector2 => ["x", "y"].iter().all(|suffix| {
+                    primitives
+                        .contains(&format!("{}_{}", target.name(), suffix))
+                }),
+                crate::solver::ir::FieldKind::Vector3 => ["x", "y", "z"].iter().all(|suffix| {
+                    primitives
+                        .contains(&format!("{}_{}", target.name(), suffix))
+                }),
+            };
+            if !has_own_ddt && !recoverable {
+                return Err(format!(
+                    "model '{}' row '{}' has no own-variable ddt and no explicit primitive recovery; it is not a method-of-lines row",
+                    self.id,
+                    target.name()
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Get the state stride (number of f32 per cell in the state buffer).
     ///
     /// Convenience accessor — equivalent to `self.state_layout.stride()`.

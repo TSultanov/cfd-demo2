@@ -90,6 +90,7 @@ impl TimeIntegrationSpec {
         let history_levels = match scheme {
             TimeScheme::Euler => 1,
             TimeScheme::BDF2 => 2,
+            TimeScheme::RK4 => 1,
         };
         Self {
             scheme,
@@ -227,6 +228,14 @@ impl SolverRecipe {
         stepping: SteppingMode,
     ) -> Result<Self, String> {
         model.validate_module_manifests()?;
+        if matches!(stepping, SteppingMode::Explicit) {
+            model.validate_explicit_rk4()?;
+            if time_scheme != TimeScheme::RK4 {
+                return Err(
+                    "fully explicit stepping requires TimeScheme::RK4".to_string(),
+                );
+            }
+        }
 
         // State fields must be registered before module manifests so equation target
         // fields are available for runtime resolution.
@@ -335,10 +344,31 @@ impl SolverRecipe {
         let mut binds_low_mach_params = false;
         let mut binds_solution_x = false;
         for kernel in &kernels {
-            let src = kernel_registry::kernel_source_by_id(model.id, kernel.id)
-                .or_else(|_| kernel_registry::kernel_source_by_id("", kernel.id))?;
-            for binding in src.bindings {
-                match binding.name {
+            let binding_names: Vec<String> = match kernel_registry::kernel_source_by_id(
+                model.id,
+                kernel.id,
+            )
+            .or_else(|_| kernel_registry::kernel_source_by_id("", kernel.id))
+            {
+                Ok(src) => src.bindings.iter().map(|binding| binding.name.to_string()).collect(),
+                Err(registry_error) if matches!(stepping, SteppingMode::Explicit) => {
+                    match crate::solver::model::kernel::generate_kernel_artifact_for_model_by_id(
+                        model,
+                        &crate::solver::ir::SchemeRegistry::new(advection_scheme),
+                        kernel.id,
+                    )? {
+                        crate::solver::model::kernel::ModelKernelArtifact::DslProgram(program) => {
+                            program.bindings.into_iter().map(|binding| binding.name).collect()
+                        }
+                        crate::solver::model::kernel::ModelKernelArtifact::Wgsl(_) => {
+                            return Err(registry_error);
+                        }
+                    }
+                }
+                Err(error) => return Err(error),
+            };
+            for binding_name in binding_names {
+                match binding_name.as_str() {
                     "state_iter" => binds_state_iter = true,
                     "fluxes" => binds_fluxes = true,
                     "low_mach_params" => binds_low_mach_params = true,

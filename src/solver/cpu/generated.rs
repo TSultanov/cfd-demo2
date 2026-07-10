@@ -8,6 +8,8 @@
 //! Kernels without a generated variant return `None` from [`lookup`]; the
 //! `CpuSolver` then interprets them.
 
+#![allow(non_snake_case, unused_assignments, unused_mut, unused_variables)]
+
 #[allow(unused_imports)]
 use crate::solver::cpu::interpreter::Buffers;
 #[allow(unused_imports)]

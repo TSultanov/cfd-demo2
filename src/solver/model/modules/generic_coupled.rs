@@ -62,13 +62,13 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
                 id: KernelId::GENERIC_COUPLED_ASSEMBLY,
                 phase: KernelPhaseId::Assembly,
                 dispatch: DispatchKindId::Cells,
-                condition: KernelConditionId::RequiresNoGradState,
+                condition: KernelConditionId::RequiresNoGradStateAndImplicitStepping,
             },
             ModelKernelSpec {
                 id: KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE,
                 phase: KernelPhaseId::Assembly,
                 dispatch: DispatchKindId::Cells,
-                condition: KernelConditionId::RequiresGradState,
+                condition: KernelConditionId::RequiresGradStateAndImplicitStepping,
             },
             // RHS-only assembly variants for matrix-frozen outer iterations
             // (scheduled only by the freeze paths; default off).
@@ -76,13 +76,13 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
                 id: KernelId::GENERIC_COUPLED_ASSEMBLY_RHS_ONLY,
                 phase: KernelPhaseId::AssemblyRhsOnly,
                 dispatch: DispatchKindId::Cells,
-                condition: KernelConditionId::RequiresNoGradState,
+                condition: KernelConditionId::RequiresNoGradStateAndImplicitStepping,
             },
             ModelKernelSpec {
                 id: KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY,
                 phase: KernelPhaseId::AssemblyRhsOnly,
                 dispatch: DispatchKindId::Cells,
-                condition: KernelConditionId::RequiresGradState,
+                condition: KernelConditionId::RequiresGradStateAndImplicitStepping,
             },
             ModelKernelSpec {
                 id: KernelId::GENERIC_COUPLED_APPLY,
@@ -94,7 +94,43 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
                 id: KernelId::GENERIC_COUPLED_UPDATE,
                 phase: KernelPhaseId::Update,
                 dispatch: DispatchKindId::Cells,
-                condition: KernelConditionId::Always,
+                condition: KernelConditionId::RequiresImplicitStepping,
+            },
+            ModelKernelSpec {
+                id: KernelId::EXPLICIT_RESIDUAL,
+                phase: KernelPhaseId::Assembly,
+                dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::RequiresNoGradStateAndExplicitStepping,
+            },
+            ModelKernelSpec {
+                id: KernelId::EXPLICIT_RESIDUAL_GRAD_STATE,
+                phase: KernelPhaseId::Assembly,
+                dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::RequiresGradStateAndExplicitStepping,
+            },
+            ModelKernelSpec {
+                id: KernelId::EXPLICIT_RK4_STAGE_1,
+                phase: KernelPhaseId::Update,
+                dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::RequiresExplicitStepping,
+            },
+            ModelKernelSpec {
+                id: KernelId::EXPLICIT_RK4_STAGE_2,
+                phase: KernelPhaseId::Update,
+                dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::RequiresExplicitStepping,
+            },
+            ModelKernelSpec {
+                id: KernelId::EXPLICIT_RK4_STAGE_3,
+                phase: KernelPhaseId::Update,
+                dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::RequiresExplicitStepping,
+            },
+            ModelKernelSpec {
+                id: KernelId::EXPLICIT_RK4_STAGE_4,
+                phase: KernelPhaseId::Update,
+                dispatch: DispatchKindId::Cells,
+                condition: KernelConditionId::RequiresExplicitStepping,
             },
         ],
         generators: vec![
@@ -134,6 +170,30 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
             ModelKernelGeneratorSpec::new_dsl(
                 KernelId::GENERIC_COUPLED_UPDATE,
                 crate::solver::model::kernel::generate_generic_coupled_update_kernel_program,
+            ),
+            ModelKernelGeneratorSpec::new_cpu_dsl(
+                KernelId::EXPLICIT_RESIDUAL,
+                crate::solver::model::kernel::generate_explicit_residual_kernel_program,
+            ),
+            ModelKernelGeneratorSpec::new_cpu_dsl(
+                KernelId::EXPLICIT_RESIDUAL_GRAD_STATE,
+                crate::solver::model::kernel::generate_explicit_residual_grad_state_kernel_program,
+            ),
+            ModelKernelGeneratorSpec::new_cpu_dsl(
+                KernelId::EXPLICIT_RK4_STAGE_1,
+                crate::solver::model::kernel::generate_explicit_rk4_stage_1_kernel_program,
+            ),
+            ModelKernelGeneratorSpec::new_cpu_dsl(
+                KernelId::EXPLICIT_RK4_STAGE_2,
+                crate::solver::model::kernel::generate_explicit_rk4_stage_2_kernel_program,
+            ),
+            ModelKernelGeneratorSpec::new_cpu_dsl(
+                KernelId::EXPLICIT_RK4_STAGE_3,
+                crate::solver::model::kernel::generate_explicit_rk4_stage_3_kernel_program,
+            ),
+            ModelKernelGeneratorSpec::new_cpu_dsl(
+                KernelId::EXPLICIT_RK4_STAGE_4,
+                crate::solver::model::kernel::generate_explicit_rk4_stage_4_kernel_program,
             ),
         ],
         fusion_rules: vec![

@@ -124,7 +124,13 @@ fn split_dp_coeff_factor(
 /// velocity dotted with a normal. Zero-filled when static, so the subtraction
 /// vanishes bitwise.
 fn mesh_fluxes_item() -> Item {
-    storage_var("mesh_fluxes", Type::array(Type::F32), 0, 8, AccessMode::Read)
+    storage_var(
+        "mesh_fluxes",
+        Type::array(Type::F32),
+        0,
+        8,
+        AccessMode::Read,
+    )
 }
 
 /// ALE volume-history bindings (group 0 / bindings 9 and 15; binding 14 is
@@ -398,6 +404,7 @@ pub fn generate_unified_assembly_wgsl(
                 self.slots,
                 self.flux_stride,
                 self.needs_gradients,
+                false,
             )));
             KernelWgsl::from(module)
         }
@@ -454,6 +461,7 @@ pub fn generate_unified_assembly_kernel_program(
                 self.slots,
                 self.flux_stride,
                 self.needs_gradients,
+                false,
             );
             let (launch, consumed_stmts) = launch_from_main_statements(&main.body.stmts)?;
             let kernel_stmts = &main.body.stmts[consumed_stmts..];
@@ -469,6 +477,69 @@ pub fn generate_unified_assembly_kernel_program(
         Dispatch {
             id,
             system,
+            slots,
+            flux_stride,
+            needs_gradients,
+            eos_params,
+        },
+    )?
+}
+
+/// Generate a matrix-free method-of-lines residual kernel.
+///
+/// The returned program binds no global matrix, no block-CSR row metadata and
+/// no solution vector.  It evaluates the declared spatial discretization
+/// directly into `rhs = S(q) - L(q)` for consumption by an explicit RK stage.
+pub fn generate_matrix_free_residual_kernel_program(
+    id: &str,
+    system: &DiscreteSystem,
+    slots: &ResolvedStateSlotsSpec,
+    flux_stride: u32,
+    needs_gradients: bool,
+    eos_params: &[ParamSpec],
+) -> Result<KernelProgram, String> {
+    let residual_system = system.matrix_free_spatial_residual();
+    let coupled_stride = coupled_unknown_components(&residual_system).len() as u32;
+
+    struct Dispatch<'a> {
+        id: &'a str,
+        system: &'a DiscreteSystem,
+        slots: &'a ResolvedStateSlotsSpec,
+        flux_stride: u32,
+        needs_gradients: bool,
+        eos_params: &'a [ParamSpec],
+    }
+    impl typed::DispatchByStride<Result<KernelProgram, String>> for Dispatch<'_> {
+        fn call<Ax: typed::CoupledAxis>(&self) -> Result<KernelProgram, String> {
+            let needs_fluxes = unified_assembly_needs_fluxes(self.system);
+            validate_unified_assembly_inputs(needs_fluxes, self.flux_stride);
+            let items = super::coupled_common::base_matrix_free_residual_items(
+                self.system.topology(),
+                self.needs_gradients,
+                needs_fluxes,
+                self.eos_params,
+            );
+            let bindings = kernel_bindings_from_items(&items)?;
+            let main = main_assembly_fn::<Ax>(
+                self.system,
+                self.slots,
+                self.flux_stride,
+                self.needs_gradients,
+                true,
+            );
+            let (launch, consumed_stmts) = launch_from_main_statements(&main.body.stmts)?;
+            let mut program = KernelProgram::new(self.id, DispatchDomain::Cells, launch, bindings);
+            program.body = main.body.stmts[consumed_stmts..].to_vec();
+            program.eos_params = self.eos_params.to_vec();
+            Ok(program)
+        }
+    }
+
+    typed::dispatch_by_coupled_stride(
+        coupled_stride,
+        Dispatch {
+            id,
+            system: &residual_system,
             slots,
             flux_stride,
             needs_gradients,
@@ -555,7 +626,10 @@ fn structured_face_head() -> Vec<Stmt> {
         ),
         // Face area = the OTHER axis' spacing; cell-to-cell spacing = this axis'.
         dsl::let_expr("area", dsl::select(grid("dx"), grid("dy"), id("axis_is_x"))),
-        dsl::let_expr("spacing", dsl::select(grid("dy"), grid("dx"), id("axis_is_x"))),
+        dsl::let_expr(
+            "spacing",
+            dsl::select(grid("dy"), grid("dx"), id("axis_is_x")),
+        ),
         dsl::let_expr("half", Expr::from(0.5) * id("spacing")),
         // Boundary when the face sits on a domain edge (min edge for -dir faces,
         // max edge for +dir faces) along this face's axis.
@@ -563,7 +637,11 @@ fn structured_face_head() -> Vec<Stmt> {
         dsl::let_expr("ext", dsl::select(grid("ny"), grid("nx"), id("axis_is_x"))),
         dsl::let_expr(
             "is_boundary",
-            dsl::select(id("coord").eq(id("ext") - 1u32), id("coord").eq(0u32), k().lt(2u32)),
+            dsl::select(
+                id("coord").eq(id("ext") - 1u32),
+                id("coord").eq(0u32),
+                k().lt(2u32),
+            ),
         ),
         dsl::let_expr("off_u", dsl::select(grid("nx"), 1u32, id("axis_is_x"))),
         dsl::let_expr(
@@ -583,7 +661,10 @@ fn structured_face_head() -> Vec<Stmt> {
         ),
         // Interior neighbour is a full cell away; a boundary "ghost" sits on the
         // face (half a cell), giving the standard Dirichlet ghost distance.
-        dsl::let_expr("mult", dsl::select(id("spacing"), id("half"), id("is_boundary"))),
+        dsl::let_expr(
+            "mult",
+            dsl::select(id("spacing"), id("half"), id("is_boundary")),
+        ),
         dsl::let_expr(
             "other_center",
             vec2(
@@ -611,6 +692,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
     slots: &ResolvedStateSlotsSpec,
     flux_stride: u32,
     needs_gradients: bool,
+    matrix_free: bool,
 ) -> Function {
     let _stride = slots.stride;
     let unknowns = coupled_unknown_components(system);
@@ -657,7 +739,8 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
         // as the dispatch bounds guard.
         let f32_of = |s: &str| Expr::call_named("f32", vec![Expr::ident(s)]);
         stmts.push(dsl::if_block_expr(
-            Expr::ident("idx").ge(Expr::ident("grid").field("nx") * Expr::ident("grid").field("ny")),
+            Expr::ident("idx")
+                .ge(Expr::ident("grid").field("nx") * Expr::ident("grid").field("ny")),
             dsl::block(vec![Stmt::Return(None)]),
             None,
         ));
@@ -683,9 +766,11 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             "vol",
             Expr::ident("grid").field("dx") * Expr::ident("grid").field("dy"),
         ));
-        stmts.push(dsl::let_expr("scalar_offset", Expr::ident("idx") * 5u32));
-        stmts.push(dsl::let_expr("diag_rank", Expr::from(2u32)));
-        stmts.push(dsl::let_expr("num_neighbors", Expr::from(5u32)));
+        if !matrix_free {
+            stmts.push(dsl::let_expr("scalar_offset", Expr::ident("idx") * 5u32));
+            stmts.push(dsl::let_expr("diag_rank", Expr::from(2u32)));
+            stmts.push(dsl::let_expr("num_neighbors", Expr::from(5u32)));
+        }
     } else {
         stmts.push(dsl::if_block_expr(
             Expr::ident("idx").ge(Expr::call_named(
@@ -711,52 +796,60 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             "end",
             dsl::array_access("cell_face_offsets", Expr::ident("idx") + 1u32),
         ));
-        stmts.push(dsl::let_expr(
-            "scalar_offset",
-            dsl::array_access("scalar_row_offsets", Expr::ident("idx")),
-        ));
-        stmts.push(dsl::let_expr(
-            "diag_rank",
-            dsl::array_access("diagonal_indices", Expr::ident("idx")) - Expr::ident("scalar_offset"),
-        ));
-        stmts.push(dsl::let_expr(
-            "num_neighbors",
-            dsl::array_access("scalar_row_offsets", Expr::ident("idx") + 1u32)
-                - Expr::ident("scalar_offset"),
+        if !matrix_free {
+            stmts.push(dsl::let_expr(
+                "scalar_offset",
+                dsl::array_access("scalar_row_offsets", Expr::ident("idx")),
+            ));
+            stmts.push(dsl::let_expr(
+                "diag_rank",
+                dsl::array_access("diagonal_indices", Expr::ident("idx"))
+                    - Expr::ident("scalar_offset"),
+            ));
+            stmts.push(dsl::let_expr(
+                "num_neighbors",
+                dsl::array_access("scalar_row_offsets", Expr::ident("idx") + 1u32)
+                    - Expr::ident("scalar_offset"),
+            ));
+        }
+    }
+    if !matrix_free {
+        stmts.extend(
+            acc.declare_start_rows(Expr::ident("scalar_offset"), Expr::ident("num_neighbors")),
+        );
+
+        // Clear all block entries for this cell's rows.
+        stmts.push(dsl::for_loop_expr(
+            dsl::for_init_var_expr("rank", 0u32),
+            Expr::ident("rank").lt(Expr::ident("num_neighbors")),
+            dsl::for_step_increment_expr(Expr::ident("rank")),
+            dsl::block(dsl::for_each_mat_entry_block(
+                coupled_stride as usize,
+                |r, c| {
+                    vec![dsl::assign_expr(
+                        block_matrix
+                            .entry(
+                                &Expr::ident("rank"),
+                                typed::block_row::<Ax>(r as u32),
+                                typed::block_col::<Ax>(c as u32),
+                            )
+                            .expr,
+                        0.0,
+                    )]
+                },
+            )),
         ));
     }
-    stmts
-        .extend(acc.declare_start_rows(Expr::ident("scalar_offset"), Expr::ident("num_neighbors")));
-
-    // Clear all block entries for this cell's rows.
-    stmts.push(dsl::for_loop_expr(
-        dsl::for_init_var_expr("rank", 0u32),
-        Expr::ident("rank").lt(Expr::ident("num_neighbors")),
-        dsl::for_step_increment_expr(Expr::ident("rank")),
-        dsl::block(dsl::for_each_mat_entry_block(
-            coupled_stride as usize,
-            |r, c| {
-                vec![dsl::assign_expr(
-                    block_matrix
-                        .entry(
-                            &Expr::ident("rank"),
-                            typed::block_row::<Ax>(r as u32),
-                            typed::block_col::<Ax>(c as u32),
-                        )
-                        .expr,
-                    0.0,
-                )]
-            },
-        )),
-    ));
 
     // diag_i / rhs_i accumulators
     stmts.extend(acc.declare());
 
     // Time derivative contributions (implicit only).
-    stmts.extend(super::coupled_common::emit_ddt_contributions(
-           system, slots, &offsets, &acc,
-    ));
+    if !matrix_free {
+        stmts.extend(super::coupled_common::emit_ddt_contributions(
+            system, slots, &offsets, &acc,
+        ));
+    }
 
     // Source terms.
     for equation in &system.equations {
@@ -792,7 +885,9 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     .find(|s| s.name == field_name)
                     .map(|s| s.base_offset)
                     .unwrap_or_else(|| {
-                        panic!("viscous_dissipation: velocity '{field_name}' missing from state slots")
+                        panic!(
+                            "viscous_dissipation: velocity '{field_name}' missing from state slots"
+                        )
                     });
                 // Only the grad_state assembly variant binds grad_state. Declaring a
                 // viscous_dissipation term forces that variant on (needs_gradients),
@@ -822,16 +917,9 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             + dvdy.clone() * dvdy
                             + Expr::lit_f32(0.5) * shear.clone() * shear
                             - Expr::lit_f32(1.0 / 3.0) * div_u.clone() * div_u);
-                    let coeff_val = coefficient_value_expr(
-                        slots,
-                        source_op.coeff.as_ref(),
-                        "idx",
-                        0.0.into(),
-                    );
-                    stmts.push(acc.add_rhs(
-                        base_offset,
-                        coeff_val * phi_grad * Expr::ident("vol"),
-                    ));
+                    let coeff_val =
+                        coefficient_value_expr(slots, source_op.coeff.as_ref(), "idx", 0.0.into());
+                    stmts.push(acc.add_rhs(base_offset, coeff_val * phi_grad * Expr::ident("vol")));
                 }
                 continue;
             }
@@ -885,6 +973,44 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     }
                 }
             } else {
+                if source_op.explicit_reaction {
+                    let coeff =
+                        coefficient_value_expr(slots, source_op.coeff.as_ref(), "idx", 0.0.into());
+                    let scale = if source_op.static_diag {
+                        coeff
+                    } else {
+                        coeff * Expr::ident("vol")
+                    };
+                    let source_slot = slots
+                        .slots
+                        .iter()
+                        .find(|s| s.name == field_name)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "matrix-free reaction source field '{}' is missing from state slots",
+                                field_name
+                            )
+                        });
+                    if source_op.field.kind() != equation.target.kind() {
+                        panic!(
+                            "matrix-free reaction source requires field.kind == target.kind (target={}, field={})",
+                            equation.target.name(),
+                            field_name
+                        );
+                    }
+                    for component in 0..equation.target.kind().component_count() as u32 {
+                        let value = state_component_slot(
+                            slots.stride,
+                            "state",
+                            "idx",
+                            source_slot,
+                            component,
+                        );
+                        stmts.push(acc.add_rhs(base_offset + component, scale.clone() * value));
+                    }
+                    continue;
+                }
+
                 // Explicit source: RHS += value * vol, per target component.
                 //
                 // Vector targets need per-component source values: a plain
@@ -912,12 +1038,8 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         direction.len(),
                         target_kind.component_count()
                     );
-                    let val = coefficient_value_expr(
-                        slots,
-                        source_op.coeff.as_ref(),
-                        "idx",
-                        0.0.into(),
-                    );
+                    let val =
+                        coefficient_value_expr(slots, source_op.coeff.as_ref(), "idx", 0.0.into());
                     for (component, dir) in direction.iter().enumerate() {
                         if *dir == 0.0 {
                             continue;
@@ -929,22 +1051,16 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         ));
                     }
                 } else if let Some(source_field) = vector_source {
-                    let slot =
-                        find_slot(slots, source_field.name()).unwrap_or_else(|| {
-                            panic!(
-                                "explicit vector source '{}' is not in the state layout",
-                                source_field.name()
-                            )
-                        });
+                    let slot = find_slot(slots, source_field.name()).unwrap_or_else(|| {
+                        panic!(
+                            "explicit vector source '{}' is not in the state layout",
+                            source_field.name()
+                        )
+                    });
                     for component in 0..target_kind.component_count() as u32 {
                         let u_idx = base_offset + component;
-                        let value = state_component_slot(
-                            slots.stride,
-                            "state",
-                            "idx",
-                            slot,
-                            component,
-                        );
+                        let value =
+                            state_component_slot(slots.stride, "state", "idx", slot, component);
                         stmts.push(acc.add_rhs(u_idx, value * Expr::ident("vol")));
                     }
                 } else if target_kind.component_count() > 1 {
@@ -955,12 +1071,8 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         equation.target.name()
                     );
                 } else {
-                    let val = coefficient_value_expr(
-                        slots,
-                        source_op.coeff.as_ref(),
-                        "idx",
-                        0.0.into(),
-                    );
+                    let val =
+                        coefficient_value_expr(slots, source_op.coeff.as_ref(), "idx", 0.0.into());
                     stmts.push(acc.add_rhs(base_offset, val * Expr::ident("vol")));
                 }
             }
@@ -1013,87 +1125,87 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             // reads). Binds the same named locals the unstructured gather does.
             body.extend(structured_face_head());
         } else {
-        body.extend(vec![
-            dsl::let_expr(
-                "face_idx",
-                dsl::array_access("cell_faces", Expr::ident("k")),
-            ),
-            dsl::let_expr(
-                "owner",
-                dsl::array_access("face_owner", Expr::ident("face_idx")),
-            ),
-            dsl::let_expr(
-                "neighbor_raw",
-                dsl::array_access("face_neighbor", Expr::ident("face_idx")),
-            ),
-            dsl::let_expr(
-                "boundary_type",
-                dsl::array_access("face_boundary", Expr::ident("face_idx")),
-            ),
-            dsl::let_expr(
-                "area",
-                dsl::array_access("face_areas", Expr::ident("face_idx")),
-            ),
-            dsl::let_expr(
-                "f_center",
-                dsl::array_access("face_centers", Expr::ident("face_idx")),
-            ),
-            dsl::var_typed_expr(
-                "normal",
-                Type::Custom("Vector2".to_string()),
-                Some(dsl::array_access("face_normals", Expr::ident("face_idx"))),
-            ),
-            dsl::var_typed_expr("is_boundary", Type::Bool, Some(false.into())),
-            dsl::var_typed_expr("other_idx", Type::U32, Some(Expr::ident("idx"))),
-            dsl::var_typed_expr("other_center", Type::Custom("Vector2".to_string()), None),
-            // Make normal outward from `idx`.
-            dsl::if_block_expr(
-                Expr::ident("owner").ne(Expr::ident("idx")),
-                dsl::block(vec![
-                    dsl::assign_expr(
-                        Expr::ident("normal").field("x"),
-                        -Expr::ident("normal").field("x"),
-                    ),
-                    dsl::assign_expr(
-                        Expr::ident("normal").field("y"),
-                        -Expr::ident("normal").field("y"),
-                    ),
-                ]),
-                None,
-            ),
-        ]);
+            body.extend(vec![
+                dsl::let_expr(
+                    "face_idx",
+                    dsl::array_access("cell_faces", Expr::ident("k")),
+                ),
+                dsl::let_expr(
+                    "owner",
+                    dsl::array_access("face_owner", Expr::ident("face_idx")),
+                ),
+                dsl::let_expr(
+                    "neighbor_raw",
+                    dsl::array_access("face_neighbor", Expr::ident("face_idx")),
+                ),
+                dsl::let_expr(
+                    "boundary_type",
+                    dsl::array_access("face_boundary", Expr::ident("face_idx")),
+                ),
+                dsl::let_expr(
+                    "area",
+                    dsl::array_access("face_areas", Expr::ident("face_idx")),
+                ),
+                dsl::let_expr(
+                    "f_center",
+                    dsl::array_access("face_centers", Expr::ident("face_idx")),
+                ),
+                dsl::var_typed_expr(
+                    "normal",
+                    Type::Custom("Vector2".to_string()),
+                    Some(dsl::array_access("face_normals", Expr::ident("face_idx"))),
+                ),
+                dsl::var_typed_expr("is_boundary", Type::Bool, Some(false.into())),
+                dsl::var_typed_expr("other_idx", Type::U32, Some(Expr::ident("idx"))),
+                dsl::var_typed_expr("other_center", Type::Custom("Vector2".to_string()), None),
+                // Make normal outward from `idx`.
+                dsl::if_block_expr(
+                    Expr::ident("owner").ne(Expr::ident("idx")),
+                    dsl::block(vec![
+                        dsl::assign_expr(
+                            Expr::ident("normal").field("x"),
+                            -Expr::ident("normal").field("x"),
+                        ),
+                        dsl::assign_expr(
+                            Expr::ident("normal").field("y"),
+                            -Expr::ident("normal").field("y"),
+                        ),
+                    ]),
+                    None,
+                ),
+            ]);
 
-        let interior_block = dsl::block(vec![
-            dsl::let_expr(
-                "neighbor",
-                Expr::call_named("u32", vec![Expr::ident("neighbor_raw")]),
-            ),
-            dsl::assign_expr(Expr::ident("other_idx"), Expr::ident("neighbor")),
-            dsl::if_block_expr(
-                Expr::ident("owner").ne(Expr::ident("idx")),
-                dsl::block(vec![dsl::assign_expr(
-                    Expr::ident("other_idx"),
-                    Expr::ident("owner"),
-                )]),
-                None,
-            ),
-            dsl::assign_expr(
-                Expr::ident("other_center"),
-                dsl::array_access("cell_centers", Expr::ident("other_idx")),
-            ),
-        ]);
+            let interior_block = dsl::block(vec![
+                dsl::let_expr(
+                    "neighbor",
+                    Expr::call_named("u32", vec![Expr::ident("neighbor_raw")]),
+                ),
+                dsl::assign_expr(Expr::ident("other_idx"), Expr::ident("neighbor")),
+                dsl::if_block_expr(
+                    Expr::ident("owner").ne(Expr::ident("idx")),
+                    dsl::block(vec![dsl::assign_expr(
+                        Expr::ident("other_idx"),
+                        Expr::ident("owner"),
+                    )]),
+                    None,
+                ),
+                dsl::assign_expr(
+                    Expr::ident("other_center"),
+                    dsl::array_access("cell_centers", Expr::ident("other_idx")),
+                ),
+            ]);
 
-        let boundary_block = dsl::block(vec![
-            dsl::assign_expr(Expr::ident("is_boundary"), true),
-            dsl::assign_expr(Expr::ident("other_idx"), Expr::ident("idx")),
-            dsl::assign_expr(Expr::ident("other_center"), Expr::ident("f_center")),
-        ]);
+            let boundary_block = dsl::block(vec![
+                dsl::assign_expr(Expr::ident("is_boundary"), true),
+                dsl::assign_expr(Expr::ident("other_idx"), Expr::ident("idx")),
+                dsl::assign_expr(Expr::ident("other_center"), Expr::ident("f_center")),
+            ]);
 
-        body.push(dsl::if_block_expr(
-            Expr::ident("neighbor_raw").ne(-1),
-            interior_block,
-            Some(boundary_block),
-        ));
+            body.push(dsl::if_block_expr(
+                Expr::ident("neighbor_raw").ne(-1),
+                interior_block,
+                Some(boundary_block),
+            ));
         }
 
         body.push(dsl::let_expr(
@@ -1194,14 +1306,18 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             body.extend(ale_thermal_upwind_face_density_stmts(system, slots));
         }
 
-        if structured {
+        if !matrix_free && structured {
             // Off-diagonal band slot for this direction: S=0, W=1, (diag=2),
             // E=3, N=4 — i.e. `k` for k<2 else `k+1` (skipping the diagonal).
             body.push(dsl::let_expr(
                 "neighbor_rank",
-                dsl::select(Expr::ident("k") + 1u32, Expr::ident("k"), Expr::ident("k").lt(2u32)),
+                dsl::select(
+                    Expr::ident("k") + 1u32,
+                    Expr::ident("k"),
+                    Expr::ident("k").lt(2u32),
+                ),
             ));
-        } else {
+        } else if !matrix_free {
             body.push(dsl::let_expr(
                 "scalar_mat_idx",
                 dsl::array_access("cell_face_matrix_indices", Expr::ident("k")),
@@ -1491,7 +1607,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             // Explicit diffusion (RHS-only), supporting `laplacian(k, field)` where `field` may
             // differ from the equation target (e.g., viscous term for conserved momentum using
             // the derived velocity `u`).
-            if let Some(diff_op) = equation.ops.iter().find(|op| {
+            for diff_op in equation.ops.iter().filter(|op| {
                 op.kind == DiscreteOpKind::Diffusion
                     && op.discretization == Discretization::Explicit
                     && !op.transpose_dev2
@@ -1548,11 +1664,10 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         component,
                     );
 
-                    let interior_contrib =
-                        dsl::block(vec![acc.add_rhs(
-                            u_idx,
-                            Expr::ident(&diff_coeff_name) * (phi_neigh - phi_own.clone()),
-                        )]);
+                    let interior_contrib = dsl::block(vec![acc.add_rhs(
+                        u_idx,
+                        Expr::ident(&diff_coeff_name) * (phi_neigh - phi_own.clone()),
+                    )]);
 
                     let boundary_contrib = if let Some(field_base_offset) = field_offset_opt {
                         let field_u_idx = field_base_offset + component;
@@ -1601,8 +1716,11 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             dsl::select(rho_own, bc_rho_val, bc_rho_kind.eq(GpuBcKind::Dirichlet));
                         let rho_bc_safe = dsl::max(rho_bc, 1e-12);
                         let u_bc = bc_rho_u_val / rho_bc_safe;
-                        let u_other =
-                            dsl::select(phi_own.clone(), u_bc, bc_rho_u_kind.eq(GpuBcKind::Dirichlet));
+                        let u_other = dsl::select(
+                            phi_own.clone(),
+                            u_bc,
+                            bc_rho_u_kind.eq(GpuBcKind::Dirichlet),
+                        );
 
                         dsl::block(vec![acc.add_rhs(
                             u_idx,
@@ -1686,8 +1804,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             field_offset + c,
                         );
                         let own_v = dsl::vec2_f32(own.clone().field("x"), own.field("y"));
-                        let neigh_v =
-                            dsl::vec2_f32(neigh.clone().field("x"), neigh.field("y"));
+                        let neigh_v = dsl::vec2_f32(neigh.clone().field("x"), neigh.field("y"));
                         (own_v + neigh_v) * 0.5
                     } else {
                         // Two-point fallback (same as the convection
@@ -1695,20 +1812,10 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         // scheduled once the dev2 term forces the gradients
                         // pipeline on, but the kernel must still compile;
                         // at boundary faces it degrades to zero.
-                        let phi_own = state_component_slot(
-                            slots.stride,
-                            "state",
-                            "idx",
-                            field_slot,
-                            c,
-                        );
-                        let phi_neigh = state_component_slot(
-                            slots.stride,
-                            "state",
-                            "other_idx",
-                            field_slot,
-                            c,
-                        );
+                        let phi_own =
+                            state_component_slot(slots.stride, "state", "idx", field_slot, c);
+                        let phi_neigh =
+                            state_component_slot(slots.stride, "state", "other_idx", field_slot, c);
                         let diff = phi_neigh - phi_own;
                         let denom = dsl::max(
                             Expr::ident("dx") * Expr::ident("dx")
@@ -1773,10 +1880,11 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             }
 
             // 2. Convection
-            if let Some(conv_op) = equation.ops.iter().find(|op| {
-                op.kind == DiscreteOpKind::Convection
-                    && op.discretization == Discretization::Implicit
-            }) {
+            if let Some(conv_op) = equation
+                .ops
+                .iter()
+                .find(|op| op.kind == DiscreteOpKind::Convection)
+            {
                 // Flux buffer is interpreted as a packed per-unknown-component face flux table.
                 // Indexing is `fluxes[face * flux_stride + u_idx]`, where `u_idx` is the packed
                 // unknown component index in the coupled system.
@@ -1843,9 +1951,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                                 .iter()
                                 .find(|s| s.name == "rho")
                                 .unwrap_or_else(|| {
-                                    panic!(
-                                        "linearize_pressure_flux requires a 'rho' state field"
-                                    )
+                                    panic!("linearize_pressure_flux requires a 'rho' state field")
                                 });
                             let psi_own = coefficient_value_expr(
                                 slots,
@@ -1934,7 +2040,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             None,
                         ));
 
-                        if conv_op.bounded {
+                        if conv_op.bounded && conv_op.discretization == Discretization::Implicit {
                             body.push(dsl::assign_op_expr(
                                 AssignOp::Add,
                                 Expr::ident(format!("bounded_sum_phi_{u_idx}")),
@@ -2023,7 +2129,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             &format!("rec_{u_idx}"),
                             scheme_src,
                             acc.phi(u_idx),
-                            phi_own,
+                            phi_own.clone(),
                             phi_neigh,
                             grad_own,
                             grad_neigh,
@@ -2034,85 +2140,118 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             },
                         );
 
-                        let flux_pos = dsl::max(acc.phi(u_idx), 0.0);
-                        let flux_neg = dsl::min(acc.phi(u_idx), 0.0);
-
-                        // IBM (Brinkman): kill the deferred high-order
-                        // correction on any face touching a penalty cell —
-                        // the SOU/VanLeer reconstruction mixes solid (U≈0)
-                        // states and Green-Gauss gradients across the
-                        // coefficient jump the limiter cannot see, feeding
-                        // the interface velocity speckle. Branchless factor:
-                        // exactly 1.0 on fluid-interior faces (|Sp|=0 both
-                        // sides ⇒ x*1.0, bitwise x), 0.0 across/beside the
-                        // interface ⇒ first-order upwind there (the implicit
-                        // matrix side is untouched). Non-IBM models (no
-                        // `ibm_penalty_U` slot) emit byte-identical code.
-                        let dc_raw = acc.phi(u_idx) * (rec.phi_ho - rec.phi_upwind);
-                        let dc_term = if let Some(pen_slot) = find_slot(slots, IBM_PENALTY_SLOT) {
-                            let sp_own = dsl::abs(state_component_slot(
-                                slots.stride,
-                                "state",
-                                "idx",
-                                pen_slot,
-                                0,
-                            ));
-                            let sp_neigh = dsl::abs(state_component_slot(
-                                slots.stride,
-                                "state",
-                                "other_idx",
-                                pen_slot,
-                                0,
-                            ));
-                            dc_raw
-                                * dsl::select(
-                                    Expr::from(1.0),
-                                    Expr::from(0.0),
-                                    (sp_own + sp_neigh).gt(0.0),
-                                )
-                        } else {
-                            dc_raw
-                        };
-
-                        // The reconstruction locals live at the head of the
-                        // interior branch: boundary faces never needed them (the
-                        // deferred-correction term is interior-only), so they
-                        // skip the reconstruction arithmetic entirely.
-                        let mut interior_stmts = rec_stmts;
-                        interior_stmts.extend([
-                            acc.add_diag(u_idx, flux_pos.clone()),
-                            dsl::assign_op_expr(
-                                AssignOp::Add,
-                                block_matrix
-                                    .entry(
-                                        &Expr::ident("neighbor_rank"),
-                                        typed::block_row::<Ax>(u_idx),
-                                        typed::block_col::<Ax>(u_idx),
-                                    )
-                                    .expr,
-                                flux_neg.clone(),
-                            ),
-                            acc.sub_rhs(u_idx, dc_term),
-                        ]);
-                        let interior_contrib = dsl::block(interior_stmts);
-
                         let bc = BcTable::new(Expr::ident("face_idx"), coupled_stride);
                         let (bc_kind_expr, bc_value_expr) = bc.lookup(u_idx);
 
-                        let boundary_contrib = dsl::block(vec![dsl::if_block_expr(
-                            bc_kind_expr.eq(GpuBcKind::Dirichlet),
-                            dsl::block(vec![
-                                acc.add_diag(u_idx, flux_pos),
-                                acc.sub_rhs(u_idx, flux_neg * bc_value_expr),
-                            ]),
-                            Some(dsl::block(vec![acc.add_diag(u_idx, acc.phi(u_idx))])),
-                        )]);
+                        if conv_op.discretization == Discretization::Explicit {
+                            // Direct finite-volume flux residual.  Unlike the
+                            // implicit path below there is no upwind matrix plus
+                            // deferred correction: the selected reconstructed
+                            // face value is consumed in one expression.
+                            let mut interior_stmts = rec_stmts;
+                            interior_stmts.push(acc.sub_rhs(u_idx, acc.phi(u_idx) * rec.phi_ho));
+                            if conv_op.bounded {
+                                // bounded div(phi,q) = div(phi q) - div(phi) q
+                                interior_stmts
+                                    .push(acc.add_rhs(u_idx, acc.phi(u_idx) * phi_own.clone()));
+                            }
+                            let interior_contrib = dsl::block(interior_stmts);
 
-                        body.push(dsl::if_block_expr(
-                            !Expr::ident("is_boundary"),
-                            interior_contrib,
-                            Some(boundary_contrib),
-                        ));
+                            let flux_pos = dsl::max(acc.phi(u_idx), 0.0);
+                            let flux_neg = dsl::min(acc.phi(u_idx), 0.0);
+                            let mut dirichlet = vec![acc.sub_rhs(
+                                u_idx,
+                                flux_pos * phi_own.clone() + flux_neg * bc_value_expr,
+                            )];
+                            let mut extrapolated =
+                                vec![acc.sub_rhs(u_idx, acc.phi(u_idx) * phi_own.clone())];
+                            if conv_op.bounded {
+                                dirichlet
+                                    .push(acc.add_rhs(u_idx, acc.phi(u_idx) * phi_own.clone()));
+                                extrapolated.push(acc.add_rhs(u_idx, acc.phi(u_idx) * phi_own));
+                            }
+                            let boundary_contrib = dsl::block(vec![dsl::if_block_expr(
+                                bc_kind_expr.eq(GpuBcKind::Dirichlet),
+                                dsl::block(dirichlet),
+                                Some(dsl::block(extrapolated)),
+                            )]);
+                            body.push(dsl::if_block_expr(
+                                !Expr::ident("is_boundary"),
+                                interior_contrib,
+                                Some(boundary_contrib),
+                            ));
+                        } else {
+                            let flux_pos = dsl::max(acc.phi(u_idx), 0.0);
+                            let flux_neg = dsl::min(acc.phi(u_idx), 0.0);
+                            // IBM (Brinkman): kill the deferred high-order
+                            // correction on a face touching a penalty cell.
+                            // The implicit matrix side remains first-order
+                            // upwind and is unchanged.
+                            let dc_raw = acc.phi(u_idx) * (rec.phi_ho - rec.phi_upwind);
+                            let dc_term = if let Some(pen_slot) =
+                                find_slot(slots, IBM_PENALTY_SLOT)
+                            {
+                                let sp_own = dsl::abs(state_component_slot(
+                                    slots.stride,
+                                    "state",
+                                    "idx",
+                                    pen_slot,
+                                    0,
+                                ));
+                                let sp_neigh = dsl::abs(state_component_slot(
+                                    slots.stride,
+                                    "state",
+                                    "other_idx",
+                                    pen_slot,
+                                    0,
+                                ));
+                                dc_raw
+                                    * dsl::select(
+                                        Expr::from(1.0),
+                                        Expr::from(0.0),
+                                        (sp_own + sp_neigh).gt(0.0),
+                                    )
+                            } else {
+                                dc_raw
+                            };
+
+                            // The reconstruction locals live at the head of the
+                            // interior branch: boundary faces never needed them (the
+                            // deferred-correction term is interior-only), so they
+                            // skip the reconstruction arithmetic entirely.
+                            let mut interior_stmts = rec_stmts;
+                            interior_stmts.extend([
+                                acc.add_diag(u_idx, flux_pos.clone()),
+                                dsl::assign_op_expr(
+                                    AssignOp::Add,
+                                    block_matrix
+                                        .entry(
+                                            &Expr::ident("neighbor_rank"),
+                                            typed::block_row::<Ax>(u_idx),
+                                            typed::block_col::<Ax>(u_idx),
+                                        )
+                                        .expr,
+                                    flux_neg.clone(),
+                                ),
+                                acc.sub_rhs(u_idx, dc_term),
+                            ]);
+                            let interior_contrib = dsl::block(interior_stmts);
+
+                            let boundary_contrib = dsl::block(vec![dsl::if_block_expr(
+                                bc_kind_expr.eq(GpuBcKind::Dirichlet),
+                                dsl::block(vec![
+                                    acc.add_diag(u_idx, flux_pos),
+                                    acc.sub_rhs(u_idx, flux_neg * bc_value_expr),
+                                ]),
+                                Some(dsl::block(vec![acc.add_diag(u_idx, acc.phi(u_idx))])),
+                            )]);
+
+                            body.push(dsl::if_block_expr(
+                                !Expr::ident("is_boundary"),
+                                interior_contrib,
+                                Some(boundary_contrib),
+                            ));
+                        }
                     }
                 }
             }
@@ -2199,14 +2338,12 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             // faces and ZeroGradient boundaries are bitwise
                             // unchanged (`0.5·(g + g) ≡ 0.5·(2·g)` in IEEE).
                             let bc = BcTable::new(Expr::ident("face_idx"), coupled_stride);
-                            let ghost =
-                                bc.ghost_value(p_idx, phi_own.clone(), Expr::ident("dist"));
+                            let ghost = bc.ghost_value(p_idx, phi_own.clone(), Expr::ident("dist"));
                             body.push(dsl::if_block_expr(
                                 !Expr::ident("is_boundary"),
                                 dsl::block(vec![acc.sub_rhs(
                                     u_idx,
-                                    term_common.clone()
-                                        * (phi_own.clone() + phi_neigh.clone()),
+                                    term_common.clone() * (phi_own.clone() + phi_neigh.clone()),
                                 )]),
                                 Some(dsl::block(vec![
                                     acc.sub_rhs(u_idx, term_common * (ghost * 2.0))
@@ -2327,17 +2464,21 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
         ));
     }
 
-    // Write diagonal block and RHS.
-    let diag_entry = block_matrix.row_entry(&Expr::ident("diag_rank"));
-    stmts.extend(acc.writeback(
-        |i| {
-            diag_entry
-                .entry(typed::block_row::<Ax>(i), typed::block_col::<Ax>(i))
-                .expr
-        },
-        "rhs",
-        Expr::ident("idx"),
-    ));
+    if matrix_free {
+        stmts.extend(acc.write_rhs("rhs", Expr::ident("idx")));
+    } else {
+        // Write diagonal block and RHS.
+        let diag_entry = block_matrix.row_entry(&Expr::ident("diag_rank"));
+        stmts.extend(acc.writeback(
+            |i| {
+                diag_entry
+                    .entry(typed::block_row::<Ax>(i), typed::block_col::<Ax>(i))
+                    .expr
+            },
+            "rhs",
+            Expr::ident("idx"),
+        ));
+    }
 
     Function::new(
         "main",

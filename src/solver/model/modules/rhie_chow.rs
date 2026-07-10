@@ -1786,6 +1786,7 @@ mod tests {
             modules: vec![module],
             linear_solver: None,
             primitives: PrimitiveDerivations::identity(),
+            explicit_primitives: None,
         };
 
         let schemes = crate::solver::ir::SchemeRegistry::default();
@@ -2081,6 +2082,7 @@ mod tests {
             modules: vec![module],
             linear_solver: None,
             primitives: PrimitiveDerivations::identity(),
+            explicit_primitives: None,
         };
 
         let schemes = crate::solver::ir::SchemeRegistry::default();

@@ -222,6 +222,7 @@ struct ModelUiCaps {
     supports_alpha_u: bool,
     supports_alpha_p: bool,
     supports_eos_tuning: bool,
+    supports_explicit_rk4: bool,
 }
 
 struct SolverInitRequest {
@@ -1417,6 +1418,7 @@ impl CFDApp {
         self.model_caps.supports_outer_iters = named_params.iter().any(|&k| k == "outer_iters");
         self.model_caps.supports_dtau = named_params.iter().any(|&k| k == "dtau");
         self.model_caps.supports_low_mach = named_params.iter().any(|&k| k == "low_mach.model");
+        self.model_caps.supports_explicit_rk4 = model.validate_explicit_rk4().is_ok();
 
         // Use UiPortSet for field offset resolution (validates field types)
         let ui_ports = UiPortSet::from_layout(&model.state_layout);
@@ -2461,6 +2463,7 @@ impl CFDApp {
             supports_alpha_u: named_params.iter().any(|&k| k == "alpha_u"),
             supports_alpha_p: named_params.iter().any(|&k| k == "alpha_p"),
             supports_eos_tuning: named_params.iter().any(|&k| k == "eos.gamma"),
+            supports_explicit_rk4: model.validate_explicit_rk4().is_ok(),
         }
     }
 
@@ -3047,11 +3050,10 @@ impl CFDApp {
     }
 
     fn update_gpu_time_scheme(&mut self) {
-        if self.mesh_mode == MeshMode::Structured2D {
-            self.init_solver();
-        } else {
-            self.sync_worker_params();
-        }
+        // RK4 selects a different, matrix-free solver program; rebuilding on
+        // every time-scheme change keeps transitions to/from the implicit
+        // Euler/BDF2 paths unambiguous for both mesh families.
+        self.init_solver();
     }
 
     fn update_gpu_outer_iters(&self) {
@@ -4643,6 +4645,28 @@ impl eframe::App for CFDApp {
                                 {
                                     self.update_gpu_time_scheme();
                                 }
+                                let rk4_enabled = self.model_caps.supports_explicit_rk4
+                                    && self.backend.is_cpu()
+                                    && !self.enable_moving_mesh
+                                    && !self.solver_is_moving;
+                                let rk4 = ui.add_enabled(
+                                    rk4_enabled,
+                                    egui::SelectableLabel::new(
+                                        self.time_scheme == GpuTimeScheme::RK4,
+                                        "RK4 (Explicit, adaptive CFL)",
+                                    ),
+                                );
+                                if rk4.clicked() {
+                                    self.time_scheme = GpuTimeScheme::RK4;
+                                    self.adaptive_dt = true;
+                                    self.dual_time = false;
+                                    self.update_gpu_time_scheme();
+                                }
+                                if !rk4_enabled {
+                                    rk4.on_disabled_hover_text(
+                                        "Explicit RK4 requires a method-of-lines model, a static mesh, and a CPU backend.",
+                                    );
+                                }
                             });
 
                         ui.separator();
@@ -4707,7 +4731,18 @@ impl eframe::App for CFDApp {
                                 // affects the unstructured solve; on structured it is
                                 // the same transpiled kernels + shared banded solve.)
                                 for choice in BackendChoice::ALL {
-                                    ui.selectable_value(&mut self.backend, choice, choice.label());
+                                    let enabled = self.time_scheme != GpuTimeScheme::RK4
+                                        || choice.is_cpu();
+                                    let entry = ui.add_enabled(
+                                        enabled,
+                                        egui::SelectableLabel::new(
+                                            self.backend == choice,
+                                            choice.label(),
+                                        ),
+                                    );
+                                    if entry.clicked() {
+                                        self.backend = choice;
+                                    }
                                 }
                             })
                             .response
@@ -5172,6 +5207,7 @@ fn structured_pin_dt(
     params: &RuntimeParams,
     prev_max_vel: f64,
     supports_sound_speed: bool,
+    model_id: &str,
 ) {
     if params.adaptive_dt {
         let sound_speed = if supports_sound_speed {
@@ -5195,11 +5231,38 @@ fn structured_pin_dt(
         // target_cfl only makes the acoustic mass term `psi_precond·V/dt` comparable
         // to the pressure Laplacian (R = 1/(4·α_u·CFL_β²)), which de-ellipticises the
         // pressure and stalls/destabilises the flow.
-        let wave_speed = adv_speed + effective_sound_speed;
+        // Explicit RK4 integrates the real acoustics directly (no implicit
+        // pressure solve, no low-Mach preconditioning of the residual), so its
+        // acoustic CFL MUST use the TRUE sound speed. The `effective_sound_speed`
+        // reduction is valid only for the implicit/coupled paths; reusing it under
+        // RK4 sizes dt against a preconditioned wave speed ~10^3–10^4x too small
+        // and the explicit compressible step diverges.
+        let acoustic_speed = if params.time_scheme == GpuTimeScheme::RK4 {
+            sound_speed
+        } else {
+            effective_sound_speed
+        };
+        let wave_speed = adv_speed + acoustic_speed;
         let min_h = s.st_min_cell_size();
-        if min_h > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
+        let mut stable_dt = if min_h > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
+            Some(params.target_cfl * min_h / wave_speed)
+        } else {
+            None
+        };
+        if params.time_scheme == GpuTimeScheme::RK4 && min_h > 1e-12 {
+            let rho = (params.density as f64).abs().max(1.0e-12);
+            let mut alpha = (params.viscosity as f64).abs() / rho;
+            if model_id.contains("thermal") {
+                alpha = alpha.max(crate::solver::model::ALLMACH_K_OVER_CP / rho);
+            }
+            if alpha.is_finite() && alpha > 1.0e-14 {
+                let diffusion_dt =
+                    0.25 * params.target_cfl * min_h * min_h / alpha;
+                stable_dt = Some(stable_dt.map_or(diffusion_dt, |dt| dt.min(diffusion_dt)));
+            }
+        }
+        if let Some(mut next_dt) = stable_dt {
             let current_dt = s.st_dt();
-            let mut next_dt = params.target_cfl * min_h / wave_speed;
             if next_dt > current_dt * 1.2 {
                 next_dt = current_dt * 1.2;
             }
@@ -5224,7 +5287,13 @@ fn structured_step(
     model_id: &str,
     readback: bool,
 ) -> StepOutcome {
-    structured_pin_dt(s, params, *prev_max_vel, structured_supports_sound_speed(model_id));
+    structured_pin_dt(
+        s,
+        params,
+        *prev_max_vel,
+        structured_supports_sound_speed(model_id),
+        model_id,
+    );
 
     let t0 = std::time::Instant::now();
     s.st_step();

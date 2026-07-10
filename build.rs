@@ -280,8 +280,7 @@ fn main() {
 
     let schemes = solver::model::backend::SchemeRegistry::new(solver::scheme::Scheme::Upwind);
 
-    let models = solver::model::all_models()
-        .expect("failed to build model definitions");
+    let models = solver::model::all_models().expect("failed to build model definitions");
 
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR not set");
     let model_codegen_fingerprint = fingerprint_files(&model_codegen_inputs);
@@ -762,21 +761,9 @@ fn generate_fusion_schedule_registry(manifest_dir: &str, models: &[solver::model
     let handwritten_kernel_ids = collect_handwritten_kernel_ids(manifest_dir);
 
     let stepping_cases = [
-        (
-            0u8,
-            solver::model::kernel::KernelFusionStepping::Explicit,
-            false,
-        ),
-        (
-            1u8,
-            solver::model::kernel::KernelFusionStepping::Implicit,
-            true,
-        ),
-        (
-            2u8,
-            solver::model::kernel::KernelFusionStepping::Coupled,
-            false,
-        ),
+        (0u8, solver::model::kernel::KernelFusionStepping::Explicit),
+        (1u8, solver::model::kernel::KernelFusionStepping::Implicit),
+        (2u8, solver::model::kernel::KernelFusionStepping::Coupled),
     ];
     let policies = [
         solver::model::kernel::KernelFusionPolicy::Off,
@@ -799,8 +786,7 @@ fn generate_fusion_schedule_registry(manifest_dir: &str, models: &[solver::model
         let has_neighbor_grad_consumers =
             solver::model::kernel::model_has_neighbor_grad_consumers(model);
 
-        for (stepping_tag, fusion_stepping, satisfies_requires_implicit_stepping) in stepping_cases
-        {
+        for (stepping_tag, fusion_stepping) in stepping_cases {
             for has_grad_state in [false, true] {
                 let filtered_specs: Vec<solver::model::kernel::ModelKernelSpec> =
                     model_kernel_specs
@@ -810,7 +796,7 @@ fn generate_fusion_schedule_registry(manifest_dir: &str, models: &[solver::model
                             include_kernel_in_schedule(
                                 spec.condition,
                                 has_grad_state,
-                                satisfies_requires_implicit_stepping,
+                                fusion_stepping,
                             )
                         })
                         .collect();
@@ -923,14 +909,30 @@ fn generate_fusion_schedule_registry(manifest_dir: &str, models: &[solver::model
 fn include_kernel_in_schedule(
     condition: solver::model::kernel::KernelConditionId,
     has_grad_state: bool,
-    satisfies_requires_implicit_stepping: bool,
+    stepping: solver::model::kernel::KernelFusionStepping,
 ) -> bool {
+    let explicit = stepping == solver::model::kernel::KernelFusionStepping::Explicit;
     match condition {
         solver::model::kernel::KernelConditionId::Always => true,
         solver::model::kernel::KernelConditionId::RequiresGradState => has_grad_state,
         solver::model::kernel::KernelConditionId::RequiresNoGradState => !has_grad_state,
         solver::model::kernel::KernelConditionId::RequiresImplicitStepping => {
-            satisfies_requires_implicit_stepping
+            !explicit
+        }
+        solver::model::kernel::KernelConditionId::RequiresExplicitStepping => {
+            explicit
+        }
+        solver::model::kernel::KernelConditionId::RequiresGradStateAndImplicitStepping => {
+            has_grad_state && !explicit
+        }
+        solver::model::kernel::KernelConditionId::RequiresNoGradStateAndImplicitStepping => {
+            !has_grad_state && !explicit
+        }
+        solver::model::kernel::KernelConditionId::RequiresGradStateAndExplicitStepping => {
+            has_grad_state && explicit
+        }
+        solver::model::kernel::KernelConditionId::RequiresNoGradStateAndExplicitStepping => {
+            !has_grad_state && explicit
         }
     }
 }
@@ -989,7 +991,7 @@ fn collect_per_model_generated_kernel_ids(
         for module in &model.modules {
             let module: &dyn solver::model::module::ModelModule = module;
             for generator in module.kernel_generators() {
-                if generator.scope == solver::model::kernel::KernelWgslScope::PerModel {
+                if generator.scope != solver::model::kernel::KernelWgslScope::Shared {
                     ids.insert(generator.id.as_str().to_string());
                 }
             }
@@ -1359,11 +1361,15 @@ fn emit_transpiled_cpu_kernels(
     // calls that with its grid; the unstructured `lookup` ABI is untouched).
     let mut struct_entries: Vec<(String, String, String)> = Vec::new();
     for model in models {
-        let structured =
-            model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D;
+        let structured = model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D;
         for module in &model.modules {
             let module: &dyn ModelModule = module;
             for spec in module.kernel_generators() {
+                if spec.scope == solver::model::kernel::KernelWgslScope::CpuOnly
+                    && model.validate_explicit_rk4().is_err()
+                {
+                    continue;
+                }
                 let artifact = match (spec.generator)(model, schemes) {
                     Ok(a) => a,
                     Err(_) => continue,
@@ -1374,7 +1380,10 @@ fn emit_transpiled_cpu_kernels(
                         sanitize_ident(model.id),
                         sanitize_ident(spec.id.as_str())
                     );
-                    let dup = entries.iter().chain(&struct_entries).any(|(_, _, f)| f == &fn_name);
+                    let dup = entries
+                        .iter()
+                        .chain(&struct_entries)
+                        .any(|(_, _, f)| f == &fn_name);
                     if dup {
                         continue;
                     }

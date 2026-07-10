@@ -29,7 +29,7 @@ use crate::solver::mesh::refresh::{mesh_geometry_f32, MeshRefreshReport, MeshTop
 use crate::solver::snapshot::SolverStateSnapshot;
 use crate::solver::mesh::Mesh;
 use crate::solver::model::backend::SchemeRegistry;
-use crate::solver::model::ModelSpec;
+use crate::solver::model::{KernelId, ModelSpec};
 use crate::solver::scheme::Scheme;
 use crate::solver::TimeScheme;
 
@@ -394,17 +394,24 @@ impl CpuSolver {
         let num_cells = mesh.num_cells();
         let num_faces = mesh.num_faces();
 
+        let matrix_free = stepping == SteppingMode::Explicit;
         let (scalar_row_offsets, col_indices, diagonal_indices, cell_face_matrix_indices) =
-            build_csr_topology(mesh);
-        let nnz_blocks = *scalar_row_offsets.last().unwrap() as usize;
+            if matrix_free {
+                (Vec::new(), Vec::new(), Vec::new(), Vec::new())
+            } else {
+                build_csr_topology(mesh)
+            };
+        let nnz_blocks = scalar_row_offsets.last().copied().unwrap_or(0) as usize;
 
         let mut buffers = Buffers::new();
         upload_mesh(&mut buffers, mesh);
-        buffers.insert_u32("scalar_row_offsets", scalar_row_offsets.clone());
-        buffers.insert_u32("row_offsets", scalar_row_offsets.clone());
-        buffers.insert_u32("col_indices", col_indices.clone());
-        buffers.insert_u32("diagonal_indices", diagonal_indices.clone());
-        buffers.insert_u32("cell_face_matrix_indices", cell_face_matrix_indices);
+        if !matrix_free {
+            buffers.insert_u32("scalar_row_offsets", scalar_row_offsets.clone());
+            buffers.insert_u32("row_offsets", scalar_row_offsets.clone());
+            buffers.insert_u32("col_indices", col_indices.clone());
+            buffers.insert_u32("diagonal_indices", diagonal_indices.clone());
+            buffers.insert_u32("cell_face_matrix_indices", cell_face_matrix_indices);
+        }
 
         // State + history + per-iteration snapshot.
         let state_len = num_cells * state_stride as usize;
@@ -433,11 +440,17 @@ impl CpuSolver {
             "grad_state",
             vec![0.0; num_cells * state_stride as usize * 2],
         );
-        // Block-CSR: nnz_blocks * S*S matrix entries; rhs/x packed `[cell*S + u]`.
-        buffers.insert_f32("matrix_values", vec![0.0; nnz_blocks * s * s]);
+        // The direct residual is the only coupled work array in explicit mode.
+        // CSR structure/values and Krylov x/y storage are not allocated at all.
         buffers.insert_f32("rhs", vec![0.0; num_cells * s]);
-        buffers.insert_f32("x", vec![0.0; num_cells * s]);
-        buffers.insert_f32("y", vec![0.0; num_cells * s]);
+        if matrix_free {
+            buffers.insert_f32("rk_base", vec![0.0; num_cells * s]);
+            buffers.insert_f32("rk_accum", vec![0.0; num_cells * s]);
+        } else {
+            buffers.insert_f32("matrix_values", vec![0.0; nnz_blocks * s * s]);
+            buffers.insert_f32("x", vec![0.0; num_cells * s]);
+            buffers.insert_f32("y", vec![0.0; num_cells * s]);
+        }
 
         // Boundary conditions: per face x coupled-unknown component. The
         // per-boundary-type tables are kept (a topology refresh
@@ -660,9 +673,14 @@ impl CpuSolver {
         // 1. Rebuild the diag-first scalar CSR from the factored builder (the
         //    single source of truth the build path uses — byte-identical
         //    structure for a no-op refresh).
+        let matrix_free = self.stepping == SteppingMode::Explicit;
         let (scalar_row_offsets, col_indices, diagonal_indices, cell_face_matrix_indices) =
-            build_csr_topology(mesh);
-        let nnz_blocks = *scalar_row_offsets.last().unwrap() as usize;
+            if matrix_free {
+                (Vec::new(), Vec::new(), Vec::new(), Vec::new())
+            } else {
+                build_csr_topology(mesh)
+            };
+        let nnz_blocks = scalar_row_offsets.last().copied().unwrap_or(0) as usize;
 
         // 2. Update the struct fields: `num_faces` drives the face-kernel
         //    dispatch count, and the block linear solvers read the CSR
@@ -678,11 +696,13 @@ impl CpuSolver {
         //    ×3, state_iter, grad_state, x/rhs/y, cell_vols_old{,_old}) are left
         //    in place — cell count is invariant.
         upload_mesh(&mut self.buffers, mesh);
-        self.buffers.insert_u32("scalar_row_offsets", scalar_row_offsets.clone());
-        self.buffers.insert_u32("row_offsets", scalar_row_offsets);
-        self.buffers.insert_u32("col_indices", col_indices);
-        self.buffers.insert_u32("diagonal_indices", diagonal_indices);
-        self.buffers.insert_u32("cell_face_matrix_indices", cell_face_matrix_indices);
+        if !matrix_free {
+            self.buffers.insert_u32("scalar_row_offsets", scalar_row_offsets.clone());
+            self.buffers.insert_u32("row_offsets", scalar_row_offsets);
+            self.buffers.insert_u32("col_indices", col_indices);
+            self.buffers.insert_u32("diagonal_indices", diagonal_indices);
+            self.buffers.insert_u32("cell_face_matrix_indices", cell_face_matrix_indices);
+        }
 
         // 4. Resize the face-indexed + nnz-sized data buffers (zero-filled:
         //    `fluxes` and the assembled `matrix_values` are recomputed every
@@ -690,7 +710,9 @@ impl CpuSolver {
         //    static physics bitwise, exactly as the build path seeds them).
         self.buffers.insert_f32("fluxes", vec![0.0; num_faces * self.flux_stride]);
         self.buffers.insert_f32("mesh_fluxes", vec![0.0; num_faces]);
-        self.buffers.insert_f32("matrix_values", vec![0.0; nnz_blocks * s * s]);
+        if !matrix_free {
+            self.buffers.insert_f32("matrix_values", vec![0.0; nnz_blocks * s * s]);
+        }
 
         // 5. Re-scatter the bc tables from the stored per-type tables onto the
         //    new faces + rebuild the boundary-face groups. Runtime per-face BC
@@ -735,7 +757,11 @@ impl CpuSolver {
             state: self.buffers.f32_vec_threaded("state", t),
             state_old: self.buffers.f32_vec_threaded("state_old", t),
             state_old_old: self.buffers.f32_vec_threaded("state_old_old", t),
-            x: self.buffers.f32_vec_threaded("x", t),
+            x: if self.buffers.contains("x") {
+                self.buffers.f32_vec_threaded("x", t)
+            } else {
+                Vec::new()
+            },
             cell_vols: self.buffers.f32_vec_threaded("cell_vols", t),
             cell_vols_old: self.buffers.f32_vec_threaded("cell_vols_old", t),
             cell_vols_old_old: self.buffers.f32_vec_threaded("cell_vols_old_old", t),
@@ -763,7 +789,9 @@ impl CpuSolver {
         if snap.has_history {
             self.buffers.copy_into_f32_threaded("state_old", &snap.state_old, t);
             self.buffers.copy_into_f32_threaded("state_old_old", &snap.state_old_old, t);
-            self.buffers.copy_into_f32_threaded("x", &snap.x, t);
+            if self.buffers.contains("x") && snap.x.len() == self.num_cells * self.unknowns_per_cell {
+                self.buffers.copy_into_f32_threaded("x", &snap.x, t);
+            }
             if !snap.cell_vols.is_empty() {
                 self.buffers.copy_into_f32_threaded("cell_vols", &snap.cell_vols, t);
             }
@@ -1027,7 +1055,9 @@ impl CpuSolver {
         for b in ["cell_vols", "cell_vols_old", "cell_vols_old_old"] {
             permute(b, 1);
         }
-        permute("x", self.unknowns_per_cell.max(1));
+        if self.buffers.contains("x") {
+            permute("x", self.unknowns_per_cell.max(1));
+        }
         Ok(())
     }
 
@@ -1088,7 +1118,7 @@ impl CpuSolver {
             let v = new_vols[k] as f32;
             self.buffers.set_f32("cell_vols_old", cell, v);
             self.buffers.set_f32("cell_vols_old_old", cell, v);
-            if s > 1 {
+            if s > 1 && self.buffers.contains("x") {
                 for (i, (xbase, field)) in offs.iter().enumerate() {
                     let xbase = *xbase as usize;
                     let next = offs.get(i + 1).map(|(o, _)| *o as usize).unwrap_or(s);
@@ -1162,12 +1192,31 @@ impl CpuSolver {
     /// `Buffers` map (the assembly kernels consume it there).
     #[doc(hidden)]
     pub fn debug_scalar_csr(&self) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<u32>) {
+        let face_indices = if self.buffers.contains("cell_face_matrix_indices") {
+            self.buffers.u32_vec("cell_face_matrix_indices")
+        } else {
+            Vec::new()
+        };
         (
             self.scalar_row_offsets.clone(),
             self.col_indices.clone(),
             self.diagonal_indices.clone(),
-            self.buffers.u32_vec("cell_face_matrix_indices"),
+            face_indices,
         )
+    }
+
+    /// True when no global matrix topology/values or Krylov vectors exist.
+    #[doc(hidden)]
+    pub fn debug_is_fully_matrix_free(&self) -> bool {
+        self.stepping == SteppingMode::Explicit
+            && !self.buffers.contains("matrix_values")
+            && !self.buffers.contains("scalar_row_offsets")
+            && !self.buffers.contains("row_offsets")
+            && !self.buffers.contains("col_indices")
+            && !self.buffers.contains("diagonal_indices")
+            && !self.buffers.contains("cell_face_matrix_indices")
+            && !self.buffers.contains("x")
+            && !self.buffers.contains("y")
     }
 
     pub fn set_boundary_scalar(
@@ -1210,6 +1259,9 @@ impl CpuSolver {
     /// `coupled_offsets`; its component width is the gap to the next base (last
     /// to `unknowns_per_cell`); its source offset in the state from the layout.
     fn sync_x_from_state(&self) {
+        if !self.buffers.contains("x") {
+            return;
+        }
         let s = self.unknowns_per_cell;
         if s <= 1 {
             return; // scalar path solves for the field directly; no packing.
@@ -1258,7 +1310,96 @@ impl CpuSolver {
         self.buffers.copy_into_f32_threaded("x", &x, threads);
     }
 
+    fn step_explicit_rk4(&mut self) {
+        let threads = self.config.threads;
+        let before = self.buffers.f32_vec_threaded("state", threads);
+
+        // Preserve the ordinary history/snapshot contract even though RK4
+        // itself is one-step and never reads BDF history.
+        let old = self.buffers.f32_vec_threaded("state_old", threads);
+        self.buffers
+            .copy_into_f32_threaded("state_old_old", &old, threads);
+        self.buffers
+            .copy_into_f32_threaded("state_old", &before, threads);
+
+        self.constants.dt = self.dt;
+        self.constants.dt_old = self.dt_old;
+        self.constants.dtau = 0.0;
+        self.constants.time_scheme = TimeScheme::RK4 as u32;
+
+        let stage_ids = [
+            KernelId::EXPLICIT_RK4_STAGE_1.as_str(),
+            KernelId::EXPLICIT_RK4_STAGE_2.as_str(),
+            KernelId::EXPLICIT_RK4_STAGE_3.as_str(),
+            KernelId::EXPLICIT_RK4_STAGE_4.as_str(),
+        ];
+        let stage_times = [0.0_f32, 0.5, 0.5, 1.0];
+        let base_time = self.time;
+        let model_id = self.model_id;
+        let nf = self.num_faces;
+        let nc = self.num_cells;
+        let engine = self.config.engine;
+
+        for (&stage_id, &c) in stage_ids.iter().zip(stage_times.iter()) {
+            self.constants.time = base_time + c * self.dt;
+            let ctx = constants_ctx(&self.constants, &self.low_mach);
+
+            // Expression-valued BCs, gradients, face fluxes and the direct
+            // spatial residual are all refreshed from this stage state.
+            for id in self
+                .groups
+                .bc_expr
+                .iter()
+                .chain(self.groups.per_iter.iter())
+            {
+                run_kernel(
+                    &self.buffers,
+                    &ctx,
+                    &self.kernels,
+                    id,
+                    nf,
+                    nc,
+                    threads,
+                    engine,
+                    model_id,
+                    &self.constants,
+                );
+            }
+            run_kernel(
+                &self.buffers,
+                &ctx,
+                &self.kernels,
+                stage_id,
+                nf,
+                nc,
+                threads,
+                engine,
+                model_id,
+                &self.constants,
+            );
+        }
+
+        self.time = base_time + self.dt;
+        self.constants.time = self.time;
+        self.dt_old = self.dt;
+        self.step_count += 1;
+        self.outer_iterations_done = 0;
+
+        let after = self.buffers.f32_vec_threaded("state", threads);
+        let mut max_delta = 0.0_f64;
+        let mut max_state = 0.0_f64;
+        for (&a, &b) in after.iter().zip(before.iter()) {
+            max_delta = max_delta.max((a as f64 - b as f64).abs());
+            max_state = max_state.max((a as f64).abs()).max((b as f64).abs());
+        }
+        self.last_rel_delta = max_delta / max_state.max(1.0e-30);
+    }
+
     pub fn step(&mut self) {
+        if self.stepping == SteppingMode::Explicit {
+            self.step_explicit_rk4();
+            return;
+        }
         // Rotate time history: old_old <- old, old <- current state. Threaded
         // marshal (bit-identical) — runs every step incl. the resize re-solves.
         let t = self.config.threads;

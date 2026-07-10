@@ -1200,10 +1200,14 @@ fn face_stmts(
     body.extend(state_var_stmts);
     let ctx = LowerCtx::new(resolver, primitives, flux_layout, state_vars, structured);
     let mut cse = CseBuilder::new("_cse_");
+    let mut fcse = FaceCse::new();
+    // Single-root lowerings without an eliminate scope keep the pre-memo
+    // behavior (byte-identical output).
+    let mut nocse = FaceCseScope::disabled();
 
     match spec {
         FluxModuleKernelSpec::ScalarReplicated { phi } => {
-            let phi_expr = lower_scalar(phi, &ctx);
+            let phi_expr = lower_scalar(phi, &ctx, &mut nocse);
             body.push(dsl::var_typed_expr("phi", Type::F32, Some(phi_expr)));
 
             for u_idx in 0..flux_stride {
@@ -1222,7 +1226,7 @@ fn face_stmts(
                 let off = flux_layout
                     .offset_for(comp_name)
                     .unwrap_or_else(|| panic!("missing flux layout component '{comp_name}'"));
-                let flux_expr = lower_scalar(&flux[i], &ctx);
+                let flux_expr = lower_scalar(&flux[i], &ctx, &mut nocse);
                 body.push(dsl::assign_expr(flux_face(off), flux_expr));
             }
         }
@@ -1247,9 +1251,9 @@ fn face_stmts(
                 panic!("CentralUpwind spec arrays must match component count");
             }
 
-            let a_p = lower_scalar(a_plus, &ctx);
-            let a_m = lower_scalar(a_minus, &ctx);
-            let (cse_stmts, exprs) = cse.eliminate(&[a_p, a_m]);
+            let (fcse_stmts, exprs) = fcse.lower_scalars(&[a_plus, a_minus], &ctx);
+            body.extend(fcse_stmts);
+            let (cse_stmts, exprs) = cse.eliminate(&exprs);
             body.extend(cse_stmts);
             let [a_p, a_m] = exprs
                 .try_into()
@@ -1265,11 +1269,12 @@ fn face_stmts(
                 let off = flux_layout
                     .offset_for(comp_name)
                     .unwrap_or_else(|| panic!("missing flux layout component '{comp_name}'"));
-                let u_l = lower_scalar(&u_left[i], &ctx);
-                let u_r = lower_scalar(&u_right[i], &ctx);
-                let f_l = lower_scalar(&flux_left[i], &ctx);
-                let f_r = lower_scalar(&flux_right[i], &ctx);
-                let (cse_stmts, exprs) = cse.eliminate(&[u_l, u_r, f_l, f_r]);
+                let (fcse_stmts, exprs) = fcse.lower_scalars(
+                    &[&u_left[i], &u_right[i], &flux_left[i], &flux_right[i]],
+                    &ctx,
+                );
+                body.extend(fcse_stmts);
+                let (cse_stmts, exprs) = cse.eliminate(&exprs);
                 body.extend(cse_stmts);
                 let [u_l, u_r, f_l, f_r] = exprs
                     .try_into()
@@ -1424,6 +1429,7 @@ fn face_stmts_runtime_scheme(
     body.extend(state_var_stmts);
     let ctx = LowerCtx::new(resolver, primitives, flux_layout, state_vars, structured);
     let mut cse = CseBuilder::new("_cse_");
+    let mut fcse = FaceCse::new();
 
     if variants.is_empty() {
         panic!("runtime scheme flux module requires at least one variant spec");
@@ -1486,15 +1492,16 @@ fn face_stmts_runtime_scheme(
 
         // Declare one mutable flux var per component, initialized from the Upwind variant.
         let mut var_names: Vec<String> = Vec::with_capacity(upwind.components.len());
-        let mut upwind_flux_exprs: Vec<Expr> = Vec::with_capacity(upwind.components.len());
-        for (i, comp_name) in upwind.components.iter().enumerate() {
+        for comp_name in upwind.components.iter() {
             let off = flux_layout
                 .offset_for(comp_name)
                 .unwrap_or_else(|| panic!("missing flux layout component '{comp_name}'"));
             var_names.push(format!("phi_{off}"));
-            upwind_flux_exprs.push(lower_scalar(&upwind.flux[i], &ctx));
         }
 
+        let upwind_roots: Vec<&FaceScalarExpr> = upwind.flux.iter().collect();
+        let (fcse_stmts, upwind_flux_exprs) = fcse.lower_scalars(&upwind_roots, &ctx);
+        body.extend(fcse_stmts);
         let (cse_stmts, upwind_flux_exprs) = cse.eliminate(&upwind_flux_exprs);
         body.extend(cse_stmts);
         for (name, expr) in var_names.iter().zip(upwind_flux_exprs.into_iter()) {
@@ -1514,17 +1521,16 @@ fn face_stmts_runtime_scheme(
             };
 
             let cond = cond_for(scheme);
-            let mut scheme_flux_exprs: Vec<Expr> = Vec::with_capacity(v.components.len());
-            for i in 0..v.components.len() {
-                scheme_flux_exprs.push(lower_scalar(&v.flux[i], &ctx));
-            }
+            let scheme_roots: Vec<&FaceScalarExpr> = v.flux.iter().collect();
+            let (fcse_stmts, scheme_flux_exprs) = fcse.lower_scalars(&scheme_roots, &ctx);
             let (cse_stmts, scheme_flux_exprs) = cse.eliminate(&scheme_flux_exprs);
 
             body.push(dsl::if_block_expr(
                 cond,
                 dsl::block(
-                    cse_stmts
+                    fcse_stmts
                         .into_iter()
+                        .chain(cse_stmts)
                         .chain(
                             var_names.iter().zip(scheme_flux_exprs.into_iter()).map(
                                 |(name, expr)| dsl::assign_expr(Expr::ident(name.clone()), expr),
@@ -1605,9 +1611,9 @@ fn face_stmts_runtime_scheme(
     let is_interior = !Expr::ident("is_boundary");
     let cond_for = |scheme: Scheme| scheme_lit.clone().eq(scheme) & is_interior.clone();
 
-    let a_plus_upwind = lower_scalar(upwind.a_plus, &ctx);
-    let a_minus_upwind = lower_scalar(upwind.a_minus, &ctx);
-    let (cse_stmts, exprs) = cse.eliminate(&[a_plus_upwind, a_minus_upwind]);
+    let (fcse_stmts, exprs) = fcse.lower_scalars(&[upwind.a_plus, upwind.a_minus], &ctx);
+    body.extend(fcse_stmts);
+    let (cse_stmts, exprs) = cse.eliminate(&exprs);
     body.extend(cse_stmts);
     let [a_plus_upwind, a_minus_upwind] = exprs
         .try_into()
@@ -1636,9 +1642,8 @@ fn face_stmts_runtime_scheme(
         };
 
         let cond = cond_for(scheme);
-        let a_p = lower_scalar(v.a_plus, &ctx);
-        let a_m = lower_scalar(v.a_minus, &ctx);
-        let (cse_stmts, exprs) = cse.eliminate(&[a_p, a_m]);
+        let (fcse_stmts, exprs) = fcse.lower_scalars(&[v.a_plus, v.a_minus], &ctx);
+        let (cse_stmts, exprs) = cse.eliminate(&exprs);
         let [a_p, a_m] = exprs
             .try_into()
             .expect("CSE returned unexpected number of expressions");
@@ -1646,8 +1651,9 @@ fn face_stmts_runtime_scheme(
         body.push(dsl::if_block_expr(
             cond,
             dsl::block(
-                cse_stmts
+                fcse_stmts
                     .into_iter()
+                    .chain(cse_stmts)
                     .chain([
                         dsl::assign_expr(Expr::ident("a_plus"), a_p),
                         dsl::assign_expr(Expr::ident("a_minus"), a_m),
@@ -1673,11 +1679,17 @@ fn face_stmts_runtime_scheme(
         let f_l = format!("f_l_{off}");
         let f_r = format!("f_r_{off}");
 
-        let u_l_upwind = lower_scalar(&upwind.u_left[i], &ctx);
-        let u_r_upwind = lower_scalar(&upwind.u_right[i], &ctx);
-        let f_l_upwind = lower_scalar(&upwind.flux_left[i], &ctx);
-        let f_r_upwind = lower_scalar(&upwind.flux_right[i], &ctx);
-        let (cse_stmts, exprs) = cse.eliminate(&[u_l_upwind, u_r_upwind, f_l_upwind, f_r_upwind]);
+        let (fcse_stmts, exprs) = fcse.lower_scalars(
+            &[
+                &upwind.u_left[i],
+                &upwind.u_right[i],
+                &upwind.flux_left[i],
+                &upwind.flux_right[i],
+            ],
+            &ctx,
+        );
+        body.extend(fcse_stmts);
+        let (cse_stmts, exprs) = cse.eliminate(&exprs);
         body.extend(cse_stmts);
         let [u_l_upwind, u_r_upwind, f_l_upwind, f_r_upwind] = exprs
             .try_into()
@@ -1701,11 +1713,16 @@ fn face_stmts_runtime_scheme(
             };
 
             let cond = cond_for(scheme);
-            let u_l_expr = lower_scalar(&v.u_left[i], &ctx);
-            let u_r_expr = lower_scalar(&v.u_right[i], &ctx);
-            let f_l_expr = lower_scalar(&v.flux_left[i], &ctx);
-            let f_r_expr = lower_scalar(&v.flux_right[i], &ctx);
-            let (cse_stmts, exprs) = cse.eliminate(&[u_l_expr, u_r_expr, f_l_expr, f_r_expr]);
+            let (fcse_stmts, exprs) = fcse.lower_scalars(
+                &[
+                    &v.u_left[i],
+                    &v.u_right[i],
+                    &v.flux_left[i],
+                    &v.flux_right[i],
+                ],
+                &ctx,
+            );
+            let (cse_stmts, exprs) = cse.eliminate(&exprs);
             let [u_l_expr, u_r_expr, f_l_expr, f_r_expr] = exprs
                 .try_into()
                 .expect("CSE returned unexpected number of expressions");
@@ -1713,8 +1730,9 @@ fn face_stmts_runtime_scheme(
             body.push(dsl::if_block_expr(
                 cond,
                 dsl::block(
-                    cse_stmts
+                    fcse_stmts
                         .into_iter()
+                        .chain(cse_stmts)
                         .chain([
                             dsl::assign_expr(Expr::ident(&u_l), u_l_expr),
                             dsl::assign_expr(Expr::ident(&u_r), u_r_expr),
@@ -2001,6 +2019,447 @@ fn precompute_state_vars<'a>(
     (vars, stmts)
 }
 
+// ── Hash-consed FaceScalarExpr lowering ─────────────────────────────────
+//
+// `derive_central_upwind` builds each scheme variant's `FaceScalarExpr`
+// trees by deep-cloning shared subexpressions (reconstruction, EOS and
+// wave-speed subtrees) at every reference, so the input trees carry massive
+// structural duplication (~200k nodes per variant for the compressible
+// model, ~1.5M lowered nodes across the 7 runtime-scheme variants) even
+// though the deduplicated WGSL output is ~111 KB. Lowering naively
+// materializes every duplicate copy into `Expr` allocations only for
+// `CseBuilder::eliminate` to hash the huge tree and collapse it back
+// (~6 s per compressible CPU solver construction; ~24 s of every fresh
+// build via build.rs).
+//
+// Fix: dedupe DURING lowering. Per eliminate scope (exactly the region
+// where that call's `_cse_*` prelude statements land), precompute a
+// bottom-up structural hash plus an occurrence count over the deduplicated
+// dag, then lower with a memo: a subtree that occurs >= FCSE_MIN_COUNT
+// times and weighs >= FCSE_MIN_WEIGHT nodes is materialized ONCE as
+// `let _fcse_N = <lowered>;` into a statement sink, and every later
+// occurrence lowers to `Expr::ident("_fcse_N")`. Hoisting a pure
+// subexpression into a `let` in the same block is IEEE-neutral (same ops,
+// same evaluation order), and the sink is emitted exactly where the
+// corresponding `cse.eliminate` statements go, so placement semantics are
+// unchanged. The downstream `CseBuilder` still runs and catches duplicates
+// that only arise between the lowered roots.
+
+/// Minimum occurrences for a subtree to be memoized/hoisted.
+const FCSE_MIN_COUNT: u32 = 2;
+/// Minimum subtree weight (see `scan_scalar`) for hoisting into a `let` —
+/// avoids churning the output on leaves and near-leaves.
+const FCSE_MIN_WEIGHT: u32 = 4;
+/// Weight stand-in for a `Primitive` leaf: a single IR node that expands to
+/// the primitive's full EOS expression during lowering, so a repeated
+/// primitive read is always worth hoisting.
+const FCSE_PRIMITIVE_WEIGHT: u32 = FCSE_MIN_WEIGHT;
+
+/// splitmix64-style hash combine; deterministic across runs and platforms.
+#[inline]
+fn fcse_mix(h: u64, v: u64) -> u64 {
+    let mut x = h
+        .wrapping_mul(0x9E37_79B9_7F4A_7C15)
+        .wrapping_add(v)
+        .wrapping_add(0x2545_F491_4F6C_DD1D);
+    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^ (x >> 31)
+}
+
+/// FNV-1a 64 of a string, folded into `tag`.
+#[inline]
+fn fcse_str(tag: u64, s: &str) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for &b in s.as_bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    fcse_mix(tag, h)
+}
+
+#[inline]
+fn fcse_side(side: FaceSide) -> u64 {
+    match side {
+        FaceSide::Owner => 0,
+        FaceSide::Neighbor => 1,
+    }
+}
+
+/// Shared `_fcse_*` name allocator for one kernel body. Sibling scopes emit
+/// `let`s into the same WGSL block, so ids must be monotonic across scopes
+/// (mirrors how one `CseBuilder` is reused for all `_cse_*` names).
+struct FaceCse {
+    next_id: u32,
+}
+
+impl FaceCse {
+    fn new() -> Self {
+        Self { next_id: 0 }
+    }
+
+    /// Lower `roots` with hash-consed deduplication. Returns the hoisted
+    /// `let _fcse_N = ...;` prelude (dependency-ordered) and the rewritten
+    /// roots. The prelude must be emitted into the exact block that receives
+    /// the downstream `cse.eliminate` statements for these roots.
+    fn lower_scalars<'a>(
+        &mut self,
+        roots: &[&'a FaceScalarExpr],
+        ctx: &LowerCtx<'a>,
+    ) -> (Vec<Stmt>, Vec<Expr>) {
+        let mut scope = FaceCseScope::enabled(self.next_id);
+        for root in roots {
+            scope.scan_scalar(root);
+        }
+        for root in roots {
+            scope.count_scalar(root);
+        }
+        let exprs: Vec<Expr> = roots
+            .iter()
+            .map(|root| lower_scalar(root, ctx, &mut scope))
+            .collect();
+        self.next_id = scope.next_id;
+        // Expr-level simplifications (e.g. dot with a unit basis vector) can
+        // drop a lowered subtree after it was hoisted; prune `let`s nothing
+        // references so the kernel never evaluates dead code.
+        let stmts = prune_unused_lets(scope.sink, &exprs);
+        (stmts, exprs)
+    }
+}
+
+/// One hash-consing scope (see [`FaceCse::lower_scalars`]).
+struct FaceCseScope<'a> {
+    enabled: bool,
+    /// Node address -> (structural hash, weight). The trees are `Box`-based,
+    /// so every duplicate copy has its own address; the scan pass fills this
+    /// for every node reachable from the scope's roots.
+    scalar_info: HashMap<usize, (u64, u32)>,
+    vec2_info: HashMap<usize, (u64, u32)>,
+    /// Structural hash -> occurrences. Counting recurses into a scalar
+    /// subtree only on its FIRST occurrence: later copies lower to a memo
+    /// hit, so their children are never materialized again. vec2 nodes are
+    /// not memoized (their lowering re-derives the small component skeleton
+    /// per copy), so counting always recurses through them.
+    counts: HashMap<u64, u32>,
+    /// Structural hash -> (lowered form, representative subtree). Heavy
+    /// subtrees map to `Expr::ident("_fcse_N")` of their hoisted `let`;
+    /// light duplicates map to the (Arc-shared) lowered expression itself so
+    /// re-lowering is skipped without changing the emitted text. The
+    /// representative is compared structurally on every lookup, so a 64-bit
+    /// hash collision can only cost a missed dedup, never a wrong rewrite.
+    memo: HashMap<u64, (Expr, &'a FaceScalarExpr)>,
+    /// Hoisted `let _fcse_N = ...;` statements (dependency-ordered).
+    sink: Vec<Stmt>,
+    next_id: u32,
+}
+
+impl<'a> FaceCseScope<'a> {
+    fn enabled(next_id: u32) -> Self {
+        Self {
+            enabled: true,
+            scalar_info: HashMap::new(),
+            vec2_info: HashMap::new(),
+            counts: HashMap::new(),
+            memo: HashMap::new(),
+            sink: Vec::new(),
+            next_id,
+        }
+    }
+
+    /// Inert scope for lowerings without a hash-consing region (call sites
+    /// that never ran `cse.eliminate` either); lowering behaves exactly as
+    /// it did before the memo existed.
+    fn disabled() -> Self {
+        Self {
+            enabled: false,
+            ..Self::enabled(0)
+        }
+    }
+
+    // ── scan: bottom-up structural hash + subtree weight per node copy ──
+
+    fn scan_scalar(&mut self, e: &'a FaceScalarExpr) -> (u64, u32) {
+        let key = e as *const FaceScalarExpr as usize;
+        if let Some(&info) = self.scalar_info.get(&key) {
+            return info;
+        }
+        use FaceScalarExpr as S;
+        let info = match e {
+            S::Literal(v) => (fcse_mix(1, u64::from(v.to_bits())), 1),
+            S::Builtin(b) => (fcse_mix(2, *b as u64), 1),
+            S::Constant { name } => (fcse_str(3, name), 1),
+            S::LowMachParam(p) => (fcse_mix(4, *p as u64), 1),
+            S::State { side, name } => (fcse_mix(fcse_side(*side), fcse_str(5, name)), 1),
+            S::Primitive { side, name } => (
+                fcse_mix(fcse_side(*side), fcse_str(6, name)),
+                FCSE_PRIMITIVE_WEIGHT,
+            ),
+            S::MeshFlux => (fcse_mix(7, 7), 1),
+            S::Add(a, b) => self.scan_scalar2(8, a, b),
+            S::Sub(a, b) => self.scan_scalar2(9, a, b),
+            S::Mul(a, b) => self.scan_scalar2(10, a, b),
+            S::Div(a, b) => self.scan_scalar2(11, a, b),
+            S::Max(a, b) => self.scan_scalar2(12, a, b),
+            S::Min(a, b) => self.scan_scalar2(13, a, b),
+            S::Lerp(a, b) => self.scan_scalar2(14, a, b),
+            S::Neg(a) => self.scan_scalar1(15, a),
+            S::Abs(a) => self.scan_scalar1(16, a),
+            S::Sqrt(a) => self.scan_scalar1(17, a),
+            S::Dot(a, b) => {
+                let (ha, wa) = self.scan_vec2(a);
+                let (hb, wb) = self.scan_vec2(b);
+                (
+                    fcse_mix(fcse_mix(18, ha), hb),
+                    1u32.saturating_add(wa).saturating_add(wb),
+                )
+            }
+        };
+        self.scalar_info.insert(key, info);
+        info
+    }
+
+    fn scan_scalar1(&mut self, tag: u64, a: &'a FaceScalarExpr) -> (u64, u32) {
+        let (ha, wa) = self.scan_scalar(a);
+        (fcse_mix(tag, ha), 1u32.saturating_add(wa))
+    }
+
+    fn scan_scalar2(
+        &mut self,
+        tag: u64,
+        a: &'a FaceScalarExpr,
+        b: &'a FaceScalarExpr,
+    ) -> (u64, u32) {
+        let (ha, wa) = self.scan_scalar(a);
+        let (hb, wb) = self.scan_scalar(b);
+        (
+            fcse_mix(fcse_mix(tag, ha), hb),
+            1u32.saturating_add(wa).saturating_add(wb),
+        )
+    }
+
+    fn scan_vec2(&mut self, e: &'a FaceVec2Expr) -> (u64, u32) {
+        let key = e as *const FaceVec2Expr as usize;
+        if let Some(&info) = self.vec2_info.get(&key) {
+            return info;
+        }
+        use FaceVec2Expr as V;
+        let info = match e {
+            V::Builtin(FaceVec2Builtin::Normal) => (fcse_mix(32, 0), 1),
+            V::Builtin(FaceVec2Builtin::CellToFace { side }) => {
+                (fcse_mix(32, 1 + fcse_side(*side)), 1)
+            }
+            V::Vec2(x, y) => {
+                let (hx, wx) = self.scan_scalar(x);
+                let (hy, wy) = self.scan_scalar(y);
+                (
+                    fcse_mix(fcse_mix(33, hx), hy),
+                    1u32.saturating_add(wx).saturating_add(wy),
+                )
+            }
+            V::StateVec2 { side, field } => (fcse_mix(fcse_side(*side), fcse_str(34, field)), 1),
+            V::CellStateVec2 { side, field } => {
+                (fcse_mix(fcse_side(*side), fcse_str(35, field)), 1)
+            }
+            V::Add(a, b) => self.scan_vec2_2(36, a, b),
+            V::Sub(a, b) => self.scan_vec2_2(37, a, b),
+            V::Lerp(a, b) => self.scan_vec2_2(38, a, b),
+            V::Neg(a) => {
+                let (ha, wa) = self.scan_vec2(a);
+                (fcse_mix(39, ha), 1u32.saturating_add(wa))
+            }
+            V::MulScalar(v, s) => {
+                let (hv, wv) = self.scan_vec2(v);
+                let (hs, ws) = self.scan_scalar(s);
+                (
+                    fcse_mix(fcse_mix(40, hv), hs),
+                    1u32.saturating_add(wv).saturating_add(ws),
+                )
+            }
+        };
+        self.vec2_info.insert(key, info);
+        info
+    }
+
+    fn scan_vec2_2(&mut self, tag: u64, a: &'a FaceVec2Expr, b: &'a FaceVec2Expr) -> (u64, u32) {
+        let (ha, wa) = self.scan_vec2(a);
+        let (hb, wb) = self.scan_vec2(b);
+        (
+            fcse_mix(fcse_mix(tag, ha), hb),
+            1u32.saturating_add(wa).saturating_add(wb),
+        )
+    }
+
+    // ── count: occurrences over the deduplicated dag ──
+
+    fn count_scalar(&mut self, e: &'a FaceScalarExpr) {
+        let key = e as *const FaceScalarExpr as usize;
+        let (h, _) = self.scalar_info[&key];
+        let c = self.counts.entry(h).or_insert(0);
+        *c += 1;
+        if *c > 1 {
+            // Later occurrences lower to a memo hit; their children are
+            // never materialized again, so don't inflate the child counts.
+            return;
+        }
+        use FaceScalarExpr as S;
+        match e {
+            S::Literal(_)
+            | S::Builtin(_)
+            | S::Constant { .. }
+            | S::LowMachParam(_)
+            | S::State { .. }
+            | S::Primitive { .. }
+            | S::MeshFlux => {}
+            S::Add(a, b)
+            | S::Sub(a, b)
+            | S::Mul(a, b)
+            | S::Div(a, b)
+            | S::Max(a, b)
+            | S::Min(a, b)
+            | S::Lerp(a, b) => {
+                self.count_scalar(a);
+                self.count_scalar(b);
+            }
+            S::Neg(a) | S::Abs(a) | S::Sqrt(a) => self.count_scalar(a),
+            S::Dot(a, b) => {
+                self.count_vec2(a);
+                self.count_vec2(b);
+            }
+        }
+    }
+
+    /// vec2 nodes are never memoized, so every copy's scalar children WILL
+    /// be lowered once per copy — always recurse so those children are
+    /// counted per copy.
+    fn count_vec2(&mut self, e: &'a FaceVec2Expr) {
+        use FaceVec2Expr as V;
+        match e {
+            V::Builtin(_) | V::StateVec2 { .. } | V::CellStateVec2 { .. } => {}
+            V::Vec2(x, y) => {
+                self.count_scalar(x);
+                self.count_scalar(y);
+            }
+            V::Add(a, b) | V::Sub(a, b) | V::Lerp(a, b) => {
+                self.count_vec2(a);
+                self.count_vec2(b);
+            }
+            V::Neg(a) => self.count_vec2(a),
+            V::MulScalar(v, s) => {
+                self.count_vec2(v);
+                self.count_scalar(s);
+            }
+        }
+    }
+
+    // ── memo ──
+
+    /// If `e` was already lowered in this scope, return its shared form.
+    fn memo_hit(&self, e: &'a FaceScalarExpr) -> Option<Expr> {
+        if !self.enabled {
+            return None;
+        }
+        let key = e as *const FaceScalarExpr as usize;
+        let &(h, _) = self.scalar_info.get(&key)?;
+        let (cached, rep) = self.memo.get(&h)?;
+        // Structural verification: a hash collision must never alias two
+        // different subtrees (worst case we just miss the dedup).
+        if *rep == e {
+            Some(cached.clone())
+        } else {
+            None
+        }
+    }
+
+    /// Record the lowering of a duplicated subtree: hoist heavy ones into a
+    /// `let _fcse_N` in the sink, cache light ones as-is (Arc-shared).
+    fn maybe_hoist(&mut self, e: &'a FaceScalarExpr, lowered: Expr) -> Expr {
+        if !self.enabled {
+            return lowered;
+        }
+        let key = e as *const FaceScalarExpr as usize;
+        let Some(&(h, w)) = self.scalar_info.get(&key) else {
+            return lowered;
+        };
+        if self.counts.get(&h).copied().unwrap_or(0) < FCSE_MIN_COUNT
+            || self.memo.contains_key(&h)
+        {
+            return lowered;
+        }
+        use cfd2_ir::ast::ExprNode;
+        let trivial = matches!(lowered.node(), ExprNode::Ident(_) | ExprNode::Literal(_));
+        if w < FCSE_MIN_WEIGHT || trivial {
+            // Duplicated but not worth a `let`: cache the lowered form so
+            // later occurrences skip re-lowering (emitted text unchanged).
+            self.memo.insert(h, (lowered.clone(), e));
+            return lowered;
+        }
+        let name = format!("_fcse_{}", self.next_id);
+        self.next_id += 1;
+        self.sink.push(Stmt::Let {
+            name: name.clone(),
+            ty: None,
+            expr: lowered,
+        });
+        let ident = Expr::ident(name);
+        self.memo.insert(h, (ident.clone(), e));
+        ident
+    }
+}
+
+/// Drop hoisted `let`s that ended up unreferenced (an Expr-level
+/// simplification can discard a subtree after it was hoisted).
+fn prune_unused_lets(sink: Vec<Stmt>, roots: &[Expr]) -> Vec<Stmt> {
+    fn collect_idents(expr: &Expr, out: &mut HashSet<String>) {
+        use cfd2_ir::ast::ExprNode;
+        match expr.node() {
+            ExprNode::Literal(_) => {}
+            ExprNode::Ident(name) => {
+                out.insert(name.clone());
+            }
+            ExprNode::Field { base, .. } => collect_idents(base, out),
+            ExprNode::Index { base, index } => {
+                collect_idents(base, out);
+                collect_idents(index, out);
+            }
+            ExprNode::Unary { expr: inner, .. } => collect_idents(inner, out),
+            ExprNode::Binary { left, right, .. } => {
+                collect_idents(left, out);
+                collect_idents(right, out);
+            }
+            ExprNode::Call { callee, args } => {
+                collect_idents(callee, out);
+                for arg in args {
+                    collect_idents(arg, out);
+                }
+            }
+        }
+    }
+
+    let mut used = HashSet::new();
+    for root in roots {
+        collect_idents(root, &mut used);
+    }
+    let mut kept: Vec<Stmt> = Vec::with_capacity(sink.len());
+    for stmt in sink.into_iter().rev() {
+        let keep = match &stmt {
+            Stmt::Let { name, expr, .. } => {
+                if used.contains(name) {
+                    collect_idents(expr, &mut used);
+                    true
+                } else {
+                    false
+                }
+            }
+            _ => true,
+        };
+        if keep {
+            kept.push(stmt);
+        }
+    }
+    kept.reverse();
+    kept
+}
+
 struct LowerCtx<'a> {
     resolver: &'a dyn OffsetResolver,
     primitives: &'a HashMap<&'a str, &'a Expr>,
@@ -2047,7 +2506,11 @@ impl<'a> LowerCtx<'a> {
     }
 }
 
-fn lower_vec2<'a>(expr: &'a FaceVec2Expr, ctx: &LowerCtx<'a>) -> typed::VecExpr<2> {
+fn lower_vec2<'a>(
+    expr: &'a FaceVec2Expr,
+    ctx: &LowerCtx<'a>,
+    cse: &mut FaceCseScope<'a>,
+) -> typed::VecExpr<2> {
     match expr {
         FaceVec2Expr::Builtin(FaceVec2Builtin::Normal) => {
             typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))
@@ -2062,9 +2525,10 @@ fn lower_vec2<'a>(expr: &'a FaceVec2Expr, ctx: &LowerCtx<'a>) -> typed::VecExpr<
             };
             face.sub(&center)
         }
-        FaceVec2Expr::Vec2(x, y) => {
-            typed::VecExpr::<2>::from_components([lower_scalar(x, ctx), lower_scalar(y, ctx)])
-        }
+        FaceVec2Expr::Vec2(x, y) => typed::VecExpr::<2>::from_components([
+            lower_scalar(x, ctx, cse),
+            lower_scalar(y, ctx, cse),
+        ]),
         FaceVec2Expr::StateVec2 { side, field } => {
             let x = ctx.state_scalar(*side, field.as_str(), XY::X.to_usize() as u32);
             let y = ctx.state_scalar(*side, field.as_str(), XY::Y.to_usize() as u32);
@@ -2124,8 +2588,8 @@ fn lower_vec2<'a>(expr: &'a FaceVec2Expr, ctx: &LowerCtx<'a>) -> typed::VecExpr<
             ])
         }
         FaceVec2Expr::Add(a, b) => {
-            let a = lower_vec2(a, ctx);
-            let b = lower_vec2(b, ctx);
+            let a = lower_vec2(a, ctx, cse);
+            let b = lower_vec2(b, ctx, cse);
             a.add(&b)
         }
         FaceVec2Expr::Sub(a, b) => {
@@ -2146,15 +2610,17 @@ fn lower_vec2<'a>(expr: &'a FaceVec2Expr, ctx: &LowerCtx<'a>) -> typed::VecExpr<
                 return b_center.sub(&a_center);
             }
 
-            let a = lower_vec2(a, ctx);
-            let b = lower_vec2(b, ctx);
+            let a = lower_vec2(a, ctx, cse);
+            let b = lower_vec2(b, ctx, cse);
             a.sub(&b)
         }
-        FaceVec2Expr::Neg(a) => lower_vec2(a, ctx).neg(),
-        FaceVec2Expr::MulScalar(v, s) => lower_vec2(v, ctx).mul_scalar(lower_scalar(s, ctx)),
+        FaceVec2Expr::Neg(a) => lower_vec2(a, ctx, cse).neg(),
+        FaceVec2Expr::MulScalar(v, s) => {
+            lower_vec2(v, ctx, cse).mul_scalar(lower_scalar(s, ctx, cse))
+        }
         FaceVec2Expr::Lerp(a, b) => {
-            let a = lower_vec2(a, ctx);
-            let b = lower_vec2(b, ctx);
+            let a = lower_vec2(a, ctx, cse);
+            let b = lower_vec2(b, ctx, cse);
             let l = Expr::ident("lambda");
             let lo = Expr::ident("lambda_other");
             a.mul_scalar(l).add(&b.mul_scalar(lo))
@@ -2376,9 +2842,16 @@ fn apply_slipwall_velocity_reflection_resolver(
 pub(crate) static KGEN_LS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub(crate) static KGEN_LP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-fn lower_scalar<'a>(expr: &'a FaceScalarExpr, ctx: &LowerCtx<'a>) -> Expr {
+fn lower_scalar<'a>(
+    expr: &'a FaceScalarExpr,
+    ctx: &LowerCtx<'a>,
+    cse: &mut FaceCseScope<'a>,
+) -> Expr {
     KGEN_LS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    match expr {
+    if let Some(hit) = cse.memo_hit(expr) {
+        return hit;
+    }
+    let lowered = match expr {
         FaceScalarExpr::Literal(v) => Expr::lit_f32(*v),
         FaceScalarExpr::Builtin(b) => match b {
             FaceScalarBuiltin::Area => Expr::ident("area"),
@@ -2405,24 +2878,27 @@ fn lower_scalar<'a>(expr: &'a FaceScalarExpr, ctx: &LowerCtx<'a>) -> Expr {
             });
             lower_primitive_expr_at_side(prim, ctx, *side)
         }
-        FaceScalarExpr::Add(a, b) => lower_scalar(a, ctx) + lower_scalar(b, ctx),
-        FaceScalarExpr::Sub(a, b) => lower_scalar(a, ctx) - lower_scalar(b, ctx),
-        FaceScalarExpr::Mul(a, b) => lower_scalar(a, ctx) * lower_scalar(b, ctx),
-        FaceScalarExpr::Div(a, b) => lower_scalar(a, ctx) / lower_scalar(b, ctx),
-        FaceScalarExpr::Neg(a) => -lower_scalar(a, ctx),
-        FaceScalarExpr::Abs(a) => dsl::abs(lower_scalar(a, ctx)),
-        FaceScalarExpr::Sqrt(a) => Expr::call_named("sqrt", vec![lower_scalar(a, ctx)]),
-        FaceScalarExpr::Max(a, b) => dsl::max(lower_scalar(a, ctx), lower_scalar(b, ctx)),
-        FaceScalarExpr::Min(a, b) => {
-            Expr::call_named("min", vec![lower_scalar(a, ctx), lower_scalar(b, ctx)])
+        FaceScalarExpr::Add(a, b) => lower_scalar(a, ctx, cse) + lower_scalar(b, ctx, cse),
+        FaceScalarExpr::Sub(a, b) => lower_scalar(a, ctx, cse) - lower_scalar(b, ctx, cse),
+        FaceScalarExpr::Mul(a, b) => lower_scalar(a, ctx, cse) * lower_scalar(b, ctx, cse),
+        FaceScalarExpr::Div(a, b) => lower_scalar(a, ctx, cse) / lower_scalar(b, ctx, cse),
+        FaceScalarExpr::Neg(a) => -lower_scalar(a, ctx, cse),
+        FaceScalarExpr::Abs(a) => dsl::abs(lower_scalar(a, ctx, cse)),
+        FaceScalarExpr::Sqrt(a) => Expr::call_named("sqrt", vec![lower_scalar(a, ctx, cse)]),
+        FaceScalarExpr::Max(a, b) => {
+            dsl::max(lower_scalar(a, ctx, cse), lower_scalar(b, ctx, cse))
         }
+        FaceScalarExpr::Min(a, b) => Expr::call_named(
+            "min",
+            vec![lower_scalar(a, ctx, cse), lower_scalar(b, ctx, cse)],
+        ),
         FaceScalarExpr::Lerp(a, b) => {
-            lower_scalar(a, ctx) * Expr::ident("lambda")
-                + lower_scalar(b, ctx) * Expr::ident("lambda_other")
+            lower_scalar(a, ctx, cse) * Expr::ident("lambda")
+                + lower_scalar(b, ctx, cse) * Expr::ident("lambda_other")
         }
         FaceScalarExpr::Dot(a, b) => {
-            let a = lower_vec2(a, ctx);
-            let b = lower_vec2(b, ctx);
+            let a = lower_vec2(a, ctx, cse);
+            let b = lower_vec2(b, ctx, cse);
             a.dot(&b)
         }
         // ALE volumetric mesh flux for this face (owner-signed, like `fluxes`).
@@ -2438,7 +2914,8 @@ fn lower_scalar<'a>(expr: &'a FaceScalarExpr, ctx: &LowerCtx<'a>) -> Expr {
             );
             dsl::array_access("mesh_fluxes", Expr::ident("idx"))
         }
-    }
+    };
+    cse.maybe_hoist(expr, lowered)
 }
 
 fn flux_spec_uses_low_mach(spec: &FluxModuleKernelSpec) -> bool {

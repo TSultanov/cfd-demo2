@@ -632,10 +632,16 @@ fn axpy(y: &mut [f64], a: f64, x: &[f64]) {
     }
 }
 
-/// Restarted GMRES on the banded block operator. Block-Jacobi (a fixed linear
-/// operator) runs plain LEFT-preconditioned GMRES; the SIMPLE Schur (whose inner
-/// heavy-ball safeguard makes it data-dependent) runs flexible RIGHT-
-/// preconditioned GMRES ([`banded_fgmres`]). Returns `(x_f32, relative residual)`.
+/// Restarted GMRES on the banded block operator. BOTH preconditioners run
+/// through the RIGHT-preconditioned flexible solve ([`banded_fgmres`]): a fixed
+/// linear operator (block-Jacobi) is a valid FGMRES preconditioner, and right
+/// preconditioning keeps every convergence decision on the TRUE residual
+/// `||b − A x||` — the old LEFT-preconditioned block-Jacobi path decided on
+/// `||M⁻¹(b − A x)|| / ||b||`, a mixed norm that is not scale-invariant (block
+/// diagonals ≫ 1, e.g. small-dt `vol/dt`, produced FALSE convergence; diagonals
+/// ≪ 1, e.g. all-Mach `psi`~1e-5 pressure rows, burned the whole budget).
+/// Returns `(x_f32, relative residual)`.
+#[allow(clippy::too_many_arguments)]
 pub fn banded_gmres(
     a: &[f32],
     nx: usize,
@@ -670,115 +676,80 @@ pub fn banded_gmres_t(
     amg_cache: Option<&StructuredAmgCache>,
 ) -> (Vec<f32>, f64, u32) {
     let built = build(a, nx, ny, s, precond);
-    if matches!(built, Built::Schur(_)) {
-        return banded_fgmres(
-            a, nx, ny, s, b, &built, restart, max_outer, tol, threads, amg_cache,
-        );
-    }
-    let _ = amg_cache;
-    let n = nx * ny * s;
-    let b64: Vec<f64> = b.iter().map(|&v| v as f64).collect();
-    let bnorm = pnorm(threads, &b64).max(1e-30);
-    let mut x = vec![0.0f64; n];
-    // Total inner (Arnoldi) iterations across restart cycles (GUI "iters=.." readout).
-    let mut total_iters = 0u32;
-
-    for _outer in 0..max_outer {
-        // r0 = M^{-1}(b - A x)
-        let ax = spmv_t(a, nx, ny, s, &x, threads);
-        let r0: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-        let r = apply(&built, a, nx, ny, s, &r0, threads, None);
-        let beta = pnorm(threads, &r);
-        if beta / bnorm <= tol {
-            return (x.iter().map(|&v| v as f32).collect(), beta / bnorm, total_iters);
-        }
-
-        let m = restart;
-        let mut v: Vec<Vec<f64>> = Vec::with_capacity(m + 1);
-        v.push(scale(&r, 1.0 / beta));
-        let mut h = vec![vec![0.0f64; m]; m + 1];
-        let mut g = vec![0.0f64; m + 1];
-        g[0] = beta;
-        let mut cs = vec![0.0f64; m];
-        let mut sn = vec![0.0f64; m];
-        let mut k_used = 0;
-
-        for k in 0..m {
-            // w = M^{-1} A v_k
-            let av = spmv_t(a, nx, ny, s, &v[k], threads);
-            let mut w = apply(&built, a, nx, ny, s, &av, threads, None);
-            for i in 0..=k {
-                h[i][k] = pdot(threads, &w, &v[i]);
-                axpy(&mut w, -h[i][k], &v[i]);
-            }
-            h[k + 1][k] = pnorm(threads, &w);
-            if h[k + 1][k] > 1e-14 {
-                v.push(scale(&w, 1.0 / h[k + 1][k]));
-            } else {
-                v.push(vec![0.0f64; n]);
-            }
-            for i in 0..k {
-                let temp = cs[i] * h[i][k] + sn[i] * h[i + 1][k];
-                h[i + 1][k] = -sn[i] * h[i][k] + cs[i] * h[i + 1][k];
-                h[i][k] = temp;
-            }
-            let denom = (h[k][k] * h[k][k] + h[k + 1][k] * h[k + 1][k]).sqrt();
-            if denom < 1e-300 {
-                k_used = k;
-                break;
-            }
-            cs[k] = h[k][k] / denom;
-            sn[k] = h[k + 1][k] / denom;
-            h[k][k] = cs[k] * h[k][k] + sn[k] * h[k + 1][k];
-            h[k + 1][k] = 0.0;
-            g[k + 1] = -sn[k] * g[k];
-            g[k] = cs[k] * g[k];
-            k_used = k + 1;
-            if g[k + 1].abs() / bnorm <= tol {
-                break;
-            }
-        }
-        total_iters += k_used as u32;
-
-        let kk = k_used;
-        let mut y = vec![0.0f64; kk];
-        for i in (0..kk).rev() {
-            let mut sm = g[i];
-            for jj in (i + 1)..kk {
-                sm -= h[i][jj] * y[jj];
-            }
-            y[i] = if h[i][i].abs() > 1e-300 { sm / h[i][i] } else { 0.0 };
-        }
-        for i in 0..kk {
-            axpy(&mut x, y[i], &v[i]);
-        }
-
-        let ax = spmv_t(a, nx, ny, s, &x, threads);
-        let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-        if pnorm(threads, &res) / bnorm <= tol {
-            return (
-                x.iter().map(|&v| v as f32).collect(),
-                pnorm(threads, &res) / bnorm,
-                total_iters,
-            );
-        }
-    }
-    let ax = spmv_t(a, nx, ny, s, &x, threads);
-    let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-    let rel = pnorm(threads, &res) / bnorm;
-    if std::env::var("CFD2_STRUCT_SOLVE_DEBUG").is_ok() {
-        eprintln!(
-            "[banded] MAXED max_outer={max_outer} restart={restart} rel_res={rel:.3e} (tol={tol:.1e} not reached)"
-        );
-    }
-    (x.iter().map(|&v| v as f32).collect(), rel, total_iters)
+    banded_fgmres(a, nx, ny, s, b, &built, restart, max_outer, tol, threads, amg_cache)
 }
 
-/// Restarted, RIGHT-preconditioned FLEXIBLE GMRES — FGMRES(`restart`) — for the
-/// Schur preconditioner, whose inner heavy-ball safeguard makes `M⁻¹` vary per
-/// apply. Stores the preconditioned Krylov vectors `z_k = M⁻¹ v_k` and updates
-/// `x = x0 + Z y`, so a data-dependent preconditioner does not corrupt the
-/// Arnoldi recurrence (unlike plain GMRES). Mirrors `cpu::linalg::fgmres`.
+/// TOTAL Arnoldi-iteration budget for one banded coupled solve. The budget used
+/// to be `max_outer` restart CYCLES (200 x 60 = 12,000 iterations): a
+/// pathological solve (non-finite operator, indefinite startup transient)
+/// stalled for minutes before returning. The unstructured fgmres budget is 200
+/// TOTAL iterations; the structured solve starts cold (x0 = 0, no warm start)
+/// and its per-block exit is stricter, so it gets several restart cycles more.
+/// `CFD2_STRUCT_LINEAR_MAXIT` overrides.
+fn max_total_iters(restart: usize, max_outer: usize) -> u32 {
+    std::env::var("CFD2_STRUCT_LINEAR_MAXIT")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .filter(|&v| v > 0)
+        .unwrap_or_else(|| (restart.saturating_mul(max_outer)).min(600) as u32)
+        .max(1)
+}
+
+/// Per-unknown-rank residual scales: `scale[c] = ||b_c||` over cells (the
+/// unstructured convention is `min(||b||, ||r0||)`; the structured solve starts
+/// from `x0 = 0`, so `r0 == b` and the min is `||b||`). A rank whose RHS is
+/// identically zero falls back to the AGGREGATE `bnorm`, so cross-coupling
+/// residuals in that block are still checked (loosely, exactly as the old
+/// aggregate test did) without stalling on a 0/0.
+fn block_scales(b: &[f64], s: usize, bnorm: f64) -> Vec<f64> {
+    let mut sums = vec![0.0f64; s];
+    for (i, &v) in b.iter().enumerate() {
+        sums[i % s] += v * v;
+    }
+    sums.iter()
+        .map(|&q| {
+            let n = q.sqrt();
+            if n > 1e-300 {
+                n
+            } else {
+                bnorm
+            }
+        })
+        .collect()
+}
+
+/// Max over unknown ranks of `||r_c|| / scale_c` — the per-BLOCK true relative
+/// residual every convergence decision uses. The AGGREGATE norm is dominated by
+/// the momentum rows; requiring each block to meet tol against its own scale is
+/// what stops the pressure block from being left with O(1) relative error (the
+/// "converged" channel with a ~30% delta-p bias). Returns `+inf` on any
+/// non-finite entry (a poisoned residual must never read as converged).
+fn block_rel_residual(r: &[f64], scales: &[f64], s: usize) -> f64 {
+    let mut sums = vec![0.0f64; s];
+    for (i, &v) in r.iter().enumerate() {
+        sums[i % s] += v * v;
+    }
+    let mut worst = 0.0f64;
+    for (c, &q) in sums.iter().enumerate() {
+        let rel = q.sqrt() / scales[c];
+        if !rel.is_finite() {
+            return f64::INFINITY;
+        }
+        worst = worst.max(rel);
+    }
+    worst
+}
+
+/// Restarted, RIGHT-preconditioned FLEXIBLE GMRES — FGMRES(`restart`) — the
+/// single banded coupled solve (both block-Jacobi and the Schur variants; the
+/// Schur inner heavy-ball safeguard makes `M⁻¹` vary per apply, which plain
+/// GMRES cannot tolerate but FGMRES can — and a FIXED `M⁻¹` is trivially valid).
+/// Stores the preconditioned Krylov vectors `z_k = M⁻¹ v_k` and updates
+/// `x = x0 + Z y`. Mirrors `cpu::linalg::fgmres` (loop shape, best-iterate
+/// restore, non-finite bail, projection-trust), with one structured addition:
+/// convergence is decided PER UNKNOWN BLOCK on the true residual
+/// (see [`block_rel_residual`]), and the returned rel-res is the max over
+/// blocks.
 #[allow(clippy::too_many_arguments)]
 fn banded_fgmres(
     a: &[f32],
@@ -795,11 +766,17 @@ fn banded_fgmres(
 ) -> (Vec<f32>, f64, u32) {
     let n = nx * ny * s;
     let b64: Vec<f64> = b.iter().map(|&v| v as f64).collect();
-    let bnorm = pnorm(threads, &b64).max(1e-30);
+    let bnorm = pnorm(threads, &b64).max(1e-300);
+    // Per-block scales (pressure rows get their OWN scale) + the strict scale: a
+    // projection residual below `tol * strict_scale` implies EVERY block is under
+    // tol (||r_c|| <= ||r||), so it is an always-trusted in-cycle exit.
+    let blk_scales = block_scales(&b64, s, bnorm);
+    let strict_scale = blk_scales.iter().cloned().fold(f64::INFINITY, f64::min).max(1e-300);
     let mut x = vec![0.0f64; n];
     // Total inner (Arnoldi) iterations across restart cycles — the GMRES iteration
     // count reported to the GUI "Linear: iters=.." readout.
     let mut total_iters = 0u32;
+    let max_total = max_total_iters(restart, max_outer);
 
     // Best-iterate / monotonicity guard (mirrors the unstructured fgmres). A
     // data-dependent preconditioner — the Schur heavy-ball safeguard, or the AMG
@@ -811,6 +788,14 @@ fn banded_fgmres(
     let mut best_x = x.clone();
     let mut best_beta = f64::INFINITY;
     const RESTART_GROWTH_TOL: f64 = 1.25;
+    // Projection trust (unstructured-fgmres pattern): the cheap in-cycle Givens
+    // estimate is an AGGREGATE norm, so it may propose a cycle break that the
+    // head's per-block check rejects. One rejection flips trust off for the rest
+    // of the solve — later cycles run until the strict (per-block-sufficient)
+    // projection threshold or the restart length, so an aggregate-vs-block gap
+    // cannot ping-pong in 1-iteration cycles.
+    let mut trust_projection = true;
+    let mut proj_broke_early = false;
 
     // Reuse the CACHED AMG hierarchy (aggregation is sparsity-only, built once from
     // a canonical Poisson seed — see `build_pressure_amg_hierarchy`) and re-Galerkin
@@ -849,31 +834,72 @@ fn banded_fgmres(
         None
     };
 
-    for _outer in 0..max_outer {
-        // Right-preconditioned: the Arnoldi space is built on the UNpreconditioned
-        // residual r0 = b - A x.
+    // Per-block true relative residual of the CANDIDATE iterate (`x` at the exit
+    // points below) and the aggregate scale for the trusted in-cycle fast-path.
+    let mut rel = f64::INFINITY;
+    let mut agg_scale: Option<f64> = None;
+    // Recompute `rel` for a RESTORED iterate on the bail paths (one extra SpMV;
+    // the common converged/budget exits reuse the head's residual).
+    let rel_at = |xv: &[f64]| -> f64 {
+        let ax = spmv_t(a, nx, ny, s, xv, threads);
+        let r: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
+        block_rel_residual(&r, &blk_scales, s)
+    };
+
+    loop {
+        // Restart head: TRUE residual r0 = b - A x. Every convergence / budget /
+        // monotonicity decision is made here (the in-cycle projection may only
+        // PROPOSE a cycle break, verified at the next head).
         let ax = spmv_t(a, nx, ny, s, &x, threads);
         let r0: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
         let beta = pnorm(threads, &r0);
-        // Monotonicity guard: bail to the best iterate if this outer's starting
-        // residual is non-finite or has grown past 1.25x the best seen — the
-        // previous cycle's (data-dependent) correction diverged; do not compound it.
-        if !beta.is_finite() || beta > best_beta * RESTART_GROWTH_TOL {
-            let ax = spmv_t(a, nx, ny, s, &best_x, threads);
-            let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-            return (
-                best_x.iter().map(|&v| v as f32).collect(),
-                pnorm(threads, &res) / bnorm,
-                total_iters,
-            );
+        // Non-finite bail (unstructured linalg::fgmres parity): a poisoned
+        // operator/rhs must not run the remaining budget nor leak NaN into the
+        // state. Restore the best (finite) iterate — the zero initial guess if
+        // nothing better was seen — and report a clearly-unconverged residual.
+        if !beta.is_finite() {
+            if proj_broke_early {
+                // A distrusted projection break may have corrupted x; retry from
+                // the best iterate with the projection distrusted.
+                x.copy_from_slice(&best_x);
+                trust_projection = false;
+                proj_broke_early = false;
+                continue;
+            }
+            x.copy_from_slice(&best_x);
+            rel = if best_beta.is_finite() { rel_at(&x) } else { f64::INFINITY };
+            break;
+        }
+        // Monotonicity guard: the previous cycle's (data-dependent) correction
+        // GREW the true residual past 1.25x the best seen — restore and stop
+        // instead of compounding (the observed SchurAmg umax~1e25 transient).
+        if beta > best_beta * RESTART_GROWTH_TOL {
+            if proj_broke_early {
+                x.copy_from_slice(&best_x);
+                trust_projection = false;
+                proj_broke_early = false;
+                continue;
+            }
+            x.copy_from_slice(&best_x);
+            rel = rel_at(&x);
+            break;
         }
         if beta < best_beta {
             best_beta = beta;
             best_x.copy_from_slice(&x);
         }
-        if beta / bnorm <= tol {
-            return (x.iter().map(|&v| v as f32).collect(), beta / bnorm, total_iters);
+        // Per-block convergence decision on the true residual.
+        rel = block_rel_residual(&r0, &blk_scales, s);
+        if rel <= tol || total_iters >= max_total {
+            break;
         }
+        if proj_broke_early {
+            // The aggregate projection claimed convergence but the per-block head
+            // check disagrees: stop trusting the aggregate fast-path this solve.
+            trust_projection = false;
+            proj_broke_early = false;
+        }
+        let rs = *agg_scale.get_or_insert_with(|| bnorm.min(beta).max(1e-300));
 
         let m = restart;
         let mut v: Vec<Vec<f64>> = Vec::with_capacity(m + 1);
@@ -896,6 +922,12 @@ fn banded_fgmres(
                 axpy(&mut w, -h[i][k], &v[i]);
             }
             h[k + 1][k] = pnorm(threads, &w);
+            if !h[k + 1][k].is_finite() {
+                // Poisoned Arnoldi vector: drop the column, let the head decide
+                // on whatever progress the earlier columns made.
+                k_used = k;
+                break;
+            }
             if h[k + 1][k] > 1e-14 {
                 v.push(scale(&w, 1.0 / h[k + 1][k]));
             } else {
@@ -918,11 +950,19 @@ fn banded_fgmres(
             g[k + 1] = -sn[k] * g[k];
             g[k] = cs[k] * g[k];
             k_used = k + 1;
-            if g[k + 1].abs() / bnorm <= tol {
+            total_iters += 1;
+            // In-cycle exits: the strict threshold (projection <= tol times the
+            // SMALLEST block scale) is SUFFICIENT for per-block convergence, so
+            // it is always trusted; the aggregate threshold is the optimistic
+            // fast-path, verified at the head (see `trust_projection`).
+            let proj = g[k + 1].abs();
+            let strict_conv = proj <= tol * strict_scale;
+            let agg_conv = trust_projection && proj <= tol * rs;
+            if strict_conv || agg_conv || !proj.is_finite() || total_iters >= max_total {
+                proj_broke_early = agg_conv && !strict_conv;
                 break;
             }
         }
-        total_iters += k_used as u32;
 
         // Back-substitute for y, update x = x + Z y (preconditioned basis).
         let kk = k_used;
@@ -937,19 +977,19 @@ fn banded_fgmres(
         for i in 0..kk {
             axpy(&mut x, y[i], &z[i]);
         }
-
-        let ax = spmv(a, nx, ny, s, &x);
-        let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-        if norm(&res) / bnorm <= tol {
-            return (x.iter().map(|&v| v as f32).collect(), norm(&res) / bnorm, total_iters);
+        if kk == 0 {
+            // Breakdown with no progress: the head would loop forever on the
+            // same x. Keep the head-computed `rel` for this x and stop.
+            break;
         }
+        // Loop back: the head recomputes the true residual at the restarted
+        // iterate and applies the convergence / budget / monotonicity guards.
     }
-    let ax = spmv(a, nx, ny, s, &x);
-    let res: Vec<f64> = (0..n).map(|i| b64[i] - ax[i]).collect();
-    let rel = norm(&res) / bnorm;
-    if std::env::var("CFD2_STRUCT_SOLVE_DEBUG").is_ok() {
+
+    if rel > tol && std::env::var("CFD2_STRUCT_SOLVE_DEBUG").is_ok() {
         eprintln!(
-            "[banded] MAXED max_outer={max_outer} restart={restart} rel_res={rel:.3e} (tol={tol:.1e} not reached)"
+            "[banded] EXIT unconverged iters={total_iters}/{max_total} restart={restart} \
+             rel_res={rel:.3e} (tol={tol:.1e} not reached)"
         );
     }
     (x.iter().map(|&v| v as f32).collect(), rel, total_iters)
@@ -1016,16 +1056,31 @@ pub fn structured_outer_residuals(
         .iter()
         .map(|comps| {
             let (mut delta, mut scale) = (0.0f32, 0.0f32);
+            let mut finite = true;
             for cell in 0..n_cells {
                 let base = cell * stride;
                 for &off in comps {
                     let a = state[base + off];
                     let b = state_iter[base + off];
+                    // NaN-blindness guard: `f32::max` IGNORES a NaN operand, so a
+                    // diverged (NaN) state would read as delta 0 = "converged" and
+                    // the Picard loop would early-exit on garbage. A non-finite
+                    // entry must read as NOT converged.
+                    if !a.is_finite() || !b.is_finite() {
+                        finite = false;
+                    }
                     delta = delta.max((a - b).abs());
                     scale = scale.max(a.abs());
                 }
+                if !finite {
+                    break;
+                }
             }
-            delta / scale.max(SCALE_FLOOR)
+            if finite {
+                delta / scale.max(SCALE_FLOOR)
+            } else {
+                f32::INFINITY
+            }
         })
         .collect()
 }

@@ -955,6 +955,137 @@ fn allmach_thermal_cylinder_matches() {
     run_case(&c, 0.18);
 }
 
+/// REGRESSION GATE for the IBM impermeable-wall face seal (the interface-leak
+/// fix): the pressure-slot face flux through every solid-fluid mixed face of
+/// the Brinkman cylinder must be ~0 after the flow develops. Pre-fix, the
+/// arithmetic face-d_p blend at the penalty jump re-admitted ~half the
+/// fluid-side Rhie–Chow conductance and the advective HbyA lerp carried
+/// ~0.5x the fluid-side velocity through the wall: measured gross leak
+/// sum|phi_p| / (rho*U_in*D) = 3.9e-1 on the GUI-regime probe (leak velocity
+/// ~0.5x inlet — the red/blue interface speckle). Post-fix the whole-face
+/// seal `phi *= 1 - min(|Sp_own|+|Sp_neigh|, 1)` zeroes every mixed-face flux
+/// EXACTLY, so the bar is far below the pre-fix value but above f32 noise.
+///
+/// `gross` (sum of |phi_p|) is the honest observable — a through-flow leak
+/// enters one side and exits the other, so the signed `net` cancels; both are
+/// asserted. Runs the structured solver only (the cut-cell reference has no
+/// mixed faces).
+fn ibm_interface_leak(case: &Case) -> (f64, f64) {
+    let model = structured_model(case.physics);
+    let s = model.system.unknowns_per_cell() as usize;
+    let mut solver = StructuredModelSolver::with_config(
+        StructuredGrid::new(case.nx, case.ny, case.lx, case.ly),
+        &model,
+        case.dt,
+        case.outer as usize,
+        case.scheme,
+        case.time,
+    )
+    .expect("structured solver");
+    solver.set_engine(cfd2::solver::cpu::CpuEngine::Transpiled, cmp_threads());
+    solver.set_fluid(case.density, case.viscosity);
+    if let Physics::AllMachThermal { psi } = case.physics {
+        seed_named(&mut solver, "psi", psi);
+        seed_named(&mut solver, "psi_precond", psi.max(1.0));
+        seed_named(&mut solver, "rho", case.density);
+        seed_named(&mut solver, "rho_t_ref", case.density * ALLMACH_T_REF);
+        seed_named(&mut solver, "T", ALLMACH_T_REF);
+        seed_named(&mut solver, "t_ref", ALLMACH_T_REF);
+        seed_named(&mut solver, "rho_floor", psi * 1.0e-5);
+        seed_named(&mut solver, "dt_local", 0.0);
+        seed_named(&mut solver, "psi_ref", psi);
+        seed_named(&mut solver, "u_ref", 2.0 * case.inlet.max(0.2));
+        seed_named(&mut solver, "precond_mask", if psi > 0.0 { 1.0 } else { 0.0 });
+    }
+    let (cx, cy, r) = case.obstacle.expect("leak gate needs an obstacle");
+    let pen = solver
+        .field_offset("ibm_penalty_U")
+        .expect("structured IBM model carries ibm_penalty_U");
+    solver.set_state(pen, move |x: f64, y: f64| {
+        if (x - cx).hypot(y - cy) < r {
+            -1.0e5
+        } else {
+            0.0
+        }
+    });
+    let bc = flow_bc(case, s);
+    solver.set_boundaries(move |e, x, y| bc(e, x, y));
+    for _ in 0..case.steps {
+        solver.step();
+    }
+
+    // Mixed-face pressure-slot flux: `fluxes[(idx*4+k)*s + 2]`, k = 0:S 1:W
+    // 2:E 3:N with the normal OUTWARD from `idx` (owner = idx per direction).
+    // Iterate solid cells, take faces whose neighbour is fluid.
+    let sp = solver.state_field(pen);
+    let fluxes = solver.read_buffer("fluxes");
+    let p_comp = 2usize; // coupled unknown order [U_x, U_y, p, ...]
+    let (nx, ny) = (case.nx, case.ny);
+    let (mut gross, mut net, mut mixed) = (0.0f64, 0.0f64, 0usize);
+    for j in 0..ny {
+        for i in 0..nx {
+            let idx = j * nx + i;
+            if sp[idx] == 0.0 {
+                continue;
+            }
+            let nbrs = [
+                (0usize, j > 0, idx.wrapping_sub(nx)),
+                (1, i > 0, idx.wrapping_sub(1)),
+                (2, i + 1 < nx, idx + 1),
+                (3, j + 1 < ny, idx + nx),
+            ];
+            for (k, valid, nb) in nbrs {
+                if !valid || sp[nb] != 0.0 {
+                    continue;
+                }
+                let phi = fluxes[(idx * 4 + k) * s + p_comp] as f64;
+                net += phi;
+                gross += phi.abs();
+                mixed += 1;
+            }
+        }
+    }
+    assert!(mixed > 0, "cylinder must produce mixed faces");
+    let scale = case.density * case.inlet * 2.0 * r;
+    let (gross_n, net_n) = (gross / scale, net / scale);
+    println!(
+        "[leak][{}] gross={gross:.4e} net={net:.4e} over {mixed} mixed faces | gross/(rho*Uin*D)={gross_n:.4e} net/(rho*Uin*D)={net_n:.4e}",
+        case.name
+    );
+    (gross_n, net_n)
+}
+
+#[test]
+fn ibm_interface_mass_flux_sealed_incompressible() {
+    let mut c = channel_incompressible();
+    c.name = "leak_incompressible_cylinder";
+    c.obstacle = Some((0.8, 0.5, 0.16));
+    c.steps = 120;
+    let (gross, net) = ibm_interface_leak(&c);
+    assert!(
+        gross < 1e-3 && net.abs() < 1e-3,
+        "IBM wall leaks: gross {gross:.3e} / net {net:.3e} normalized mass flux \
+         through mixed faces (pre-fix gross ~3.9e-1) — the face d_p / whole-flux \
+         seal is broken"
+    );
+}
+
+#[test]
+fn ibm_interface_mass_flux_sealed_allmach_thermal() {
+    let mut c = channel_incompressible();
+    c.name = "leak_allmach_thermal_cylinder";
+    c.physics = Physics::AllMachThermal { psi: 0.02 };
+    c.obstacle = Some((0.8, 0.5, 0.16));
+    c.steps = 120;
+    let (gross, net) = ibm_interface_leak(&c);
+    assert!(
+        gross < 1e-3 && net.abs() < 1e-3,
+        "IBM wall leaks: gross {gross:.3e} / net {net:.3e} normalized mass flux \
+         through mixed faces (pre-fix gross ~3.9e-1) — the face d_p / whole-flux \
+         seal is broken"
+    );
+}
+
 /// COMPRESSIBLE (density-based, central-upwind): an all-inlet uniform freestream
 /// both backends must maintain exactly. The inlet is specified in the model's
 /// PRIMITIVE-velocity convention (see `compressible_bc`) — the structured solver

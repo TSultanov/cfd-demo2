@@ -695,22 +695,33 @@ fn max_total_iters(restart: usize, max_outer: usize) -> u32 {
         .max(1)
 }
 
-/// Per-unknown-rank residual scales: `scale[c] = ||b_c||` over cells (the
-/// unstructured convention is `min(||b||, ||r0||)`; the structured solve starts
-/// from `x0 = 0`, so `r0 == b` and the min is `||b||`). A rank whose RHS is
-/// identically zero falls back to the AGGREGATE `bnorm`, so cross-coupling
-/// residuals in that block are still checked (loosely, exactly as the old
-/// aggregate test did) without stalling on a 0/0.
+/// Per-unknown-rank residual scales: `scale[c] = ||b_c||` over cells, FLOORED
+/// at `1e-3 × bnorm` (the aggregate). A rank whose RHS is identically zero
+/// falls back to the AGGREGATE `bnorm`, so cross-coupling residuals in that
+/// block are still checked (loosely, exactly as the old aggregate test did)
+/// without stalling on a 0/0.
+///
+/// The floor bounds how much TIGHTER the per-block exit can be than the
+/// aggregate one. The per-block test exists for the Δp-honesty case — a
+/// pressure block sitting ~1-2 decades below the momentum-dominated aggregate
+/// was left with O(1) relative error by the aggregate exit — and the floor
+/// keeps that behavior verbatim for contrasts up to 1e3. But the all-Mach
+/// thermal GUI regime has `||b_p||` 4-6 DECADES below the T-row-dominated
+/// aggregate (T rows ~0.345/cell vs pressure ~1e-7/cell at dt≈0.65): unfloored,
+/// the pressure block demanded an ABSOLUTE residual up to 1e-5× what the
+/// aggregate exit ever asked, so every outer burned a full Krylov budget and
+/// the iteration count quantized at restart-boundary values every step.
 fn block_scales(b: &[f64], s: usize, bnorm: f64) -> Vec<f64> {
     let mut sums = vec![0.0f64; s];
     for (i, &v) in b.iter().enumerate() {
         sums[i % s] += v * v;
     }
+    let floor = 1e-3 * bnorm;
     sums.iter()
         .map(|&q| {
             let n = q.sqrt();
             if n > 1e-300 {
-                n
+                n.max(floor)
             } else {
                 bnorm
             }
@@ -790,12 +801,18 @@ fn banded_fgmres(
     const RESTART_GROWTH_TOL: f64 = 1.25;
     // Projection trust (unstructured-fgmres pattern): the cheap in-cycle Givens
     // estimate is an AGGREGATE norm, so it may propose a cycle break that the
-    // head's per-block check rejects. One rejection flips trust off for the rest
-    // of the solve — later cycles run until the strict (per-block-sufficient)
-    // projection threshold or the restart length, so an aggregate-vs-block gap
-    // cannot ping-pong in 1-iteration cycles.
+    // head's per-block check rejects. A rejection flips trust off — later
+    // cycles run until the strict (per-block-sufficient) projection threshold
+    // or the restart length, so an aggregate-vs-block gap cannot ping-pong in
+    // 1-iteration cycles. Trust RE-ARMS once a head sees the per-block residual
+    // genuinely improve (2× below its value at the rejection): a permanent flip
+    // forced every later cycle to the full `restart` Arnoldi columns before a
+    // per-block head could exit, quantizing the iteration count at
+    // restart-boundary values (the observed 18+60=78 every step). The 2×
+    // progress requirement keeps any re-arm/reject ping-pong geometric.
     let mut trust_projection = true;
     let mut proj_broke_early = false;
+    let mut distrust_rel = f64::INFINITY;
 
     // Reuse the CACHED AMG hierarchy (aggregation is sparsity-only, built once from
     // a canonical Poisson seed — see `build_pressure_amg_hierarchy`) and re-Galerkin
@@ -906,9 +923,16 @@ fn banded_fgmres(
         }
         if proj_broke_early {
             // The aggregate projection claimed convergence but the per-block head
-            // check disagrees: stop trusting the aggregate fast-path this solve.
+            // check disagrees: stop trusting the aggregate fast-path until the
+            // per-block residual demonstrably improves.
             trust_projection = false;
+            distrust_rel = rel;
             proj_broke_early = false;
+        } else if !trust_projection && rel <= 0.5 * distrust_rel {
+            // Genuine per-block progress since the rejection — re-arm the
+            // aggregate fast-path (see the `trust_projection` block comment).
+            trust_projection = true;
+            distrust_rel = rel;
         }
         let rs = *agg_scale.get_or_insert_with(|| bnorm.min(beta).max(1e-300));
 

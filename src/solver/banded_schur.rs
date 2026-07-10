@@ -1096,6 +1096,86 @@ pub fn structured_outer_residuals(
         .collect()
 }
 
+/// Shared Picard outer-loop EXIT decision for the structured solvers (CPU
+/// `StructuredModelSolver` and GPU `StructuredGpuSolver` use this one type so
+/// their early-exit behavior cannot drift apart). The structured port of the
+/// unstructured `CpuSolver` outer-loop plateau detector (cpu/solver.rs), with
+/// one structured-specific extension (the futility projection):
+///
+/// - **Tolerance exit** (from outer 2): every field's scaled applied-correction
+///   residual is under `tol` — genuine Picard convergence.
+/// - **Plateau/stall exit** (from outer 5): every field is either under `tol`
+///   or STALLED — its residual ratio vs the previous outer sits in
+///   `[0.98, 1.01]` (the unstructured band).
+/// - **Futility exit** (from outer 5): every field is under `tol`, stalled, or
+///   DECAYING TOO SLOWLY to reach `tol` within the remaining outer cap — its
+///   geometric extrapolation `cur * ratio^remaining` stays above `tol`. The
+///   coupled update applies a single under-relaxation factor (GUI alpha_p =
+///   0.3), so the applied pressure correction contracts at best
+///   `(1 − alpha_p) ≈ 0.7` per outer (measured 0.72–0.77 in the GUI channel
+///   regime) — `tol = 1e-3` is ARITHMETICALLY unreachable inside an 8-outer
+///   cap whenever an outer starts above ~4e-3, and the loop burned the whole
+///   cap every step. Cutting a provably-futile tail sacrifices no accuracy
+///   that was achievable within the cap: whenever the projection says `tol` IS
+///   reachable, the loop keeps iterating exactly as before. (The unstructured
+///   solver exits these steps almost immediately, but only because its
+///   correction scale is floored at 1.0, which turns its relative test
+///   near-absolute — the structured residual keeps the honest unfloored scale
+///   and therefore needs the explicit projection.) A GROWING field
+///   (ratio > 1.01) never reads as futile — the loop runs on while the step is
+///   still dynamically evolving.
+///
+/// The residuals surfaced to the GUI stay the HONEST measured values. A
+/// non-finite (diverged-state) residual never reads as stalled or futile:
+/// `cur <= tol` is false and `inf/inf` is NaN, outside every band.
+#[derive(Default)]
+pub struct StructuredOuterExit {
+    prev_scaled: Vec<f32>,
+}
+
+impl StructuredOuterExit {
+    /// Minimum completed outers before the under-tolerance exit (a single lucky
+    /// outer must be confirmed — unstructured `OUTER_TOL_EXIT_MIN_ITERS`).
+    const TOL_EXIT_MIN_ITERS: u32 = 2;
+    /// Minimum completed outers before the stall/futility exits (unstructured
+    /// `OUTER_PLATEAU_MIN_ITERS`; also gives the ratio estimate a settled tail —
+    /// the pressure residual typically peaks at outer 2-3).
+    const PLATEAU_MIN_ITERS: u32 = 5;
+    const PLATEAU_FACTOR: f32 = 0.98;
+    const PLATEAU_CEILING: f32 = 1.01;
+
+    /// Record this outer's per-field scaled residuals and decide whether the
+    /// Picard loop should break. `outers_done` counts completed outers
+    /// INCLUDING the one that produced `scaled`; `outer_cap` is the configured
+    /// maximum (drives the futility projection's remaining-outers horizon).
+    pub fn should_break(
+        &mut self,
+        scaled: &[f32],
+        outers_done: u32,
+        outer_cap: u32,
+        tol: f32,
+    ) -> bool {
+        let under_tol =
+            outers_done >= Self::TOL_EXIT_MIN_ITERS && scaled.iter().all(|&c| c <= tol);
+        let remaining = outer_cap.saturating_sub(outers_done);
+        let stalled_or_futile = outers_done >= Self::PLATEAU_MIN_ITERS
+            && self.prev_scaled.len() == scaled.len()
+            && scaled.iter().zip(&self.prev_scaled).all(|(&cur, &prev)| {
+                cur <= tol || {
+                    let ratio = cur / prev.max(1e-30);
+                    // Growing (or NaN) → not breakable; stalled band → breakable;
+                    // decaying → breakable only if provably futile within the cap.
+                    ratio <= Self::PLATEAU_CEILING
+                        && (ratio >= Self::PLATEAU_FACTOR
+                            || cur * ratio.powi(remaining as i32) > tol)
+                }
+            });
+        self.prev_scaled.clear();
+        self.prev_scaled.extend_from_slice(scaled);
+        under_tol || stalled_or_futile
+    }
+}
+
 impl BandedPrecond {
     /// Build a Schur preconditioner from a [`SchurLayout`], picking the inner
     /// pressure solve (`pressure_amg`: AMG V-cycle vs safeguarded heavy-ball).

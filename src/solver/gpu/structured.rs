@@ -925,6 +925,8 @@ impl StructuredGpuSolver {
         // Pressure state offset for the GUI "P residual" line (schur rank ==
         // state offset for current models; fallback 2).
         let p_slot: Option<usize> = self.schur_layout.as_ref().map(|l| l.p);
+        // Shared tolerance/plateau exit (CPU parity via the one shared type).
+        let mut outer_exit = crate::solver::banded_schur::StructuredOuterExit::default();
         for _outer in 0..self.outer_iters {
             // state_iter <- state, then flux/gradients/assembly.
             self.copy_submit("state", "state_iter", n * sstride);
@@ -989,12 +991,17 @@ impl StructuredGpuSolver {
             solve_stats.outer_du = du;
             solve_stats.outer_dp = dp;
 
-            // Early-exit only when EVERY unknown is under tol, and never before
-            // 2 outers (unstructured OUTER_TOL_EXIT_MIN_ITERS = 2).
+            // Early-exit when EVERY unknown is under tol (from outer 2), or
+            // under tol / stalled / provably unable to reach tol within the
+            // cap (from outer 5) — see `StructuredOuterExit`.
             if self.outer_auto_converge
                 && self.outer_tol > 0.0
-                && outers_done >= 2
-                && scaled.iter().all(|&c| c <= self.outer_tol)
+                && outer_exit.should_break(
+                    &scaled,
+                    outers_done,
+                    self.outer_iters as u32,
+                    self.outer_tol,
+                )
             {
                 break;
             }

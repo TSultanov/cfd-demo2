@@ -847,6 +847,8 @@ impl StructuredModelSolver {
         let (mut last_res, mut last_du, mut last_dp) = (0f32, 0f32, 0f32);
         let mut last_iters = 0u32;
         let mut outers_done = 0u32;
+        // Shared tolerance/plateau exit (GPU parity via the one shared type).
+        let mut outer_exit = crate::solver::banded_schur::StructuredOuterExit::default();
         for _outer in 0..self.outer_iters {
             let snap = self.buffers.f32_vec("state");
             self.buffers.copy_into_f32("state_iter", &snap);
@@ -937,15 +939,28 @@ impl StructuredModelSolver {
             }
             last_du = du;
             last_dp = dp;
+            if std::env::var("CFD2_STRUCT_OUTER_DEBUG").is_ok() {
+                eprintln!(
+                    "[outer] step {} outer {} lin={iters} res={res:.2e} scaled={:?}",
+                    self.step_count,
+                    outers_done,
+                    scaled.iter().map(|v| format!("{v:.3e}")).collect::<Vec<_>>()
+                );
+            }
 
-            // Early-exit only when EVERY unknown's per-field scaled residual is
-            // under tol, and never before 2 outers (unstructured
-            // OUTER_TOL_EXIT_MIN_ITERS = 2 — a single lucky outer must be
-            // confirmed).
+            // Early-exit when EVERY unknown's per-field scaled residual is
+            // under tol (from outer 2), or when every field is under tol,
+            // stalled, or provably unable to reach tol within the cap (from
+            // outer 5) — see `StructuredOuterExit` for why an under-relaxation-
+            // limited residual must break instead of burning the outer cap.
             if self.outer_auto_converge
                 && self.outer_tol > 0.0
-                && outers_done >= 2
-                && scaled.iter().all(|&c| c <= self.outer_tol)
+                && outer_exit.should_break(
+                    &scaled,
+                    outers_done,
+                    self.outer_iters as u32,
+                    self.outer_tol,
+                )
             {
                 break;
             }

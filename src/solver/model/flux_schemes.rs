@@ -1095,6 +1095,7 @@ mod tests {
                 | S::Builtin(_)
                 | S::Constant { .. }
                 | S::LowMachParam(_)
+                | S::MeshFlux
                 | S::Primitive { .. } => false,
             }
         }
@@ -1123,6 +1124,7 @@ mod tests {
                 | S::Constant { .. }
                 | S::LowMachParam(_)
                 | S::State { .. }
+                | S::MeshFlux
                 | S::Primitive { .. } => {}
             }
         }

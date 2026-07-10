@@ -211,6 +211,14 @@ pub enum FaceScalarExpr {
     Min(Box<FaceScalarExpr>, Box<FaceScalarExpr>),
     Lerp(Box<FaceScalarExpr>, Box<FaceScalarExpr>),
     Dot(Box<FaceVec2Expr>, Box<FaceVec2Expr>),
+    /// ALE per-face volumetric mesh flux `mesh_fluxes[face]` (unit Volume/Time,
+    /// signed along the STORED face normal — the owner convention, exactly like
+    /// the `fluxes` mass-flux buffer; zero-filled on a static mesh so any use is
+    /// bitwise inert there). Only valid in the flux kernels of ALE
+    /// (`relative_to_mesh`) models: it gates an extra `mesh_fluxes` storage
+    /// binding (group 0 / binding 8, matching the unified assembly), and the
+    /// structured lowering rejects it (no structured ALE exists).
+    MeshFlux,
 }
 
 impl FaceScalarExpr {
@@ -270,6 +278,11 @@ impl FaceScalarExpr {
             side,
             name: name.into(),
         }
+    }
+
+    /// See [`FaceScalarExpr::MeshFlux`].
+    pub fn mesh_flux() -> Self {
+        FaceScalarExpr::MeshFlux
     }
 }
 

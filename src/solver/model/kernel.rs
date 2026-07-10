@@ -1945,4 +1945,96 @@ mod tests {
             "generic_coupled_assembly_grad_state must bind grad_state"
         );
     }
+
+    /// ALE mesh-flux face-density INVARIANT (regression gate for the
+    /// upwind-rho_f mesh-relative subtraction fix): the face density multiplying
+    /// `mesh_fluxes` in the assembly's mesh-relative subtraction must be the
+    /// EXACT expression the flux module bakes into the convective mass flux.
+    /// For the thermal (`t_ref`, real-EOS) ALE family the flux module UPWINDS
+    /// `rho_f` by the MESH-RELATIVE face-normal velocity; the assembly must
+    /// therefore (a) hoist the identical upwind blend (`ale_rho_f` /
+    /// `ale_upwind_sgn` locals, mesh-relative `- ale_mesh_flux_out / area` in
+    /// the sgn argument) and (b) multiply `mesh_fluxes[face_idx]` by THAT local
+    /// — never by the central Lerp the pre-fix code used (which removed a
+    /// different mass flux than convection added: a spurious source
+    /// ∝ (rho jump) × (mesh velocity) wherever grad(rho) != 0 on a moving mesh).
+    /// The barotropic ALE family (no `t_ref`) keeps the central Lerp on BOTH
+    /// sides — also asserted, so this test pins the whole case split of
+    /// `unified_assembly::ale_relative_flux_expr` against
+    /// `flux_derivation::density_face_expr`.
+    #[test]
+    fn contract_ale_mesh_flux_face_density_matches_flux_module() {
+        let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
+
+        // THERMAL ALE family: upwind rho_f, mesh-relative direction, both sites.
+        let model = crate::solver::model::allmach_thermal_ale_model().expect("model");
+        let flux = generate_kernel_wgsl_for_model_by_id(&model, &schemes, KernelId::FLUX_MODULE)
+            .expect("flux_module WGSL");
+        assert!(
+            flux.contains("mesh_fluxes[idx] / area"),
+            "thermal ALE flux module must upwind rho_f by the MESH-RELATIVE normal velocity \
+             (sgn argument `U_f.n - mesh_fluxes[idx]/area`); absolute-velocity upwinding picks \
+             the downwind side wherever the mesh outruns the flow"
+        );
+        assert!(
+            flux.contains("0.5 * (s_own_rho + s_neigh_rho)"),
+            "thermal ALE flux module must carry the upwind rho_f blend"
+        );
+
+        let asm = generate_kernel_wgsl_for_model_by_id(
+            &model,
+            &schemes,
+            KernelId::GENERIC_COUPLED_ASSEMBLY,
+        )
+        .expect("generic_coupled_assembly WGSL");
+        assert!(
+            asm.contains("- ale_mesh_flux_out / area"),
+            "thermal ALE assembly's upwind sgn must use the same MESH-RELATIVE velocity \
+             as the flux module"
+        );
+        assert!(
+            asm.contains("ale_upwind_sgn * 0.5 * (state["),
+            "thermal ALE assembly must hoist the flux module's upwind rho_f blend (ale_rho_f)"
+        );
+        // Every mesh-relative subtraction must multiply mesh_fluxes by the
+        // hoisted upwind blend — the pre-fix central Lerp against mesh_fluxes
+        // is the exact defect this pins out.
+        assert!(
+            asm.contains("- ale_rho_f * mesh_fluxes[face_idx]"),
+            "thermal ALE assembly's mesh-relative subtraction must use the upwind ale_rho_f"
+        );
+        let subtractions = asm.matches("* mesh_fluxes[face_idx]").count();
+        let upwind_subtractions = asm.matches("ale_rho_f * mesh_fluxes[face_idx]").count();
+        assert!(
+            subtractions > 0 && subtractions == upwind_subtractions,
+            "every mesh-relative subtraction in the thermal ALE assembly must carry the \
+             upwind ale_rho_f face density ({upwind_subtractions}/{subtractions} did)"
+        );
+
+        // BAROTROPIC ALE family: central Lerp on both sides, NO upwind locals,
+        // NO mesh-relative sgn (there is no sgn at all).
+        let baro = crate::solver::model::allmach_pressure_ale_model().expect("model");
+        let baro_flux =
+            generate_kernel_wgsl_for_model_by_id(&baro, &schemes, KernelId::FLUX_MODULE)
+                .expect("flux_module WGSL");
+        assert!(
+            !baro_flux.contains("mesh_fluxes"),
+            "barotropic ALE flux module central-Lerps rho_f (no upwind, no mesh_fluxes binding)"
+        );
+        let baro_asm = generate_kernel_wgsl_for_model_by_id(
+            &baro,
+            &schemes,
+            KernelId::GENERIC_COUPLED_ASSEMBLY,
+        )
+        .expect("generic_coupled_assembly WGSL");
+        assert!(
+            !baro_asm.contains("ale_rho_f"),
+            "barotropic ALE assembly must keep the central-Lerp face density \
+             (matching its flux module), not the thermal upwind blend"
+        );
+        assert!(
+            baro_asm.contains("* mesh_fluxes[face_idx]"),
+            "barotropic ALE assembly still subtracts the mesh flux"
+        );
+    }
 }

@@ -278,23 +278,28 @@ fn allmach_thermal_ale_conserves_mass_closed_box_cpu() {
     );
 }
 
-/// REGRESSION GATE for the ALE mesh-flux face-density consistency (the
-/// lambda_f/upwind rho_f defect fixed alongside this test): the mesh-relative
-/// subtraction `phi_rel = phi - rho_f*mesh_flux` must reconstruct the EXACT
-/// face density the flux module baked into `phi`. The thermal (t_ref) flux
-/// module UPWINDS rho_f; before the fix the assembly subtracted a CENTRAL
-/// distance-weighted rho_f instead, so every face with a density gradient on a
-/// moving mesh carried a spurious mass source ∝ (rho jump) × (mesh velocity).
+/// HIGH-MESH-SPEED ALE-neutrality gate for the mesh-flux face-density
+/// consistency: the mesh-relative subtraction `phi_rel = phi - rho_f*mesh_flux`
+/// must reconstruct the face density the flux module baked into `phi` (thermal
+/// `t_ref` family: the UPWIND blend; pre-fix the assembly subtracted a CENTRAL
+/// distance-weighted rho_f instead — a spurious per-face mass source
+/// ∝ (rho jump) × (mesh velocity) wherever grad(rho) != 0 on a moving mesh).
 ///
 /// Instrument: the same closed-box Gaussian-bump gas as the smooth-motion gate
-/// (rho spans ~15%, so faces genuinely carry rho jumps) under a 5x-faster
-/// interior swirl (`swirl_fast`) — mesh velocity is the knob that scales the
-/// defect while leaving the static control untouched. Gate: the moving-mesh
-/// mass drift must stay within 15% of the static control's (ALE neutrality at
-/// HIGH mesh speed). With the pre-fix central-Lerp subtraction the
-/// inconsistent face density makes the moving run drift measurably beyond the
-/// static baseline as mesh speed grows; with the fix the subtraction removes
-/// exactly what convection added and the ratio returns to ~1.
+/// (rho spans ~14%) under a 5x-faster interior swirl (`swirl_fast`) — mesh
+/// velocity scales every `rho_f*mesh_flux` term while the static control is
+/// untouched. Gate: moving-mesh mass drift within 15% of the static control's.
+///
+/// CALIBRATION HONESTY: measured pre-fix ratio 1.005 and post-fix 1.005 — the
+/// closed-box net-mass observable does NOT resolve the pre-fix face-density
+/// mismatch (its ± sources cancel globally under the antisymmetric swirl, and
+/// at-rest faces multiply a ~zero convective flux), so this test guards
+/// CATASTROPHIC mesh-flux inconsistencies (a wrong rho_f scale, a dropped
+/// subtraction, a broken volume source) at mesh speeds 5x the smooth gate's.
+/// The DISCRIMINATING regression gate for the exact pre-fix defect is
+/// codegen-level: `contract_ale_mesh_flux_face_density_matches_flux_module`
+/// (src/solver/model/kernel.rs), which pins the generated assembly's
+/// subtraction rho_f to the flux module's upwind blend expression.
 #[test]
 fn allmach_thermal_ale_density_gradient_mesh_flux_consistency_cpu() {
     let stat = run_conservation(no_motion, "densgrad-static");

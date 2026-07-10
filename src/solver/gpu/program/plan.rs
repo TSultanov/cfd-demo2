@@ -359,6 +359,12 @@ pub(crate) struct GpuProgramPlan {
     pub outer_step_status: Option<OuterStepStatus>,
     pub outer_field_residuals: Vec<(String, f32)>,
     pub outer_field_residuals_scaled: Vec<(String, f32)>,
+    /// Outer-correction delta maxima read back by the fused host solve path
+    /// (encoded into the same submission as the linear solve; see
+    /// `try_host_coupled_solve_fused`). Consumed by `compute_outer_residuals`
+    /// instead of issuing a separate reduction submission. `None` on the
+    /// non-fused path or when the fused readback failed.
+    pub pending_outer_delta: Option<Vec<f32>>,
     /// Previous outer iteration's scaled residuals, kept within a step so the
     /// adaptive outer-loop plateau detector can compare consecutive corrections.
     /// Cleared at the start of every step (never leaks across steps).
@@ -406,6 +412,7 @@ impl GpuProgramPlan {
             outer_step_status: None,
             outer_field_residuals: Vec::new(),
             outer_field_residuals_scaled: Vec::new(),
+            pending_outer_delta: None,
             prev_outer_field_residuals_scaled: Vec::new(),
             step_attempt_index: 0,
             step_attempt_count: 0,

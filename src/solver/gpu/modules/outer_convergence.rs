@@ -497,6 +497,38 @@ impl OuterConvergenceMonitor {
         self.state_scale.as_deref()
     }
 
+    /// Number of monitored targets (= length of the delta/scale vectors).
+    pub(crate) fn num_targets(&self) -> usize {
+        self.zero_out_words.len()
+    }
+
+    /// True when the per-step state scale has not been computed yet (i.e. the
+    /// first outer iteration of a step still needs the state-scale reduction).
+    pub(crate) fn state_scale_pending(&self) -> bool {
+        self.state_scale.is_none()
+    }
+
+    /// Install a state scale that was read back externally (fused host solve
+    /// path). `b_scale` must already hold the same values on-device (the fused
+    /// path copies the reduction result into it with a device-side copy).
+    pub(crate) fn set_state_scale(&mut self, scale: Vec<f32>) {
+        self.state_scale = Some(scale);
+        self.state_scale_ready = true;
+    }
+
+    /// Copy the most recent reduction result (`b_out_bits`) into a
+    /// caller-provided staging buffer for readback. Must be encoded directly
+    /// after `encode_delta_maxima_into` / `encode_state_scale_into` (before
+    /// `b_out_bits` is cleared again).
+    pub(crate) fn encode_out_bits_readback(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        staging: &wgpu::Buffer,
+    ) {
+        let out_bytes = (self.zero_out_words.len() as u64) * 4;
+        encoder.copy_buffer_to_buffer(&self.b_out_bits, 0, staging, 0, out_bytes);
+    }
+
     pub(crate) fn submit_break_eval_and_read_status(
         &self,
         plan: &GpuProgramPlan,

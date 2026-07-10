@@ -50,8 +50,8 @@ pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
                 coupled_before_iter: Some(host_coupled_before_iter),
                 coupled_outer_iters: Some(coupled_outer_iters),
 
-                assembly_graph: Some(generic_coupled_program::assembly_graph_run),
-                update_graph: Some(generic_coupled_program::update_graph_run),
+                assembly_graph: Some(coupled_assembly_graph_run),
+                update_graph: Some(coupled_update_graph_run),
                 ..Default::default()
             }
         }
@@ -277,7 +277,38 @@ fn coupled_graph_iter_prepare_run(
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
+    // Fused host path: encoded into the solve submission instead (see
+    // `try_host_coupled_solve_fused`).
+    if generic_coupled_program::coupled_host_fusion_active(plan) {
+        return (0.0, None);
+    }
     generic_coupled_program::iter_prepare_graph_run(plan, context, mode)
+}
+
+fn coupled_assembly_graph_run(
+    plan: &GpuProgramPlan,
+    context: &crate::solver::gpu::context::GpuContext,
+    mode: GraphExecMode,
+) -> (f64, Option<GraphDetail>) {
+    // Fused host path: encoded into the solve submission instead (see
+    // `try_host_coupled_solve_fused`).
+    if generic_coupled_program::coupled_host_fusion_active(plan) {
+        return (0.0, None);
+    }
+    generic_coupled_program::assembly_graph_run(plan, context, mode)
+}
+
+fn coupled_update_graph_run(
+    plan: &GpuProgramPlan,
+    context: &crate::solver::gpu::context::GpuContext,
+    mode: GraphExecMode,
+) -> (f64, Option<GraphDetail>) {
+    // Fused host path: encoded into the solve submission instead (see
+    // `try_host_coupled_solve_fused`).
+    if generic_coupled_program::coupled_host_fusion_active(plan) {
+        return (0.0, None);
+    }
+    generic_coupled_program::update_graph_run(plan, context, mode)
 }
 
 fn coupled_outer_iters(plan: &GpuProgramPlan) -> usize {
@@ -294,7 +325,9 @@ fn host_coupled_before_iter(plan: &mut GpuProgramPlan) {
 }
 
 fn host_coupled_solve(plan: &mut GpuProgramPlan) {
-    generic_coupled_program::host_solve_linear_system(plan);
+    if !generic_coupled_program::try_host_coupled_solve_fused(plan) {
+        generic_coupled_program::host_solve_linear_system(plan);
+    }
     generic_coupled_program::host_after_solve(plan);
 }
 

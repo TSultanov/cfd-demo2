@@ -1666,6 +1666,7 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
     plan.outer_field_residuals.clear();
     plan.outer_field_residuals_scaled.clear();
     plan.prev_outer_field_residuals_scaled.clear();
+    plan.pending_outer_delta = None;
     plan.repeat_break = false;
     plan.positivity_min_rho = None;
     plan.positivity_min_p = None;
@@ -1960,6 +1961,298 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
 /// monotonicity logic. `CFD2_NO_HOST_CHUNKED=1` restores the host loop.
 fn host_chunked_solve_enabled() -> bool {
     !std::env::var("CFD2_NO_HOST_CHUNKED").is_ok_and(|v| v == "1")
+}
+
+/// Kill switch for the fused per-outer host path (`CFD2_NO_HOST_FUSION=1`
+/// restores the pre-fusion behavior: separate submissions for iter_prepare,
+/// assembly, the solve chunk, the outer-delta reduction, and update).
+fn host_solve_fusion_enabled() -> bool {
+    !std::env::var("CFD2_NO_HOST_FUSION").is_ok_and(|v| v == "1")
+}
+
+/// True when the per-outer host path fuses iter_prepare/assembly/update and
+/// the outer-convergence reductions into the chunked solve submission
+/// (`try_host_coupled_solve_fused`). The coupled graph handlers in
+/// `universal.rs` check this SAME predicate and no-op when it holds, so the
+/// graphs are encoded exactly once — inside the solve submission. All inputs
+/// are stable within a step: env switches + built resources.
+pub(crate) fn coupled_host_fusion_active(plan: &GpuProgramPlan) -> bool {
+    if !host_solve_fusion_enabled() || !host_chunked_solve_enabled() {
+        return false;
+    }
+    let r = res(plan);
+    if r.schur.is_none() && r.krylov.is_none() {
+        return false;
+    }
+    // The chunked one-submission solve requires the encoded GPU-side seed.
+    encoded_seed_basis0_enabled(r.outer_iters > 1)
+}
+
+/// Fused per-outer host solve: encode iter_prepare + assembly into the FIRST
+/// FGMRES chunk, and the outer-convergence reductions (state scale on the
+/// step's first outer, correction-delta maxima every outer) + the update graph
+/// into the LAST chunk — one submission per outer instead of four, and one
+/// blocking readback (the solver scalars; the delta/scale staging maps piggyback
+/// on the same completed submission). Pure submission fusion: kernel order and
+/// arithmetic are identical to the non-fused path, so physics is bit-identical.
+///
+/// Returns `false` (after running assembly stand-alone so the system stays
+/// consistent) if the fused path cannot run; the caller then falls back to
+/// `host_solve_linear_system`.
+pub(crate) fn try_host_coupled_solve_fused(plan: &mut GpuProgramPlan) -> bool {
+    if !coupled_host_fusion_active(plan) {
+        return false;
+    }
+
+    let device = plan.context.device.clone();
+    let context = crate::solver::gpu::context::GpuContext {
+        device: device.clone(),
+        queue: plan.context.queue.clone(),
+        timestamp_query: plan.context.timestamp_query,
+        timestamps_inside_encoders: plan.context.timestamps_inside_encoders,
+        timestamp_period_ns: plan.context.timestamp_period_ns,
+        pipeline_cache: plan.context.pipeline_cache.clone(),
+    };
+
+    let iters_done = plan.step_linear_stats.len();
+    let is_first_outer = iters_done == 0;
+    // Previous outer's worst scaled correction — the EW forcing input (see
+    // `host_solve_linear_system`).
+    let prev_outer_err = plan
+        .outer_field_residuals_scaled
+        .iter()
+        .map(|(_, v)| *v)
+        .fold(f32::NAN, f32::max);
+    let collect_stats = plan.collect_convergence_stats;
+
+    // Take the monitor out of the resources so its reductions can be encoded
+    // while the solver holds a mutable borrow of the resources.
+    let mut monitor = if collect_stats {
+        res_mut(plan).outer_convergence.take()
+    } else {
+        None
+    };
+    let num_targets = monitor.as_ref().map_or(0, |m| m.num_targets());
+    let want_readback = num_targets > 0;
+    let out_bytes = (num_targets as u64) * 4;
+    let staging_delta = want_readback.then(|| {
+        plan.staging_cache
+            .take_or_create(&device, out_bytes, "outer_convergence:delta (fused)")
+    });
+    let need_scale = want_readback && monitor.as_ref().is_some_and(|m| m.state_scale_pending());
+    let staging_scale = need_scale.then(|| {
+        plan.staging_cache
+            .take_or_create(&device, out_bytes, "outer_convergence:scale (fused)")
+    });
+    let bg_state = if need_scale {
+        let state = res(plan).fields.current_state();
+        monitor
+            .as_ref()
+            .map(|m| m.create_state_bind_group(&device, state))
+    } else {
+        None
+    };
+
+    let solve_stats = {
+        let r = res_mut(plan);
+        let tol = outer_forcing_tolerance(
+            r.linear_solver.tolerance,
+            is_first_outer,
+            r.outer_iters > 1,
+            prev_outer_err,
+        );
+        let max_restart = match r.linear_solver.solver_type {
+            LinearSolverType::Fgmres { max_restart } => max_restart,
+            _ => 30,
+        }
+        .max(1);
+
+        // Assembly variant selection — mirrors `assembly_graph_run`.
+        let assembly_graph = &r.assembly_graph;
+        let assembly_for_iter = if iters_done == 0 {
+            assembly_graph
+        } else if r.matrix_freeze_period > 0
+            && iters_done > 1
+            && iters_done % r.matrix_freeze_period as usize != 0
+            && r.assembly_graph_frozen.is_some()
+        {
+            r.assembly_graph_frozen.as_ref().expect("checked is_some")
+        } else {
+            r.assembly_graph_tail.as_ref().unwrap_or(assembly_graph)
+        };
+        // Mirrors `iter_prepare_graph_run` (bc_expr refresh inside the outer loop).
+        let iter_prepare = r
+            .recurring_prepare_enabled
+            .then_some(&r.init_prepare_graph);
+        let update_graph = &r.update_graph;
+        let kernels = &r.kernels;
+        let runtime_dims = r.runtime_dims();
+        let system = LinearSystemView {
+            ports: r.runtime.linear_ports,
+            space: &r.runtime.linear_port_space,
+        };
+        let n = r.runtime.num_dofs;
+        let num_cells = r.runtime.common.num_cells;
+        let max_iters = r.linear_solver.max_iters;
+        let tol_abs = r.linear_solver.tolerance_abs;
+
+        let monitor_ref = monitor.as_ref();
+        let bg_state_ref = bg_state.as_ref();
+        let staging_delta_ref = staging_delta.as_ref();
+        let staging_scale_ref = staging_scale.as_ref();
+
+        let mut pre = |encoder: &mut wgpu::CommandEncoder| {
+            if let Some(g) = iter_prepare {
+                g.encode_into(encoder, kernels, runtime_dims);
+            }
+            assembly_for_iter.encode_into(encoder, kernels, runtime_dims);
+        };
+        let mut post = |encoder: &mut wgpu::CommandEncoder| {
+            if let Some(m) = monitor_ref {
+                // Same sequence point as the host path's
+                // `compute_outer_residuals`: after the solve (the restart
+                // guard has verified x), before the update touches state.
+                if let (Some(bg), Some(staging)) = (bg_state_ref, staging_scale_ref) {
+                    m.encode_state_scale_into(encoder, bg);
+                    m.encode_out_bits_readback(encoder, staging);
+                }
+                if let Some(staging) = staging_delta_ref {
+                    m.encode_delta_maxima_into(encoder);
+                    m.encode_out_bits_readback(encoder, staging);
+                }
+            }
+            update_graph.encode_into(encoder, kernels, runtime_dims);
+        };
+
+        if let Some(schur) = &mut r.schur {
+            Some(submit_solve_fgmres_fixed_iterations_chunked(
+                &mut schur.solver,
+                SolveFgmresArgs {
+                    context: &context,
+                    system,
+                    n,
+                    num_cells,
+                    dispatch: schur.dispatch,
+                    max_restart,
+                    max_iters,
+                    tol,
+                    tol_abs,
+                    precond_label: "generic_coupled:schur",
+                    use_encoded_seed_basis0: true,
+                    tight_budget: true,
+                },
+                &mut pre,
+                &mut post,
+            ))
+        } else if let Some(krylov) = &mut r.krylov {
+            Some(submit_solve_fgmres_fixed_iterations_chunked(
+                &mut krylov.solver,
+                SolveFgmresArgs {
+                    context: &context,
+                    system,
+                    n,
+                    num_cells,
+                    dispatch: krylov.dispatch,
+                    max_restart,
+                    max_iters,
+                    tol,
+                    tol_abs,
+                    precond_label: "generic_coupled:fgmres",
+                    use_encoded_seed_basis0: true,
+                    tight_budget: true,
+                },
+                &mut pre,
+                &mut post,
+            ))
+        } else {
+            None
+        }
+    };
+
+    let Some(stats) = solve_stats else {
+        // Unreachable given the predicate, but keep the system consistent:
+        // the graph handlers no-oped, so run assembly before falling back.
+        if let Some(b) = staging_delta {
+            plan.staging_cache.put(out_bytes, b);
+        }
+        if let Some(b) = staging_scale {
+            plan.staging_cache.put(out_bytes, b);
+        }
+        if let Some(m) = monitor {
+            res_mut(plan).outer_convergence = Some(m);
+        }
+        let (_, _) = assembly_graph_run(plan, &context, GraphExecMode::SingleSubmit);
+        return false;
+    };
+    plan.last_linear_stats = stats;
+    plan.step_linear_stats.push(stats);
+
+    // Piggyback readback of the fused reduction results. The chunked solve just
+    // blocked on this submission's scalars, so the staging copies are resident;
+    // mapping them needs a callback-processing poll, not a new submission.
+    let mut delta_read: Option<Vec<f32>> = None;
+    let mut scale_read: Option<Vec<f32>> = None;
+    if want_readback {
+        let start_map = |staging: &wgpu::Buffer| {
+            let slice = staging.slice(..);
+            let (tx, rx) = std::sync::mpsc::channel();
+            slice.map_async(wgpu::MapMode::Read, move |result| {
+                let _ = tx.send(result);
+            });
+            rx
+        };
+        let rx_delta = staging_delta.as_ref().map(start_map);
+        let rx_scale = staging_scale.as_ref().map(start_map);
+        let _ = device.poll(wgpu::PollType::Wait {
+            submission_index: None,
+            timeout: None,
+        });
+        let finish_map = |staging: &wgpu::Buffer,
+                          rx: std::sync::mpsc::Receiver<Result<(), wgpu::BufferAsyncError>>|
+         -> Option<Vec<f32>> {
+            match rx.recv() {
+                Ok(Ok(())) => {}
+                _ => return None,
+            }
+            let slice = staging.slice(..);
+            let data = slice.get_mapped_range();
+            let vals = if data.len() == out_bytes as usize {
+                let words: &[u32] = bytemuck::cast_slice(&data);
+                Some(words.iter().map(|&w| f32::from_bits(w)).collect())
+            } else {
+                None
+            };
+            drop(data);
+            staging.unmap();
+            vals
+        };
+        if let (Some(b), Some(rx)) = (staging_delta.as_ref(), rx_delta) {
+            delta_read = finish_map(b, rx);
+        }
+        if let (Some(b), Some(rx)) = (staging_scale.as_ref(), rx_scale) {
+            scale_read = finish_map(b, rx);
+        }
+    }
+    if let Some(b) = staging_delta {
+        plan.staging_cache.put(out_bytes, b);
+    }
+    if let Some(b) = staging_scale {
+        plan.staging_cache.put(out_bytes, b);
+    }
+
+    if let Some(m) = monitor.as_mut() {
+        if let Some(scale) = scale_read.filter(|s| s.len() == num_targets) {
+            // b_scale already holds these values via the device-side copy.
+            m.set_state_scale(scale);
+        }
+    }
+    // Consumed by `compute_outer_residuals`; None (readback failure) falls back
+    // to the stand-alone reduction submission there.
+    plan.pending_outer_delta = delta_read.filter(|d| d.len() == num_targets);
+    if let Some(m) = monitor {
+        res_mut(plan).outer_convergence = Some(m);
+    }
+    true
 }
 
 /// Eisenstat-Walker-style loosened tolerance for the FIRST outer iteration of
@@ -2438,13 +2731,21 @@ fn compute_outer_residuals(plan: &mut GpuProgramPlan) -> Option<(Vec<f32>, Optio
         eprintln!("[cfd2][outer] failed to compute state scale: {err}");
     }
 
-    let delta = match monitor.delta_maxima(plan) {
-        Ok(v) => v,
-        Err(err) => {
-            eprintln!("[cfd2][outer] failed to compute correction norms: {err}");
-            res_mut(plan).outer_convergence = Some(monitor);
-            return None;
-        }
+    // Fused host solve path: the delta reduction was encoded into the solve
+    // submission and read back there — no extra submission needed. `b_delta`
+    // already holds the values via the device-side copy.
+    let fused_delta = plan.pending_outer_delta.take();
+    let delta_on_device = fused_delta.is_some();
+    let delta = match fused_delta {
+        Some(v) => v,
+        None => match monitor.delta_maxima(plan) {
+            Ok(v) => v,
+            Err(err) => {
+                eprintln!("[cfd2][outer] failed to compute correction norms: {err}");
+                res_mut(plan).outer_convergence = Some(monitor);
+                return None;
+            }
+        },
     };
 
     if delta.len() != monitor.target_names().len() {
@@ -2457,7 +2758,7 @@ fn compute_outer_residuals(plan: &mut GpuProgramPlan) -> Option<(Vec<f32>, Optio
         return None;
     }
 
-    if !delta.is_empty() {
+    if !delta.is_empty() && !delta_on_device {
         plan.context
             .queue
             .write_buffer(&monitor.b_delta, 0, bytemuck::cast_slice(&delta));

@@ -927,12 +927,25 @@ impl StructuredGpuSolver {
         let p_slot: Option<usize> = self.schur_layout.as_ref().map(|l| l.p);
         // Shared tolerance/plateau exit (CPU parity via the one shared type).
         let mut outer_exit = crate::solver::banded_schur::StructuredOuterExit::default();
-        for _outer in 0..self.outer_iters {
+        // Eisenstat–Walker outer forcing (CPU `StructuredModelSolver::step`
+        // parity — identical formula, so the two backends run identical solves):
+        // middle outers at `clamp(0.1 * prev_err, default, 1e-2)`; outer 1 and
+        // the LAST outer at the full default tolerance.
+        let default_tol = crate::solver::banded_schur::default_step_tol();
+        let ew_hi = 1e-2f64.max(default_tol);
+        let mut prev_err: Option<f64> = None;
+        for outer in 0..self.outer_iters {
             // state_iter <- state, then flux/gradients/assembly.
             self.copy_submit("state", "state_iter", n * sstride);
             let per = self.per_iter.clone();
             self.dispatch_ids(&per);
 
+            let lin_tol = match prev_err {
+                Some(e) if outer > 0 && outer + 1 < self.outer_iters && e.is_finite() => {
+                    (0.1 * e).clamp(default_tol, ew_hi)
+                }
+                _ => default_tol,
+            };
             // Banded solve: x = A^{-1} rhs. Keep last outer's *linear* stats;
             // Picard residual is measured from applied state change below.
             let mut solve_failed = false;
@@ -942,6 +955,7 @@ impl StructuredGpuSolver {
                 self.buf("matrix_values"),
                 self.buf("rhs"),
                 self.buf("x"),
+                lin_tol,
             ) {
                 solve_stats.linear_iters = st.linear_iters;
                 solve_stats.linear_res = st.linear_res;
@@ -990,6 +1004,8 @@ impl StructuredGpuSolver {
             }
             solve_stats.outer_du = du;
             solve_stats.outer_dp = dp;
+            // EW forcing input: the worst per-field scaled residual of this outer.
+            prev_err = Some(scaled.iter().fold(0.0f32, |m, &v| m.max(v)) as f64);
 
             // Early-exit when EVERY unknown is under tol (from outer 2), or
             // under tol / stalled / provably unable to reach tol within the
@@ -1220,6 +1236,13 @@ struct BandedGpuLinAlg {
     /// `A_pp` transiently indefinite, and the SPD-assuming AMG V-cycle
     /// amplifies on it — mapping SchurAmg straight in blew the startup up.
     amg_active: std::sync::atomic::AtomicBool,
+    /// WARM START for the host coupled solve: the previous solve's RAW solution
+    /// (the device `x` buffer is overwritten by the update kernel with the
+    /// APPLIED under-relaxed value, so the raw solution is kept host-side).
+    /// Mirror of the CPU `StructuredModelSolver::prev_x` — identical update
+    /// policy (only on a finite solve), so CPU/GPU bit-parity holds. `Mutex`
+    /// because `host_solve` runs under `&self`.
+    prev_x: std::sync::Mutex<Option<Vec<f32>>>,
     dims_buf: wgpu::Buffer,
     scalar_buf: wgpu::Buffer,
 
@@ -1315,6 +1338,7 @@ impl BandedGpuLinAlg {
             precond: crate::solver::banded_schur::BandedPrecond::BlockJacobi,
             amg_cache: crate::solver::banded_schur::StructuredAmgCache::default(),
             amg_active: std::sync::atomic::AtomicBool::new(false),
+            prev_x: std::sync::Mutex::new(None),
             dims_buf,
             scalar_buf,
             p_spmv: make(LA_SPMV, "spmv"),
@@ -1457,6 +1481,7 @@ impl BandedGpuLinAlg {
         mat: &wgpu::Buffer,
         rhs: &wgpu::Buffer,
         x: &wgpu::Buffer,
+        tol: f64,
     ) -> Option<crate::solver::banded_schur::StructuredStepStats> {
         let device = &ctx.device;
         let queue = &ctx.queue;
@@ -1491,7 +1516,7 @@ impl BandedGpuLinAlg {
             // + rhs readback, one x upload per solve) — robust and fast, avoiding
             // O(iters^2) GPU dot-product round-trips on a weakly-preconditioned,
             // often-hundreds-of-iterations saddle-point system.
-            Some(self.host_solve(ctx, mat, rhs, x))
+            Some(self.host_solve(ctx, mat, rhs, x, tol))
         }
     }
 
@@ -1506,6 +1531,7 @@ impl BandedGpuLinAlg {
         mat: &wgpu::Buffer,
         rhs: &wgpu::Buffer,
         x: &wgpu::Buffer,
+        tol: f64,
     ) -> crate::solver::banded_schur::StructuredStepStats {
         let (nx, ny, s) = (self.nx as usize, self.ny as usize, self.s as usize);
         let a = read_buffer_f32(ctx, mat, nx * ny * BAND_STRIDE * s * s);
@@ -1541,18 +1567,24 @@ impl BandedGpuLinAlg {
             }
             other => other.clone(),
         };
-        let (xh, res, iters) = crate::solver::banded_schur::banded_gmres_t(
+        // Warm start from the previous solve's raw solution (CPU parity: the
+        // CPU Picard loop keeps the identical `prev_x` cache).
+        let mut prev_x = self.prev_x.lock().unwrap();
+        let (xh, res, iters) = crate::solver::banded_schur::banded_gmres_opts(
             &a,
             nx,
             ny,
             s,
             &b,
             &effective,
-            self.restart.max(1),
-            200,
-            crate::solver::banded_schur::default_step_tol(),
-            threads,
-            Some(&self.amg_cache),
+            &crate::solver::banded_schur::BandedSolveOpts {
+                restart: self.restart.max(1),
+                max_outer: 200,
+                tol,
+                threads,
+                amg_cache: Some(&self.amg_cache),
+                x0: prev_x.as_deref(),
+            },
         );
         // Flip AMG once heavy-ball either fails to reduce the residual or
         // converges only after burning a full GMRES restart cycle (iters > 60)
@@ -1567,12 +1599,14 @@ impl BandedGpuLinAlg {
         }
         // NON-FINITE system: the solve bailed without a usable correction —
         // do NOT upload the zero iterate (the caller skips the update and
-        // freezes the step; see `StructuredGpuSolver::step`, CPU parity).
+        // freezes the step; see `StructuredGpuSolver::step`, CPU parity), and
+        // keep the last good warm-start cache.
         if res.is_finite() {
             // Picard outer residual is measured by `StructuredGpuSolver::step` from
             // applied |state − state_iter| after under-relaxation — not from |xh|.
             // Absolute |x| is freestream-scale (or T≈1) and is not a residual.
             ctx.queue.write_buffer(x, 0, bytemuck::cast_slice(&xh));
+            *prev_x = Some(xh);
         }
         crate::solver::banded_schur::StructuredStepStats {
             outer_iters: 0, // filled in by the caller (`step`), which owns the count

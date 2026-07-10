@@ -675,8 +675,52 @@ pub fn banded_gmres_t(
     threads: usize,
     amg_cache: Option<&StructuredAmgCache>,
 ) -> (Vec<f32>, f64, u32) {
+    banded_gmres_opts(
+        a,
+        nx,
+        ny,
+        s,
+        b,
+        precond,
+        &BandedSolveOpts { restart, max_outer, tol, threads, amg_cache, x0: None },
+    )
+}
+
+/// Options for [`banded_gmres_opts`] — the full-surface entry point of the
+/// banded coupled solve (the structured solvers' Picard loops call this).
+pub struct BandedSolveOpts<'a> {
+    pub restart: usize,
+    pub max_outer: usize,
+    /// Per-block relative tolerance for THIS solve (the Picard loop passes an
+    /// Eisenstat–Walker forcing tolerance for middle outers; see
+    /// [`default_step_tol`] for the converged-accuracy default).
+    pub tol: f64,
+    pub threads: usize,
+    pub amg_cache: Option<&'a StructuredAmgCache>,
+    /// WARM-START iterate (`ncells*s`), e.g. the previous Picard outer's raw
+    /// solution. The banded system solves for the FULL next-state (the update
+    /// kernel under-relaxes `state + alpha*(x − state)`), so successive outers'
+    /// solutions are close and a warm start turns the O(||b||) cold-start
+    /// residual into the small inter-outer drift. Ignored when the length
+    /// mismatches or any entry is non-finite (a poisoned guess must not burn
+    /// the budget); `None` = the zero initial guess. The per-block convergence
+    /// scales stay RHS-based (`||b_c||`), so the converged meaning of `tol` is
+    /// unchanged — a warm start only removes redundant Krylov work.
+    pub x0: Option<&'a [f32]>,
+}
+
+/// [`banded_gmres_t`] with explicit [`BandedSolveOpts`] (warm start + forcing).
+pub fn banded_gmres_opts(
+    a: &[f32],
+    nx: usize,
+    ny: usize,
+    s: usize,
+    b: &[f32],
+    precond: &BandedPrecond,
+    opts: &BandedSolveOpts,
+) -> (Vec<f32>, f64, u32) {
     let built = build(a, nx, ny, s, precond);
-    banded_fgmres(a, nx, ny, s, b, &built, restart, max_outer, tol, threads, amg_cache)
+    banded_fgmres(a, nx, ny, s, b, &built, opts)
 }
 
 /// TOTAL Arnoldi-iteration budget for one banded coupled solve. The budget used
@@ -769,12 +813,10 @@ fn banded_fgmres(
     s: usize,
     b: &[f32],
     built: &Built,
-    restart: usize,
-    max_outer: usize,
-    tol: f64,
-    threads: usize,
-    amg_cache: Option<&StructuredAmgCache>,
+    opts: &BandedSolveOpts,
 ) -> (Vec<f32>, f64, u32) {
+    let (restart, max_outer, tol, threads, amg_cache) =
+        (opts.restart, opts.max_outer, opts.tol, opts.threads, opts.amg_cache);
     let n = nx * ny * s;
     let b64: Vec<f64> = b.iter().map(|&v| v as f64).collect();
     let bnorm = pnorm(threads, &b64).max(1e-300);
@@ -784,6 +826,15 @@ fn banded_fgmres(
     let blk_scales = block_scales(&b64, s, bnorm);
     let strict_scale = blk_scales.iter().cloned().fold(f64::INFINITY, f64::min).max(1e-300);
     let mut x = vec![0.0f64; n];
+    // Warm start (see `BandedSolveOpts::x0`): guarded against a stale-length or
+    // non-finite guess — the zero start is always safe.
+    if let Some(x0) = opts.x0 {
+        if x0.len() == n && x0.iter().all(|v| v.is_finite()) {
+            for (xi, &v) in x.iter_mut().zip(x0) {
+                *xi = v as f64;
+            }
+        }
+    }
     // Total inner (Arnoldi) iterations across restart cycles — the GMRES iteration
     // count reported to the GUI "Linear: iters=.." readout.
     let mut total_iters = 0u32;

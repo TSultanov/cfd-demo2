@@ -456,6 +456,17 @@ pub struct StructuredModelSolver {
     /// Model id + accumulated sim time (GUI parity with `StructuredGpuSolver`).
     model_id: &'static str,
     time: f64,
+    /// WARM START for the banded coupled solve: the previous outer's RAW linear
+    /// solution (the update kernel overwrites the `x` buffer with the APPLIED
+    /// under-relaxed value, so the raw solution must be kept host-side).
+    /// Successive Picard linearizations drift slowly, so their solutions are
+    /// close — starting from the previous one turns the O(||b||) cold-start
+    /// residual into the inter-outer drift. Kept across steps (the last outer
+    /// of step k warm-starts outer 1 of step k+1); only updated on a FINITE
+    /// solve (a failed solve leaves the last good guess). The GPU host solve
+    /// keeps the identical cache (`BandedGpuLinAlg::prev_x`), so CPU/GPU
+    /// bit-parity holds.
+    prev_x: Option<Vec<f32>>,
     /// Convergence telemetry from the last [`step`](Self::step) (GUI readout):
     /// `(outer_iters, linear rel-residual of the last inner solve, max |ΔU| and
     /// max |Δp| across the last outer sweep = the nonlinear/Picard residual)`.
@@ -625,6 +636,7 @@ impl StructuredModelSolver {
             schur_layout,
             model_id: model.id,
             time: 0.0,
+            prev_x: None,
             last_stats: StructuredStepStats::default(),
         })
     }
@@ -849,29 +861,50 @@ impl StructuredModelSolver {
         let mut outers_done = 0u32;
         // Shared tolerance/plateau exit (GPU parity via the one shared type).
         let mut outer_exit = crate::solver::banded_schur::StructuredOuterExit::default();
-        for _outer in 0..self.outer_iters {
+        // Eisenstat–Walker outer forcing (mirrors the unstructured CpuSolver's
+        // full-EW `ew_outer_tol`): the linear tolerance for MIDDLE outers tracks
+        // the previous outer's worst scaled Picard residual —
+        // `clamp(0.1 * prev_err, default, 1e-2)` — because re-linearization
+        // discards accuracy beyond ~a decade below the nonlinear error. Outer 1
+        // (no previous residual) and the LAST outer (the one whose solution the
+        // step keeps if the cap binds) run at the full `default_step_tol()`, so
+        // converged accuracy is unchanged.
+        let default_tol = crate::solver::banded_schur::default_step_tol();
+        let ew_hi = 1e-2f64.max(default_tol);
+        let mut prev_err: Option<f64> = None;
+        for outer in 0..self.outer_iters {
             let snap = self.buffers.f32_vec("state");
             self.buffers.copy_into_f32("state_iter", &snap);
             for id in &per {
                 self.run(id, n, &ctx);
             }
+            let lin_tol = match prev_err {
+                Some(e) if outer > 0 && outer + 1 < self.outer_iters && e.is_finite() => {
+                    (0.1 * e).clamp(default_tol, ew_hi)
+                }
+                _ => default_tol,
+            };
             // Banded GMRES on the assembled block-banded system (shared routine —
             // block-Jacobi or the model-owned Schur; bit-identical to the GPU
-            // host coupled solve).
+            // host coupled solve). Warm-started from the previous outer's raw
+            // solution (see `prev_x`).
             let a = self.buffers.f32_vec("matrix_values");
             let b = self.buffers.f32_vec("rhs");
-            let (x, res, iters) = crate::solver::banded_schur::banded_gmres_t(
+            let (x, res, iters) = crate::solver::banded_schur::banded_gmres_opts(
                 &a,
                 self.grid.nx,
                 self.grid.ny,
                 self.s,
                 &b,
                 &precond,
-                60,
-                200,
-                crate::solver::banded_schur::default_step_tol(),
-                self.threads,
-                Some(&self.amg_cache),
+                &crate::solver::banded_schur::BandedSolveOpts {
+                    restart: 60,
+                    max_outer: 200,
+                    tol: lin_tol,
+                    threads: self.threads,
+                    amg_cache: Some(&self.amg_cache),
+                    x0: self.prev_x.as_deref(),
+                },
             );
             // NON-FINITE system (e.g. a NaN auxiliary poisoning the assembly —
             // the observed case: an un-seeded `u_ref` makes the on-device
@@ -905,6 +938,9 @@ impl StructuredModelSolver {
             last_res = res as f32;
             last_iters = iters;
             self.buffers.copy_into_f32("x", &x);
+            // Cache the RAW solution as the next solve's warm start BEFORE the
+            // update kernel overwrites the `x` buffer with the applied value.
+            self.prev_x = Some(x);
             for id in &upd {
                 self.run(id, n, &ctx);
             }
@@ -939,6 +975,8 @@ impl StructuredModelSolver {
             }
             last_du = du;
             last_dp = dp;
+            // EW forcing input: the worst per-field scaled residual of this outer.
+            prev_err = Some(scaled.iter().fold(0.0f32, |m, &v| m.max(v)) as f64);
             if std::env::var("CFD2_STRUCT_OUTER_DEBUG").is_ok() {
                 eprintln!(
                     "[outer] step {} outer {} lin={iters} res={res:.2e} scaled={:?}",

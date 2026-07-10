@@ -474,6 +474,52 @@ fn gpu_structured_schur_matches_block_jacobi() {
     );
 }
 
+/// ADAPTIVE AMG LATCH (GPU, CPU-parity): a SchurAmg request must run the robust
+/// heavy-ball Schur until the one-way latch fires (mirrors
+/// `StructuredModelSolver::effective_precond`). A from-rest through-flow startup
+/// makes `A_pp` transiently indefinite, and mapping SchurAmg straight into the
+/// host solve used to let the SPD-assuming V-cycle amplify the startup transient.
+/// The latched path must develop the channel from rest, bounded and finite.
+#[test]
+fn gpu_structured_schur_amg_from_rest_channel_stays_bounded() {
+    use cfd2::solver::banded_schur::CoupledPrecondKind as K;
+    let (nx, ny) = (48usize, 16usize);
+    let model = incompressible_momentum_structured_model().expect("model");
+    let mut s =
+        StructuredGpuSolver::new(StructuredGrid::new(nx, ny, 3.0, 1.0), &model, 0.02, 4).unwrap();
+    assert_eq!(s.set_preconditioner(K::SchurAmg), K::SchurAmg);
+    assert!(
+        !s.amg_is_active(),
+        "the adaptive latch must arm OFF (heavy-ball first) on a preconditioner change"
+    );
+    s.set_fluid(1.0, 0.02);
+    let inlet = 0.5f32;
+    s.set_boundaries(move |edge, _x, _y| {
+        let d = |v: f32| BcComp { kind: 1, value: v };
+        let g = || BcComp { kind: 2, value: 0.0 };
+        match edge {
+            Edge::Left => (1, vec![d(inlet), d(0.0), g()]),
+            Edge::Right => (2, vec![g(), g(), d(0.0)]),
+            _ => (3, vec![d(0.0), d(0.0), g()]),
+        }
+    });
+    for _ in 0..40 {
+        s.step();
+    }
+    let ux = s.state_field(0);
+    let uy = s.state_field(1);
+    let mut umax = 0.0f64;
+    for (a, b) in ux.iter().zip(&uy) {
+        assert!(a.is_finite() && b.is_finite(), "SchurAmg-from-rest channel diverged");
+        umax = umax.max(a.hypot(*b));
+    }
+    println!(
+        "[gpu-structured] SchurAmg from-rest channel umax={umax:.4} amg_latched={}",
+        s.amg_is_active()
+    );
+    assert!(umax > 0.05 && umax < 5.0, "unphysical channel speed {umax}");
+}
+
 /// PRECONDITIONER CORRECTNESS (rigorous): the shared banded solve — with BOTH the
 /// block-Jacobi (plain GMRES) and the SIMPLE Schur (FGMRES + safeguarded heavy-
 /// ball) preconditioners — must recover a KNOWN solution of a coupled saddle-like

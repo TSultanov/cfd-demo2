@@ -866,6 +866,12 @@ impl StructuredGpuSolver {
     pub fn assemble_only(&mut self) {
         let n = self.n;
         let sstride = self.state_stride;
+        // Match `step()` (and the CPU `assemble_only`): the time-step size drives
+        // the `ddt` diagonal — without this re-sync a `set_dt` after construction
+        // assembled with the stale constructor dt.
+        self.constants.dt = self.dt as f32;
+        self.constants.dt_old = self.dt_old as f32;
+        self.write_kernel_constants();
         self.copy_submit("state", "state_old", n * sstride);
         self.copy_submit("state", "state_iter", n * sstride);
         let ids: Vec<String> = self.prep.iter().chain(self.per_iter.iter()).cloned().collect();
@@ -1108,7 +1114,19 @@ impl StructuredGpuSolver {
             (K::SchurAmg, Some(l)) => BandedPrecond::schur(l, true),
             _ => BandedPrecond::BlockJacobi,
         };
+        // Re-arm the adaptive AMG latch on a precond change (CPU parity).
+        self.solver
+            .amg_active
+            .store(false, std::sync::atomic::Ordering::Relaxed);
         crate::solver::banded_schur::kind_of(&self.solver.precond)
+    }
+
+    /// Whether the adaptive AMG latch has activated (diagnostics/tests; CPU
+    /// `StructuredModelSolver::amg_is_active` parity).
+    pub fn amg_is_active(&self) -> bool {
+        self.solver
+            .amg_active
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Whether this model declares a Schur preconditioner (drives the GUI to
@@ -1178,6 +1196,13 @@ struct BandedGpuLinAlg {
     /// grid sparsity; only the Galerkin values re-assemble each host solve). Shared
     /// borrow works via `OnceCell` interior mutability under `host_solve(&self)`.
     amg_cache: crate::solver::banded_schur::StructuredAmgCache,
+    /// One-way adaptive-AMG latch (CPU parity, `StructuredModelSolver::
+    /// effective_precond` + its step-loop latch): a SchurAmg request runs the
+    /// robust heavy-ball Schur until an inner solve stalls (`res > 0.7`) or
+    /// burns a full restart cycle (`iters > 60`). From-rest startup makes
+    /// `A_pp` transiently indefinite, and the SPD-assuming AMG V-cycle
+    /// amplifies on it — mapping SchurAmg straight in blew the startup up.
+    amg_active: std::sync::atomic::AtomicBool,
     dims_buf: wgpu::Buffer,
     scalar_buf: wgpu::Buffer,
 
@@ -1190,7 +1215,19 @@ struct BandedGpuLinAlg {
     p_copy: wgpu::ComputePipeline,
     p_dot: wgpu::ComputePipeline,
 
-    // Work vectors (ndof each) + block-Jacobi inverse (n*s*s) + dot partials.
+    /// On-device work buffers, allocated LAZILY on first use: only the `s == 1`
+    /// on-device CG and the env-gated (`CFD2_STRUCTGPU_ONDEVICE_SOLVE`) GMRES
+    /// touch them. The shipped coupled path host-solves and never does — eagerly
+    /// allocating the 61-vector Krylov basis + work vectors used to pin
+    /// 600MB–2.4GB of dead VRAM on fine grids (on the SHARED GUI renderer
+    /// device).
+    work: std::sync::OnceLock<LaWork>,
+}
+
+/// The on-device solve's work set: block-Jacobi inverse (`n*s*s`), work vectors
+/// (`ndof` each), the GMRES Krylov basis (`restart+1` vectors) and the
+/// dot-product partial buffers. See [`BandedGpuLinAlg::work`].
+struct LaWork {
     dinv: wgpu::Buffer,
     r: wgpu::Buffer,
     z: wgpu::Buffer,
@@ -1248,20 +1285,9 @@ impl BandedGpuLinAlg {
             }),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
-        let n_partials = ndof.div_ceil(WG).max(1);
-        let partials = storage_buffer(device, "la_partials", n_partials as usize);
-        let partials_staging = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("la_partials_staging"),
-            size: (n_partials * 4) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
         // GMRES restart: capped by the DOF count so tiny systems don't
         // over-allocate. 60 matches the CPU banded_block_gmres.
         let restart = (60).min(ndof as usize).max(1);
-        let basis: Vec<wgpu::Buffer> = (0..=restart)
-            .map(|i| storage_buffer(device, &format!("la_basis_{i}"), ndof as usize))
-            .collect();
         Self {
             n,
             nx,
@@ -1271,6 +1297,7 @@ impl BandedGpuLinAlg {
             restart,
             precond: crate::solver::banded_schur::BandedPrecond::BlockJacobi,
             amg_cache: crate::solver::banded_schur::StructuredAmgCache::default(),
+            amg_active: std::sync::atomic::AtomicBool::new(false),
             dims_buf,
             scalar_buf,
             p_spmv: make(LA_SPMV, "spmv"),
@@ -1281,17 +1308,40 @@ impl BandedGpuLinAlg {
             p_xpby: make(LA_XPBY, "xpby"),
             p_copy: make(LA_VCOPY, "vcopy"),
             p_dot: make(LA_DOT, "dot_partial"),
-            dinv: storage_buffer(device, "la_dinv", (n * s * s) as usize),
-            r: storage_buffer(device, "la_r", ndof as usize),
-            z: storage_buffer(device, "la_z", ndof as usize),
-            p: storage_buffer(device, "la_p", ndof as usize),
-            ap: storage_buffer(device, "la_ap", ndof as usize),
-            v: storage_buffer(device, "la_v", ndof as usize),
-            basis,
-            partials,
-            partials_staging,
-            n_partials,
+            work: std::sync::OnceLock::new(),
         }
+    }
+
+    /// The on-device work set, allocated on FIRST use (the `s == 1` CG and the
+    /// env-gated on-device GMRES). The shipped coupled path host-solves and
+    /// never allocates these.
+    fn work(&self, device: &wgpu::Device) -> &LaWork {
+        self.work.get_or_init(|| {
+            let (n, s, ndof) = (self.n, self.s, self.ndof);
+            let n_partials = ndof.div_ceil(WG).max(1);
+            let partials = storage_buffer(device, "la_partials", n_partials as usize);
+            let partials_staging = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("la_partials_staging"),
+                size: (n_partials * 4) as u64,
+                usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            let basis: Vec<wgpu::Buffer> = (0..=self.restart)
+                .map(|i| storage_buffer(device, &format!("la_basis_{i}"), ndof as usize))
+                .collect();
+            LaWork {
+                dinv: storage_buffer(device, "la_dinv", (n * s * s) as usize),
+                r: storage_buffer(device, "la_r", ndof as usize),
+                z: storage_buffer(device, "la_z", ndof as usize),
+                p: storage_buffer(device, "la_p", ndof as usize),
+                ap: storage_buffer(device, "la_ap", ndof as usize),
+                v: storage_buffer(device, "la_v", ndof as usize),
+                basis,
+                partials,
+                partials_staging,
+                n_partials,
+            }
+        })
     }
 
     fn bg<'a>(
@@ -1340,7 +1390,14 @@ impl BandedGpuLinAlg {
 
     /// Dot product `a·b` (dispatch the partial-reduction kernel, then sum the
     /// per-workgroup partials on the host — only `n_partials` floats cross).
-    fn dot(&self, device: &wgpu::Device, queue: &wgpu::Queue, a: &wgpu::Buffer, b: &wgpu::Buffer) -> f64 {
+    fn dot(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        w: &LaWork,
+        a: &wgpu::Buffer,
+        b: &wgpu::Buffer,
+    ) -> f64 {
         self.run(
             device,
             queue,
@@ -1349,11 +1406,11 @@ impl BandedGpuLinAlg {
                 (0, &self.dims_buf),
                 (1, a),
                 (2, b),
-                (3, &self.partials),
+                (3, &w.partials),
             ],
             self.ndof,
         );
-        let parts = read_buffer_f32_via(device, queue, &self.partials, &self.partials_staging, self.n_partials as usize);
+        let parts = read_buffer_f32_via(device, queue, &w.partials, &w.partials_staging, w.n_partials as usize);
         parts.iter().map(|&v| v as f64).sum()
     }
 
@@ -1388,26 +1445,28 @@ impl BandedGpuLinAlg {
         let queue = &ctx.queue;
         if self.s == 1 {
             // SPD scalar: fully on-device block-Jacobi CG.
+            let w = self.work(device);
             self.run(
                 device,
                 queue,
                 &self.p_binv,
-                &[(0, &self.dims_buf), (1, mat), (2, &self.dinv)],
+                &[(0, &self.dims_buf), (1, mat), (2, &w.dinv)],
                 self.n,
             );
-            self.cg(device, queue, grid, mat, rhs, x);
+            self.cg(device, queue, w, grid, mat, rhs, x);
             None
         } else if std::env::var("CFD2_STRUCTGPU_ONDEVICE_SOLVE").is_ok() {
             // Opt-in fully on-device GMRES (correct but per-dot readback makes it
             // slow for the many-iteration saddle-point solve).
+            let w = self.work(device);
             self.run(
                 device,
                 queue,
                 &self.p_binv,
-                &[(0, &self.dims_buf), (1, mat), (2, &self.dinv)],
+                &[(0, &self.dims_buf), (1, mat), (2, &w.dinv)],
                 self.n,
             );
-            self.gmres(device, queue, grid, mat, rhs, x);
+            self.gmres(device, queue, w, grid, mat, rhs, x);
             None
         } else {
             // Coupled indefinite U-p: the assembly runs on the GPU, but the
@@ -1443,19 +1502,50 @@ impl BandedGpuLinAlg {
             .or_else(|| std::thread::available_parallelism().ok().map(|n| n.get()))
             .unwrap_or(1)
             .max(1);
+        // Adaptive AMG latch (CPU parity, `StructuredModelSolver::effective_precond`):
+        // a SchurAmg request runs the robust heavy-ball Schur until the one-way
+        // latch fires — from-rest startup makes A_pp transiently indefinite and
+        // the SPD-assuming AMG V-cycle amplifies on it.
+        use crate::solver::banded_schur::BandedPrecond;
+        use std::sync::atomic::Ordering;
+        let amg_requested =
+            matches!(&self.precond, BandedPrecond::Schur { pressure_amg: true, .. });
+        let effective = match &self.precond {
+            BandedPrecond::Schur { u_idx, p, omega, sweeps_cap, pressure_amg: true }
+                if !self.amg_active.load(Ordering::Relaxed) =>
+            {
+                BandedPrecond::Schur {
+                    u_idx: u_idx.clone(),
+                    p: *p,
+                    omega: *omega,
+                    sweeps_cap: *sweeps_cap,
+                    pressure_amg: false, // heavy-ball until the latch activates AMG
+                }
+            }
+            other => other.clone(),
+        };
         let (xh, res, iters) = crate::solver::banded_schur::banded_gmres_t(
             &a,
             nx,
             ny,
             s,
             &b,
-            &self.precond,
+            &effective,
             self.restart.max(1),
             200,
             crate::solver::banded_schur::default_step_tol(),
             threads,
             Some(&self.amg_cache),
         );
+        // Flip AMG once heavy-ball either fails to reduce the residual or
+        // converges only after burning a full GMRES restart cycle (iters > 60)
+        // — the h-dependent regime AMG cures. Mirrors cpu/structured.rs.
+        if amg_requested
+            && !self.amg_active.load(Ordering::Relaxed)
+            && (res > 0.7 || iters > 60)
+        {
+            self.amg_active.store(true, Ordering::Relaxed);
+        }
         // Picard outer residual is measured by `StructuredGpuSolver::step` from
         // applied |state − state_iter| after under-relaxation — not from |xh|.
         // Absolute |x| is freestream-scale (or T≈1) and is not a residual.
@@ -1469,11 +1559,13 @@ impl BandedGpuLinAlg {
         }
     }
 
-    /// Block-Jacobi preconditioned CG (SPD scalar system). Assumes `dinv` is set.
+    /// Block-Jacobi preconditioned CG (SPD scalar system). Assumes `w.dinv` is set.
+    #[allow(clippy::too_many_arguments)]
     fn cg(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        w: &LaWork,
         grid: &wgpu::Buffer,
         mat: &wgpu::Buffer,
         rhs: &wgpu::Buffer,
@@ -1482,18 +1574,18 @@ impl BandedGpuLinAlg {
         // Initial guess x <- 0, so the initial residual r <- rhs. Then
         // z <- M^{-1} r and the search direction p <- z.
         self.zero(queue, x);
-        self.run(device, queue, &self.p_copy, &[(0, &self.dims_buf), (1, rhs), (2, &self.r)], self.ndof); // r <- rhs
+        self.run(device, queue, &self.p_copy, &[(0, &self.dims_buf), (1, rhs), (2, &w.r)], self.ndof); // r <- rhs
         self.run(
             device,
             queue,
             &self.p_papply,
-            &[(0, &self.dims_buf), (1, &self.dinv), (2, &self.r), (3, &self.z)],
+            &[(0, &self.dims_buf), (1, &w.dinv), (2, &w.r), (3, &w.z)],
             self.n,
         ); // z <- Minv r
-        self.run(device, queue, &self.p_copy, &[(0, &self.dims_buf), (1, &self.z), (2, &self.p)], self.ndof); // p <- z
+        self.run(device, queue, &self.p_copy, &[(0, &self.dims_buf), (1, &w.z), (2, &w.p)], self.ndof); // p <- z
 
-        let bnorm = self.dot(device, queue, rhs, rhs).sqrt().max(1e-30);
-        let mut rz = self.dot(device, queue, &self.r, &self.z);
+        let bnorm = self.dot(device, queue, w, rhs, rhs).sqrt().max(1e-30);
+        let mut rz = self.dot(device, queue, w, &w.r, &w.z);
         let tol = 1e-10_f64;
         let maxit = (self.ndof as usize * 4).max(200);
 
@@ -1503,30 +1595,30 @@ impl BandedGpuLinAlg {
                 device,
                 queue,
                 &self.p_spmv,
-                &[(0, grid), (1, &self.dims_buf), (2, mat), (3, &self.p), (4, &self.ap)],
+                &[(0, grid), (1, &self.dims_buf), (2, mat), (3, &w.p), (4, &w.ap)],
                 self.n,
             );
-            let pap = self.dot(device, queue, &self.p, &self.ap);
+            let pap = self.dot(device, queue, w, &w.p, &w.ap);
             if pap.abs() < 1e-300 {
                 break;
             }
             let alpha = rz / pap;
             // x <- x + alpha p ; r <- r - alpha Ap
             self.set_scalar(queue, alpha as f32, 0.0);
-            self.run(device, queue, &self.p_axpy, &[(0, &self.dims_buf), (1, &self.scalar_buf), (2, &self.p), (3, x)], self.ndof);
+            self.run(device, queue, &self.p_axpy, &[(0, &self.dims_buf), (1, &self.scalar_buf), (2, &w.p), (3, x)], self.ndof);
             self.set_scalar(queue, -(alpha as f32), 0.0);
-            self.run(device, queue, &self.p_axpy, &[(0, &self.dims_buf), (1, &self.scalar_buf), (2, &self.ap), (3, &self.r)], self.ndof);
+            self.run(device, queue, &self.p_axpy, &[(0, &self.dims_buf), (1, &self.scalar_buf), (2, &w.ap), (3, &w.r)], self.ndof);
 
-            let rr = self.dot(device, queue, &self.r, &self.r);
+            let rr = self.dot(device, queue, w, &w.r, &w.r);
             if rr.sqrt() / bnorm <= tol {
                 break;
             }
             // z <- Minv r ; rz_new ; beta ; p <- z + beta p
-            self.run(device, queue, &self.p_papply, &[(0, &self.dims_buf), (1, &self.dinv), (2, &self.r), (3, &self.z)], self.n);
-            let rz_new = self.dot(device, queue, &self.r, &self.z);
+            self.run(device, queue, &self.p_papply, &[(0, &self.dims_buf), (1, &w.dinv), (2, &w.r), (3, &w.z)], self.n);
+            let rz_new = self.dot(device, queue, w, &w.r, &w.z);
             let beta = rz_new / rz;
             self.set_scalar(queue, 0.0, beta as f32);
-            self.run(device, queue, &self.p_xpby, &[(0, &self.dims_buf), (1, &self.scalar_buf), (2, &self.z), (3, &self.p)], self.ndof);
+            self.run(device, queue, &self.p_xpby, &[(0, &self.dims_buf), (1, &self.scalar_buf), (2, &w.z), (3, &w.p)], self.ndof);
             rz = rz_new;
         }
     }
@@ -1535,10 +1627,12 @@ impl BandedGpuLinAlg {
     /// CPU `banded_block_gmres`. Arnoldi/Givens run on the host over the small
     /// Hessenberg; all vector work (SpMV, precond, dot, axpy, scale) is on the
     /// device, with only scalars crossing the bus. Assumes `dinv` is set.
+    #[allow(clippy::too_many_arguments)]
     fn gmres(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        w: &LaWork,
         grid: &wgpu::Buffer,
         mat: &wgpu::Buffer,
         rhs: &wgpu::Buffer,
@@ -1556,12 +1650,12 @@ impl BandedGpuLinAlg {
             self.run(device, queue, &self.p_copy, &[(0, &self.dims_buf), (1, src), (2, dst)], self.ndof);
         };
         let precond = |rin: &wgpu::Buffer, zout: &wgpu::Buffer| {
-            self.run(device, queue, &self.p_papply, &[(0, &self.dims_buf), (1, &self.dinv), (2, rin), (3, zout)], self.n);
+            self.run(device, queue, &self.p_papply, &[(0, &self.dims_buf), (1, &w.dinv), (2, rin), (3, zout)], self.n);
         };
         let spmv = |xin: &wgpu::Buffer, yout: &wgpu::Buffer| {
             self.run(device, queue, &self.p_spmv, &[(0, grid), (1, &self.dims_buf), (2, mat), (3, xin), (4, yout)], self.n);
         };
-        let dot = |a: &wgpu::Buffer, b: &wgpu::Buffer| self.dot(device, queue, a, b);
+        let dot = |a: &wgpu::Buffer, b: &wgpu::Buffer| self.dot(device, queue, w, a, b);
         let norm = |a: &wgpu::Buffer| dot(a, a).sqrt();
 
         let m = self.restart;
@@ -1575,16 +1669,16 @@ impl BandedGpuLinAlg {
         let mut final_rel = 1.0_f64;
         for _outer in 0..max_outer {
             // r = b - A x ; z = M^{-1} r ; beta = ||z||.
-            spmv(x, &self.ap);
-            copy(rhs, &self.r);
-            axpy(&self.ap, &self.r, -1.0);
-            precond(&self.r, &self.z);
-            let beta = norm(&self.z);
+            spmv(x, &w.ap);
+            copy(rhs, &w.r);
+            axpy(&w.ap, &w.r, -1.0);
+            precond(&w.r, &w.z);
+            let beta = norm(&w.z);
             if beta / bnorm <= tol {
                 final_rel = beta / bnorm;
                 break;
             }
-            scale(&self.z, &self.basis[0], 1.0 / beta);
+            scale(&w.z, &w.basis[0], 1.0 / beta);
 
             let mut h = vec![vec![0.0f64; m]; m + 1];
             let mut g = vec![0.0f64; m + 1];
@@ -1595,18 +1689,18 @@ impl BandedGpuLinAlg {
 
             for k in 0..m {
                 // w = M^{-1} A v_k  (use `v` as w).
-                spmv(&self.basis[k], &self.ap);
-                precond(&self.ap, &self.v);
+                spmv(&w.basis[k], &w.ap);
+                precond(&w.ap, &w.v);
                 // Modified Gram-Schmidt against the existing basis.
                 for i in 0..=k {
-                    h[i][k] = dot(&self.v, &self.basis[i]);
-                    axpy(&self.basis[i], &self.v, -h[i][k]);
+                    h[i][k] = dot(&w.v, &w.basis[i]);
+                    axpy(&w.basis[i], &w.v, -h[i][k]);
                 }
-                h[k + 1][k] = norm(&self.v);
+                h[k + 1][k] = norm(&w.v);
                 if h[k + 1][k] > 1e-14 {
-                    scale(&self.v, &self.basis[k + 1], 1.0 / h[k + 1][k]);
+                    scale(&w.v, &w.basis[k + 1], 1.0 / h[k + 1][k]);
                 } else {
-                    self.zero(queue, &self.basis[k + 1]);
+                    self.zero(queue, &w.basis[k + 1]);
                 }
                 // Apply previous Givens rotations, then a new one.
                 for i in 0..k {
@@ -1642,15 +1736,15 @@ impl BandedGpuLinAlg {
                 y[i] = if h[i][i].abs() > 1e-300 { sum / h[i][i] } else { 0.0 };
             }
             for i in 0..kk {
-                axpy(&self.basis[i], x, y[i]);
+                axpy(&w.basis[i], x, y[i]);
             }
             total_k += kk;
 
             // True-residual convergence check.
-            spmv(x, &self.ap);
-            copy(rhs, &self.r);
-            axpy(&self.ap, &self.r, -1.0);
-            final_rel = norm(&self.r) / bnorm;
+            spmv(x, &w.ap);
+            copy(rhs, &w.r);
+            axpy(&w.ap, &w.r, -1.0);
+            final_rel = norm(&w.r) / bnorm;
             if final_rel <= tol {
                 break;
             }

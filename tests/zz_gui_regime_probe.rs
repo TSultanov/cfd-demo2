@@ -192,6 +192,116 @@ fn run_structured(name: &str, allmach: bool, precond: CoupledPrecondKind) {
         "[{name}] SUMMARY: mean {mean_ms:.1} ms/step (last 50) | max|U|={prev_max_vel:.4e} | solid max|U|={solid_max_u:.3e} | near-p ptp={:.3e}",
         pmax - pmin
     );
+
+    // RING metric (interface speckle discriminator): |U| stats over FLUID cells
+    // in the 1-2 cell interface ring (R < d < 1.3R) vs the ambient upstream mean
+    // (2R < d < 4R, x < CX). Speckle = ring max/mean far above ambient.
+    let sp: Vec<f64> = solver
+        .field_offset("ibm_penalty_U")
+        .map(|off| solver.state_field(off))
+        .unwrap_or_else(|| vec![0.0; n]);
+    let (mut ring_max, mut ring_sum, mut ring_n) = (0.0f64, 0.0f64, 0usize);
+    let (mut amb_sum, mut amb_n) = (0.0f64, 0usize);
+    for i in 0..n {
+        let (x, y) = grid.cell_center(i);
+        let d = (x - CX).hypot(y - CY);
+        let m = ux[i].hypot(uy[i]);
+        if sp[i] == 0.0 && d > R && d < 1.3 * R {
+            ring_max = ring_max.max(m);
+            ring_sum += m;
+            ring_n += 1;
+        }
+        if d > 2.0 * R && d < 4.0 * R && x < CX {
+            amb_sum += m;
+            amb_n += 1;
+        }
+    }
+    let ring_mean = ring_sum / ring_n.max(1) as f64;
+    let amb_mean = amb_sum / amb_n.max(1) as f64;
+    println!(
+        "[{name}] RING: max|U|={ring_max:.4e} mean|U|={ring_mean:.4e} ({ring_n} cells) | ambient mean|U|={amb_mean:.4e} ({amb_n} cells) | ring_max/amb={:.2} ring_mean/amb={:.2}",
+        ring_max / amb_mean.max(1e-30),
+        ring_mean / amb_mean.max(1e-30)
+    );
+
+    // RING ROUGHNESS (speckle discriminator): red/blue speckle = cell-to-cell
+    // |U| alternation. For each fluid ring cell, take the max |m_i - m_j| over
+    // its fluid 4-neighbours; report the ring mean of that, normalized by the
+    // ambient mean. A smooth diverted flow gives O(grad) values; speckle gives
+    // values comparable to the field magnitude itself.
+    let (mut rough_sum, mut rough_max, mut rough_n) = (0.0f64, 0.0f64, 0usize);
+    for j in 0..NY {
+        for i in 0..NX {
+            let idx = j * NX + i;
+            let (x, y) = grid.cell_center(idx);
+            let d = (x - CX).hypot(y - CY);
+            if sp[idx] != 0.0 || d <= R || d >= 1.3 * R {
+                continue;
+            }
+            let m = ux[idx].hypot(uy[idx]);
+            let mut worst = 0.0f64;
+            let neighbors = [
+                (j > 0, idx.wrapping_sub(NX)),
+                (i > 0, idx.wrapping_sub(1)),
+                (i + 1 < NX, idx + 1),
+                (j + 1 < NY, idx + NX),
+            ];
+            for (valid, nb) in neighbors {
+                if valid && sp[nb] == 0.0 {
+                    worst = worst.max((m - ux[nb].hypot(uy[nb])).abs());
+                }
+            }
+            rough_sum += worst;
+            rough_max = rough_max.max(worst);
+            rough_n += 1;
+        }
+    }
+    let rough_mean = rough_sum / rough_n.max(1) as f64;
+    println!(
+        "[{name}] RING-ROUGH: mean d|U|={rough_mean:.4e} max d|U|={rough_max:.4e} | mean/amb={:.2} max/amb={:.2}",
+        rough_mean / amb_mean.max(1e-30),
+        rough_max / amb_mean.max(1e-30)
+    );
+
+    // LEAK metric (M1 discriminator): pressure-slot face fluxes across every
+    // solid-fluid mixed face of the cylinder, read from the structured `fluxes`
+    // buffer `fluxes[(idx*4+k)*stride + c]` (k: 0=S,1=W,2=E,3=N, normal OUTWARD
+    // from idx). `net` = signed mass flux out of the solid (cancels for
+    // in-one-side-out-the-other leaks); `gross` = sum |phi| (the honest leak
+    // magnitude). Normalized by rho*U_in*D (D=2R frontal-area mass-flux scale).
+    let fluxes = solver.read_buffer("fluxes");
+    let s_per_flux = s_per; // flux stride == coupled unknowns per cell
+    let p_comp = 2usize; // coupled unknown order: [U_x, U_y, p, ...]
+    let (mut leak_net, mut leak_gross, mut mixed_faces) = (0.0f64, 0.0f64, 0usize);
+    for j in 0..NY {
+        for i in 0..NX {
+            let idx = j * NX + i;
+            if sp[idx] == 0.0 {
+                continue; // owner side: solid cells only
+            }
+            let neighbors = [
+                (0usize, j > 0, idx.wrapping_sub(NX)),
+                (1, i > 0, idx.wrapping_sub(1)),
+                (2, i + 1 < NX, idx + 1),
+                (3, j + 1 < NY, idx + NX),
+            ];
+            for (k, valid, nb) in neighbors {
+                if !valid || sp[nb] != 0.0 {
+                    continue; // interior-solid or domain-boundary face
+                }
+                let phi = fluxes[(idx * 4 + k) * s_per_flux + p_comp] as f64;
+                leak_net += phi; // outward from solid
+                leak_gross += phi.abs();
+                mixed_faces += 1;
+            }
+        }
+    }
+    let scale = RHO * U_IN * 2.0 * R;
+    println!(
+        "[{name}] LEAK: gross={leak_gross:.4e} net={leak_net:.4e} over {mixed_faces} mixed faces | gross/(rho*Uin*D)={:.4e} net/(rho*Uin*D)={:.4e}",
+        leak_gross / scale,
+        leak_net / scale
+    );
 }
 
 fn gui_params(allmach: bool) -> RuntimeParams {

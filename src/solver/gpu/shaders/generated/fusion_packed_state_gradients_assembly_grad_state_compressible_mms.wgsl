@@ -361,9 +361,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (k1_dist_proj > 0.000001) {
             k1_dist = k1_dist_proj;
         }
-        let k1_lam_f_center_v = vec2<f32>(k1_f_center.x, k1_f_center.y);
-        let k1_lam_d_own = distance(vec2<f32>(k1_center.x, k1_center.y), k1_lam_f_center_v);
-        let k1_lam_d_neigh = distance(vec2<f32>(k1_other_center.x, k1_other_center.y), k1_lam_f_center_v);
+        let k1_lam_d_own = abs((k1_f_center.x - k1_center.x) * k1_normal.x + (k1_f_center.y - k1_center.y) * k1_normal.y);
+        let k1_lam_d_neigh = abs((k1_other_center.x - k1_f_center.x) * k1_normal.x + (k1_other_center.y - k1_f_center.y) * k1_normal.y);
         let k1_lam_total = k1_lam_d_own + k1_lam_d_neigh;
         var k1_lambda_f: f32 = 0.5;
         if (k1_lam_total > 0.000001) {

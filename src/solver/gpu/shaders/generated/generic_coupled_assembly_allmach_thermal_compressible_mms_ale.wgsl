@@ -234,14 +234,19 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (dist_proj > 0.000001) {
             dist = dist_proj;
         }
-        let lam_f_center_v = vec2<f32>(f_center.x, f_center.y);
-        let lam_d_own = distance(vec2<f32>(center.x, center.y), lam_f_center_v);
-        let lam_d_neigh = distance(vec2<f32>(other_center.x, other_center.y), lam_f_center_v);
+        let lam_d_own = abs((f_center.x - center.x) * normal.x + (f_center.y - center.y) * normal.y);
+        let lam_d_neigh = abs((other_center.x - f_center.x) * normal.x + (other_center.y - f_center.y) * normal.y);
         let lam_total = lam_d_own + lam_d_neigh;
         var lambda_f: f32 = 0.5;
         if (lam_total > 0.000001) {
             lambda_f = lam_d_neigh / lam_total;
         }
+        let ale_mesh_flux_out = select(-mesh_fluxes[face_idx], mesh_fluxes[face_idx], owner == idx);
+        let ale_u_f_x = state[idx * 25u + 0u] * lambda_f + state[other_idx * 25u + 0u] * (1.0 - lambda_f);
+        let ale_u_f_y = state[idx * 25u + 1u] * lambda_f + state[other_idx * 25u + 1u] * (1.0 - lambda_f);
+        let ale_u_n_rel = ale_u_f_x * normal.x + ale_u_f_y * normal.y - ale_mesh_flux_out / area;
+        let ale_upwind_sgn = ale_u_n_rel / max(abs(ale_u_n_rel), 0.000000000001);
+        let ale_rho_f = 0.5 * (state[idx * 25u + 11u] + state[other_idx * 25u + 11u]) + ale_upwind_sgn * 0.5 * (state[idx * 25u + 11u] - state[other_idx * 25u + 11u]);
         let scalar_mat_idx = cell_face_matrix_indices[k];
         let neighbor_rank = scalar_mat_idx - scalar_offset;
         let diff_coeff_U = select(constants.viscosity, constants.viscosity * lambda_f + constants.viscosity * (1.0 - lambda_f), !is_boundary) * area / dist;
@@ -287,7 +292,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let dev2_U_U_mu = select(constants.viscosity, constants.viscosity * lambda_f + constants.viscosity * (1.0 - lambda_f), !is_boundary);
         rhs_0 += dev2_U_U_mu * area * (normal.x * dev2_U_U_gx.x + normal.y * dev2_U_U_gy.x - 0.6666667 * dev2_U_U_div * normal.x);
         rhs_1 += dev2_U_U_mu * area * (normal.x * dev2_U_U_gx.y + normal.y * dev2_U_U_gy.y - 0.6666667 * dev2_U_U_div * normal.y);
-        var phi_0: f32 = fluxes[face_idx * 4u + 0u] - (state[other_idx * 25u + 11u] + lambda_f * (state[idx * 25u + 11u] - state[other_idx * 25u + 11u])) * mesh_fluxes[face_idx];
+        var phi_0: f32 = fluxes[face_idx * 4u + 0u] - ale_rho_f * mesh_fluxes[face_idx];
         if (owner != idx) {
             phi_0 -= phi_0 * 2.0;
         }
@@ -328,7 +333,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 diag_0 += phi_0;
             }
         }
-        var phi_1: f32 = fluxes[face_idx * 4u + 1u] - (state[other_idx * 25u + 11u] + lambda_f * (state[idx * 25u + 11u] - state[other_idx * 25u + 11u])) * mesh_fluxes[face_idx];
+        var phi_1: f32 = fluxes[face_idx * 4u + 1u] - ale_rho_f * mesh_fluxes[face_idx];
         if (owner != idx) {
             phi_1 -= phi_1 * 2.0;
         }
@@ -393,7 +398,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        var phi_2: f32 = fluxes[face_idx * 4u + 2u] - (state[other_idx * 25u + 11u] + lambda_f * (state[idx * 25u + 11u] - state[other_idx * 25u + 11u])) * mesh_fluxes[face_idx];
+        var phi_2: f32 = fluxes[face_idx * 4u + 2u] - ale_rho_f * mesh_fluxes[face_idx];
         if (owner != idx) {
             phi_2 -= phi_2 * 2.0;
         }
@@ -412,7 +417,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        var phi_3: f32 = fluxes[face_idx * 4u + 3u] - (state[other_idx * 25u + 11u] + lambda_f * (state[idx * 25u + 11u] - state[other_idx * 25u + 11u])) * mesh_fluxes[face_idx];
+        var phi_3: f32 = fluxes[face_idx * 4u + 3u] - ale_rho_f * mesh_fluxes[face_idx];
         if (owner != idx) {
             phi_3 -= phi_3 * 2.0;
         }

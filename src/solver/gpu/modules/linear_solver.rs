@@ -137,6 +137,10 @@ fn parse_usize_env(key: &str) -> Option<usize> {
         .and_then(|v| v.parse::<usize>().ok())
 }
 
+fn parse_u32_env(key: &str) -> Option<u32> {
+    std::env::var(key).ok().and_then(|v| v.parse::<u32>().ok())
+}
+
 /// Read the one-submission env tunables. Deliberately *not* a process-global
 /// cache: a `OnceLock` would freeze the first test's environment for the whole
 /// process, making env-guard-based tests order-dependent. Both call sites run
@@ -646,10 +650,26 @@ pub fn submit_solve_fgmres_fixed_iterations_chunked<P: PreconditionerModule>(
     // `tight_budget`: floor/margin of a few iterations and a first solve of one
     // restart cycle instead of max_iters, so a ~10-iteration solve encodes ~18,
     // not 60. Under-budgeting costs one AIMD doubling; physics is unaffected
-    // (inexact Picard).
+    // (inexact Picard) ONLY while the budget stays above what the solve would
+    // run to convergence.
+    //
+    // Floor 16 / margin 8 are NOT free-to-lower: the GUI-incompressible per-solve
+    // iteration distribution is wide-tailed — even at 4.8k cells the bulk needs
+    // 9-14 iterations (rare hard solves hit the 60 cap), and at 76k it routinely
+    // reaches 16-21. A floor of ~8 settles the AIMD budget near ~11, which
+    // TRUNCATES that tail (the solve stops before convergence, changing the
+    // converged state: max|U| drifts up to ~1e-4 rel at 76k). That is real solver
+    // work being cut, not wasted encoded columns — so the default stays at 16/8.
+    // The floor/margin are env-tunable for experiments only; lowering them trades
+    // solver accuracy for ~5-13% wall at the small-mesh plateau.
     let restart_len_u32 = max_restart.max(1) as u32;
     let (budget_floor, budget_margin, initial_budget) = if tight_budget {
-        (16u32.min(restart_len_u32).max(1), 8u32, restart_len_u32)
+        let floor = parse_u32_env("CFD2_TIGHT_BUDGET_FLOOR")
+            .unwrap_or(16)
+            .min(restart_len_u32)
+            .max(1);
+        let margin = parse_u32_env("CFD2_TIGHT_BUDGET_MARGIN").unwrap_or(8);
+        (floor, margin, restart_len_u32)
     } else {
         (restart_len_u32, restart_len_u32, max_iters)
     };

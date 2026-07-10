@@ -523,18 +523,31 @@ fn generate_flux_module_kernel_program_for_model(
                 Scheme::QUICKVanLeer,
             ];
 
+            // Env-gated per-phase timing (`CFD2_KGEN_PROFILE=1`): kernel-program
+            // generation runs at solver construction on the CPU backend, so a
+            // regression here is a GUI freeze — keep the phases observable.
+            let profile = std::env::var("CFD2_KGEN_PROFILE").is_ok();
             let mut variants = Vec::new();
             for reconstruction in schemes {
+                let t = std::time::Instant::now();
                 let kernel = crate::solver::model::flux_schemes::lower_flux_scheme(
                     scheme,
                     &model.system,
                     reconstruction,
                 )
                 .map_err(|e| format!("flux scheme lowering failed: {e}"))?;
+                if profile {
+                    eprintln!(
+                        "[kgen] lower_flux_scheme {:?}: {:.0} ms",
+                        reconstruction,
+                        t.elapsed().as_secs_f64() * 1e3
+                    );
+                }
                 variants.push((reconstruction, kernel));
             }
 
-            generate_flux_module_kernel_program_runtime_scheme(
+            let t = std::time::Instant::now();
+            let out = generate_flux_module_kernel_program_runtime_scheme(
                 KernelId::FLUX_MODULE.as_str(),
                 resolved_slots,
                 &flux_layout,
@@ -543,7 +556,14 @@ fn generate_flux_module_kernel_program_for_model(
                 &variants,
                 &eos_params,
                 structured,
-            )
+            );
+            if profile {
+                eprintln!(
+                    "[kgen] runtime_scheme program gen: {:.0} ms",
+                    t.elapsed().as_secs_f64() * 1e3
+                );
+            }
+            out
         }
     }
 }

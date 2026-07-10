@@ -228,6 +228,8 @@ pub fn generate_flux_module_kernel_program_runtime_scheme(
     let resolver = ResolvedSlotResolver::from_spec(resolved_slots);
     let resolver_ref: &dyn OffsetResolver = &resolver;
 
+    let profile = std::env::var("CFD2_KGEN_PROFILE").is_ok();
+    let t = std::time::Instant::now();
     let main = main_fn_runtime_scheme(
         resolver_ref,
         flux_layout,
@@ -236,7 +238,24 @@ pub fn generate_flux_module_kernel_program_runtime_scheme(
         variants,
         structured,
     );
+    if profile {
+        eprintln!(
+            "[kgen]   main_fn_runtime_scheme: {:.0} ms ({} top-level stmts) | \
+             lower_scalar calls={} lower_primitive calls={}",
+            t.elapsed().as_secs_f64() * 1e3,
+            main.body.stmts.len(),
+            KGEN_LS.load(std::sync::atomic::Ordering::Relaxed),
+            KGEN_LP.load(std::sync::atomic::Ordering::Relaxed)
+        );
+    }
+    let t = std::time::Instant::now();
     let (launch, skip) = extract_launch_pattern_b(&main)?;
+    if profile {
+        eprintln!(
+            "[kgen]   extract_launch_pattern_b: {:.0} ms",
+            t.elapsed().as_secs_f64() * 1e3
+        );
+    }
 
     let kernel_stmts = &main.body.stmts[skip..];
 
@@ -2350,7 +2369,15 @@ fn apply_slipwall_velocity_reflection_resolver(
     dsl::select(base, slip_projected, is_slipwall)
 }
 
+/// `CFD2_KGEN_PROFILE` counters: cumulative `lower_scalar` /
+/// `lower_primitive_expr_at_side` invocations (relaxed; diagnostics only).
+/// The lower_scalar count is the canonical "how much tree did we
+/// materialize" metric for the flux-module lowering.
+pub(crate) static KGEN_LS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+pub(crate) static KGEN_LP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 fn lower_scalar<'a>(expr: &'a FaceScalarExpr, ctx: &LowerCtx<'a>) -> Expr {
+    KGEN_LS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     match expr {
         FaceScalarExpr::Literal(v) => Expr::lit_f32(*v),
         FaceScalarExpr::Builtin(b) => match b {
@@ -2547,6 +2574,7 @@ fn lower_primitive_expr_at_side<'a>(
     ctx: &LowerCtx<'a>,
     side: FaceSide,
 ) -> Expr {
+    KGEN_LP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     use cfd2_ir::ast::ExprNode;
     match expr.node() {
         ExprNode::Literal(_lit) => {

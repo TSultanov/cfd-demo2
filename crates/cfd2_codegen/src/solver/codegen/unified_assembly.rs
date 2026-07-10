@@ -2037,7 +2037,42 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         let flux_pos = dsl::max(acc.phi(u_idx), 0.0);
                         let flux_neg = dsl::min(acc.phi(u_idx), 0.0);
 
-                        let dc_term = acc.phi(u_idx) * (rec.phi_ho - rec.phi_upwind);
+                        // IBM (Brinkman): kill the deferred high-order
+                        // correction on any face touching a penalty cell —
+                        // the SOU/VanLeer reconstruction mixes solid (U≈0)
+                        // states and Green-Gauss gradients across the
+                        // coefficient jump the limiter cannot see, feeding
+                        // the interface velocity speckle. Branchless factor:
+                        // exactly 1.0 on fluid-interior faces (|Sp|=0 both
+                        // sides ⇒ x*1.0, bitwise x), 0.0 across/beside the
+                        // interface ⇒ first-order upwind there (the implicit
+                        // matrix side is untouched). Non-IBM models (no
+                        // `ibm_penalty_U` slot) emit byte-identical code.
+                        let dc_raw = acc.phi(u_idx) * (rec.phi_ho - rec.phi_upwind);
+                        let dc_term = if let Some(pen_slot) = find_slot(slots, IBM_PENALTY_SLOT) {
+                            let sp_own = dsl::abs(state_component_slot(
+                                slots.stride,
+                                "state",
+                                "idx",
+                                pen_slot,
+                                0,
+                            ));
+                            let sp_neigh = dsl::abs(state_component_slot(
+                                slots.stride,
+                                "state",
+                                "other_idx",
+                                pen_slot,
+                                0,
+                            ));
+                            dc_raw
+                                * dsl::select(
+                                    Expr::from(1.0),
+                                    Expr::from(0.0),
+                                    (sp_own + sp_neigh).gt(0.0),
+                                )
+                        } else {
+                            dc_raw
+                        };
 
                         // The reconstruction locals live at the head of the
                         // interior branch: boundary faces never needed them (the

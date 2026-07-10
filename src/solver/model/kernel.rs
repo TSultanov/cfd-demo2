@@ -2037,4 +2037,107 @@ mod tests {
             "barotropic ALE assembly still subtracts the mesh flux"
         );
     }
+
+    /// IBM face-d_p seal INVARIANT (regression gate for the interface-leak
+    /// fix): on models whose layout carries the Brinkman mask `ibm_penalty_U`,
+    /// the flux module and the assembly's pressure-Laplacian coefficient must
+    /// apply the SAME impermeable-wall face d_p — `min(d_p_own, d_p_neigh)` —
+    /// and the flux module must additionally seal the WHOLE face flux with
+    /// `1 - min(|Sp_own|+|Sp_neigh|, 1)` on every component. If either site
+    /// regresses to the arithmetic blend, the wall leaks ~half the fluid-side
+    /// conductance (measured gross leak 0.39·rho·Uin·D — the interface
+    /// speckle); if the flux keeps the blended advective term while the
+    /// Laplacian is sealed, solid-cell continuity is forced through the
+    /// ~1/|Sp| conductance and solid p blows up ~1/d_p (measured p ptp
+    /// 2.3e-4 → 3.8e15). The assembly must ALSO keep the UNSEALED blend on
+    /// SOLID rows (the anchor that slaves solid p to the neighbour average —
+    /// without it the all-Mach ddt(psi_precond,p) solid block is a pressure
+    /// resonator, ring mean|U| ~16x inlet) and gate the deferred correction.
+    /// Non-IBM models must keep the pre-fix blend byte-identically — also
+    /// pinned, so the whole gate keys on layout field presence exactly.
+    #[test]
+    fn contract_ibm_face_dp_seal_matches_flux_module() {
+        let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
+
+        for model in [
+            crate::solver::model::incompressible_momentum_structured_model().expect("model"),
+            crate::solver::model::allmach_thermal_structured_model().expect("model"),
+        ] {
+            let flux =
+                generate_kernel_wgsl_for_model_by_id(&model, &schemes, KernelId::FLUX_MODULE)
+                    .expect("flux_module WGSL");
+            assert!(
+                flux.contains("min(s_own_d_p, s_neigh_d_p)"),
+                "[{}] IBM flux module must use the min-based (impermeable-wall) face d_p",
+                model.id
+            );
+            assert!(
+                !flux.contains("s_own_d_p * lambda"),
+                "[{}] IBM flux module must not blend d_p arithmetically across the \
+                 penalty jump (the interface-leak defect)",
+                model.id
+            );
+            let writes = flux.matches("fluxes[sfd_face_id").count();
+            let seals = flux
+                .matches("(1.0 - min(abs(s_own_ibm_penalty_U) + abs(s_neigh_ibm_penalty_U), 1.0))")
+                .count();
+            assert!(
+                writes > 0 && writes == seals,
+                "[{}] every flux component must carry the whole-face IBM seal \
+                 ({seals}/{writes} did) — an unsealed advective HbyA.n forces solid \
+                 continuity through the ~1/|Sp| conductance and blows up solid p",
+                model.id
+            );
+
+            let asm = generate_kernel_wgsl_for_model_by_id(
+                &model,
+                &schemes,
+                KernelId::GENERIC_COUPLED_ASSEMBLY,
+            )
+            .expect("generic_coupled_assembly WGSL");
+            assert!(
+                asm.contains(") * min(state["),
+                "[{}] IBM assembly's pressure-Laplacian fluid-row coefficient must use \
+                 the SAME min-based face d_p as the flux module",
+                model.id
+            );
+            assert!(
+                asm.contains(") > 0.0), !is_boundary)"),
+                "[{}] IBM assembly's pressure-Laplacian must be row-dependent \
+                 (solid rows keep the unsealed blend that anchors solid p)",
+                model.id
+            );
+            assert!(
+                asm.contains("select(1.0, 0.0, abs(state["),
+                "[{}] IBM assembly must gate the deferred high-order correction \
+                 off penalty-adjacent faces",
+                model.id
+            );
+        }
+
+        // NON-IBM control (no `ibm_penalty_U` in the layout): the pre-fix
+        // arithmetic blend everywhere, no seal, no penalty reads — pinning
+        // that the gate keys on layout field presence and nothing else.
+        let base = crate::solver::model::incompressible_momentum_model().expect("model");
+        let base_flux = generate_kernel_wgsl_for_model_by_id(&base, &schemes, KernelId::FLUX_MODULE)
+            .expect("flux_module WGSL");
+        assert!(
+            base_flux.contains("s_own_d_p * lambda + s_neigh_d_p * lambda_other"),
+            "non-IBM flux module keeps the distance-weighted face d_p blend"
+        );
+        assert!(
+            !base_flux.contains("ibm_penalty_U") && !base_flux.contains("min(s_own_d_p"),
+            "non-IBM flux module must not reference the IBM seal"
+        );
+        let base_asm = generate_kernel_wgsl_for_model_by_id(
+            &base,
+            &schemes,
+            KernelId::GENERIC_COUPLED_ASSEMBLY,
+        )
+        .expect("generic_coupled_assembly WGSL");
+        assert!(
+            !base_asm.contains(") * min(state[") && !base_asm.contains("select(1.0, 0.0, abs(state["),
+            "non-IBM assembly must keep the pre-fix blend and deferred correction"
+        );
+    }
 }

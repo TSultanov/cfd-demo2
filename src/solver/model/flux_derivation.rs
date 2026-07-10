@@ -287,10 +287,44 @@ fn derive_rhie_chow_flux(
     // (`dist`) as the Laplacian discretization, so the two stay consistent.
     let rho_face = density_face_expr(&registry, system.is_ale())?;
 
-    let d_p_face = S::Lerp(
-        Box::new(S::state(FaceSide::Owner, d_p.clone())),
-        Box::new(S::state(FaceSide::Neighbor, d_p.clone())),
-    );
+    // Face interpolation of d_p.
+    //
+    // Default: distance-weighted Lerp (matches the pressure-Laplacian
+    // face coefficient blend in the unified assembly).
+    //
+    // IBM (Brinkman) models — gated on the layout carrying the per-cell
+    // momentum-penalty mask `ibm_penalty_U` (same gate as the dp_update
+    // Brinkman mask in modules/rhie_chow.rs; a literal so this stays
+    // resolvable in the build.rs include!() codegen context) — use the
+    // MIN of the two cell values instead. The dp_update mask collapses
+    // d_p to ~1/|Sp| ~ 0 inside the solid, but an arithmetic face blend
+    // at a solid/fluid jump re-admits HALF the fluid-side conductance
+    // (~0.5*d_p_fluid), so the pressure equation drives mass THROUGH the
+    // immersed wall (interface velocity speckle, solid staircase leak).
+    // A wall is impermeable in SERIES: the interface conductance must be
+    // dominated by the blocked side, and `min` is exactly that (and is
+    // the strongest such seal; harmonic mean 2ab/(a+b) ~ 2*min at a 4+
+    // order jump — only 2x weaker, but min is simpler and exact at the
+    // uniform-fluid limit). On fluid-fluid faces the ClosedForm d_p is
+    // uniform, so min(a,a) == lerp(a,a) == a and the flux is unchanged;
+    // non-IBM models keep the Lerp byte-identically. The unified
+    // assembly's pressure-Laplacian face coefficient applies the SAME
+    // min under the SAME gate (crates/cfd2_codegen .../unified_assembly.rs,
+    // `split_dp_coeff_factor` / `ibm_dp_seal` — keep the two sites
+    // matched, see the flux/assembly consistency invariant there). This
+    // is only HALF the wall seal: see the whole-flux `seal` factor below.
+    let ibm_seal = layout.offset_for("ibm_penalty_U").is_some();
+    let d_p_face = if ibm_seal {
+        S::Min(
+            Box::new(S::state(FaceSide::Owner, d_p.clone())),
+            Box::new(S::state(FaceSide::Neighbor, d_p.clone())),
+        )
+    } else {
+        S::Lerp(
+            Box::new(S::state(FaceSide::Owner, d_p.clone())),
+            Box::new(S::state(FaceSide::Neighbor, d_p.clone())),
+        )
+    };
 
     // `HbyA` is the momentum predictor for the "predicted" mass flux (pressure
     // equation RHS); the explicit pressure correction is subtracted after.
@@ -341,14 +375,51 @@ fn derive_rhie_chow_flux(
         .iter()
         .map(|c| c.name.clone())
         .collect();
+    // IBM (Brinkman) impermeable-wall face seal, part two: zero the ENTIRE
+    // face flux (every component — predicted AND corrected) on any face
+    // touching a penalty cell. The min-based `d_p_face` above seals only the
+    // PRESSURE-driven terms; the advective `HbyA.n ~ U_f.n` part still lerps
+    // the fluid-side velocity across the interface (the solid side is ~0 but
+    // the face value is ~0.5*U_fluid). MEASURED consequence of sealing d_p
+    // alone: solid-cell continuity must then balance that unsealed inflow
+    // through the ~1/|Sp| conductance, so the solid pressure blows up ~1/d_p
+    // (GUI-regime probe: near-p ptp 2.3e-4 -> 3.8e15, max|U| -> 1e8). A wall
+    // admits NO mass flux, so the flux itself must vanish at the interface.
+    //
+    // Branchless factor, exact at both ends:
+    //   seal = 1 - min(|Sp_own| + |Sp_neigh|, 1)
+    // fluid-fluid faces: |0|+|0| = 0 => seal = 1.0 and `phi * 1.0` is the
+    // IEEE identity (bitwise unchanged); penalty-adjacent faces (|Sp| ~ 1e5)
+    // => seal = 0.0 exactly. Non-IBM models never take this branch. The
+    // assembly needs no advective mirror: it consumes the sealed `fluxes`
+    // buffer directly, and its implicit pressure-Laplacian coefficient uses
+    // the SAME min-based d_p (~1/|Sp|, small but nonzero) — which keeps the
+    // solid pressure block non-singular (solid p relaxes to the neighbour
+    // average through the tiny conductance) while matching the sealed flux
+    // to O(d_p_solid).
     let flux: Vec<S> = components
         .iter()
         .map(|name| {
-            if name == &pressure {
+            let phi = if name == &pressure {
                 phi_pred.clone()
             } else {
                 phi_corr.clone()
+            };
+            if !ibm_seal {
+                return phi;
             }
+            let sp_sum = S::Add(
+                Box::new(S::Abs(Box::new(S::state(FaceSide::Owner, "ibm_penalty_U")))),
+                Box::new(S::Abs(Box::new(S::state(
+                    FaceSide::Neighbor,
+                    "ibm_penalty_U",
+                )))),
+            );
+            let seal = S::Sub(
+                Box::new(S::lit(1.0)),
+                Box::new(S::Min(Box::new(sp_sum), Box::new(S::lit(1.0)))),
+            );
+            S::Mul(Box::new(phi), Box::new(seal))
         })
         .collect();
 

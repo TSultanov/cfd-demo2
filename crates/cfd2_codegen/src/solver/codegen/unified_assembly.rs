@@ -1091,38 +1091,38 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             None,
         ));
 
-        // Distance-weighted face interpolation weight (owner weight =
-        // d_neigh / (d_own + d_neigh), the standard FV linear weight).
+        // Distance-weighted face interpolation weight (weight of `idx` =
+        // d_other / (d_idx + d_other), the standard FV linear weight).
         // Matches the derived Rhie-Chow flux kernel's Lerp convention —
         // the assembly's face coefficients MUST interpolate identically to
         // the flux module's face d_p or the pressure system loses
         // consistency. On uniform meshes lambda = 0.5.
-        // (Vector2 is the custom STRUCT; convert member-wise for distance().)
-        body.push(dsl::let_expr(
-            "lam_f_center_v",
-            dsl::vec2_f32(
-                Expr::ident("f_center").field("x"),
-                Expr::ident("f_center").field("y"),
-            ),
-        ));
+        //
+        // Distances are the face-normal PROJECTED cell-to-face distances
+        // `|dot(f_center - center, n)|` — the OpenFOAM
+        // `surfaceInterpolation::weights()` form and EXACTLY what the flux
+        // module computes (`d_own`/`d_neigh` in the flux kernels); `abs` makes
+        // the normal's orientation irrelevant. A Euclidean `distance()` (the
+        // former form) is identical on orthogonal meshes but diverges at
+        // O(skew) on CVT/deformed ALE meshes, so the assembly's kappa/rho_f
+        // interpolation carried different weights than the flux it must match.
         body.push(dsl::let_expr(
             "lam_d_own",
-            dsl::distance(
-                dsl::vec2_f32(
-                    Expr::ident("center").field("x"),
-                    Expr::ident("center").field("y"),
-                ),
-                Expr::ident("lam_f_center_v"),
+            dsl::abs(
+                (Expr::ident("f_center").field("x") - Expr::ident("center").field("x"))
+                    * Expr::ident("normal").field("x")
+                    + (Expr::ident("f_center").field("y") - Expr::ident("center").field("y"))
+                        * Expr::ident("normal").field("y"),
             ),
         ));
         body.push(dsl::let_expr(
             "lam_d_neigh",
-            dsl::distance(
-                dsl::vec2_f32(
-                    Expr::ident("other_center").field("x"),
-                    Expr::ident("other_center").field("y"),
-                ),
-                Expr::ident("lam_f_center_v"),
+            dsl::abs(
+                (Expr::ident("other_center").field("x") - Expr::ident("f_center").field("x"))
+                    * Expr::ident("normal").field("x")
+                    + (Expr::ident("other_center").field("y")
+                        - Expr::ident("f_center").field("y"))
+                        * Expr::ident("normal").field("y"),
             ),
         ));
         body.push(dsl::let_expr(

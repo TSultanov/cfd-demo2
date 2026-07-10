@@ -871,6 +871,21 @@ impl StructuredModelSolver {
                 self.threads,
                 Some(&self.amg_cache),
             );
+            // NON-FINITE system (e.g. a NaN auxiliary poisoning the assembly —
+            // the observed case: an un-seeded `u_ref` makes the on-device
+            // psi_precond recovery emit NaN at quiescent cells): the solve
+            // bailed without a usable correction (x = the zero initial guess).
+            // Applying it would DRIVE THE STATE TO ZERO through the
+            // under-relaxed update. Match the unstructured failure convention
+            // (fgmres restores its warm start = current state): FREEZE this
+            // step — skip the update — and surface the failure via the stats
+            // (linear_res = inf on the GUI readout).
+            if !res.is_finite() {
+                last_res = f32::INFINITY;
+                last_iters = iters;
+                outers_done += 1;
+                break;
+            }
             if counting_stalls {
                 // Flip AMG as soon as heavy-ball either fails to reduce the residual
                 // OR converges only after burning a full GMRES restart budget

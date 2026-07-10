@@ -835,8 +835,9 @@ fn banded_fgmres(
     };
 
     // Per-block true relative residual of the CANDIDATE iterate (`x` at the exit
-    // points below) and the aggregate scale for the trusted in-cycle fast-path.
-    let mut rel = f64::INFINITY;
+    // points below; every loop `break` assigns it first) and the aggregate scale
+    // for the trusted in-cycle fast-path.
+    let mut rel;
     let mut agg_scale: Option<f64> = None;
     // Recompute `rel` for a RESTORED iterate on the bail paths (one extra SpMV;
     // the common converged/budget exits reuse the head's residual).
@@ -865,6 +866,16 @@ fn banded_fgmres(
                 trust_projection = false;
                 proj_broke_early = false;
                 continue;
+            }
+            if std::env::var("CFD2_STRUCT_SOLVE_DEBUG").is_ok() {
+                let bad_b = b64.iter().filter(|v| !v.is_finite()).count();
+                let bad_a = a.iter().filter(|v| !v.is_finite()).count();
+                eprintln!(
+                    "[banded] NON-FINITE head beta={beta} iters={total_iters} \
+                     (non-finite entries: b {bad_b}/{}, a {bad_a}/{})",
+                    b64.len(),
+                    a.len()
+                );
             }
             x.copy_from_slice(&best_x);
             rel = if best_beta.is_finite() { rel_at(&x) } else { f64::INFINITY };

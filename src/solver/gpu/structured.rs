@@ -933,6 +933,7 @@ impl StructuredGpuSolver {
 
             // Banded solve: x = A^{-1} rhs. Keep last outer's *linear* stats;
             // Picard residual is measured from applied state change below.
+            let mut solve_failed = false;
             if let Some(st) = self.solver.solve(
                 &self.ctx,
                 self.buf("grid"),
@@ -942,6 +943,15 @@ impl StructuredGpuSolver {
             ) {
                 solve_stats.linear_iters = st.linear_iters;
                 solve_stats.linear_res = st.linear_res;
+                solve_failed = !st.linear_res.is_finite();
+            }
+            // NON-FINITE system: no usable correction was produced (and `x` was
+            // not uploaded). Applying the update would blend in a stale/zero
+            // iterate and destroy the state — FREEZE the step instead and
+            // surface the failure via `linear_res = inf` (CPU structured parity).
+            if solve_failed {
+                outers_done += 1;
+                break;
             }
 
             // Update: state <- phi + alpha*(x - phi) under-relaxation.
@@ -1539,17 +1549,24 @@ impl BandedGpuLinAlg {
         );
         // Flip AMG once heavy-ball either fails to reduce the residual or
         // converges only after burning a full GMRES restart cycle (iters > 60)
-        // — the h-dependent regime AMG cures. Mirrors cpu/structured.rs.
+        // — the h-dependent regime AMG cures. Mirrors cpu/structured.rs. A
+        // non-finite residual (poisoned system) must NOT latch AMG.
         if amg_requested
             && !self.amg_active.load(Ordering::Relaxed)
+            && res.is_finite()
             && (res > 0.7 || iters > 60)
         {
             self.amg_active.store(true, Ordering::Relaxed);
         }
-        // Picard outer residual is measured by `StructuredGpuSolver::step` from
-        // applied |state − state_iter| after under-relaxation — not from |xh|.
-        // Absolute |x| is freestream-scale (or T≈1) and is not a residual.
-        ctx.queue.write_buffer(x, 0, bytemuck::cast_slice(&xh));
+        // NON-FINITE system: the solve bailed without a usable correction —
+        // do NOT upload the zero iterate (the caller skips the update and
+        // freezes the step; see `StructuredGpuSolver::step`, CPU parity).
+        if res.is_finite() {
+            // Picard outer residual is measured by `StructuredGpuSolver::step` from
+            // applied |state − state_iter| after under-relaxation — not from |xh|.
+            // Absolute |x| is freestream-scale (or T≈1) and is not a residual.
+            ctx.queue.write_buffer(x, 0, bytemuck::cast_slice(&xh));
+        }
         crate::solver::banded_schur::StructuredStepStats {
             outer_iters: 0, // filled in by the caller (`step`), which owns the count
             linear_iters: iters,

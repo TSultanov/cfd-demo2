@@ -606,6 +606,16 @@ fn gpu_structured_thermal_lid_matches_cpu() {
         solver.seed("T", 1.0);
         solver.seed_if("t_ref", 1.0);
         solver.seed_if("rho_floor", psi * 1.0e-5);
+        // Low-Mach preconditioner CONFIG (same convention as the channel+IBM
+        // tests below and the GUI driver): the on-device psi_precond recovery
+        // reads beta^2 = max(|U|^2, u_ref^2) — WITHOUT u_ref a from-rest cell
+        // computes a non-finite psi_precond, which poisons the pressure rows
+        // of the NEXT assembly. (The old NaN-blind solve masked this by
+        // grinding its full 12,000-iteration budget and freezing the state;
+        // the honest solve surfaces it and freezes explicitly.)
+        // u_ref = 2 * max(u_lid, 0.2).
+        solver.seed_if("u_ref", 2.0);
+        solver.seed_if("precond_mask", 1.0);
     };
     let bc = move |edge: Edge| {
         let u_wall = if matches!(edge, Edge::Top) { 1.0 } else { 0.0 };

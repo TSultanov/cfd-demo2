@@ -761,21 +761,9 @@ fn generate_fusion_schedule_registry(manifest_dir: &str, models: &[solver::model
     let handwritten_kernel_ids = collect_handwritten_kernel_ids(manifest_dir);
 
     let stepping_cases = [
-        (
-            0u8,
-            solver::model::kernel::KernelFusionStepping::Explicit,
-            false,
-        ),
-        (
-            1u8,
-            solver::model::kernel::KernelFusionStepping::Implicit,
-            true,
-        ),
-        (
-            2u8,
-            solver::model::kernel::KernelFusionStepping::Coupled,
-            false,
-        ),
+        (0u8, solver::model::kernel::KernelFusionStepping::Explicit),
+        (1u8, solver::model::kernel::KernelFusionStepping::Implicit),
+        (2u8, solver::model::kernel::KernelFusionStepping::Coupled),
     ];
     let policies = [
         solver::model::kernel::KernelFusionPolicy::Off,
@@ -798,8 +786,7 @@ fn generate_fusion_schedule_registry(manifest_dir: &str, models: &[solver::model
         let has_neighbor_grad_consumers =
             solver::model::kernel::model_has_neighbor_grad_consumers(model);
 
-        for (stepping_tag, fusion_stepping, satisfies_requires_implicit_stepping) in stepping_cases
-        {
+        for (stepping_tag, fusion_stepping) in stepping_cases {
             for has_grad_state in [false, true] {
                 let filtered_specs: Vec<solver::model::kernel::ModelKernelSpec> =
                     model_kernel_specs
@@ -809,7 +796,7 @@ fn generate_fusion_schedule_registry(manifest_dir: &str, models: &[solver::model
                             include_kernel_in_schedule(
                                 spec.condition,
                                 has_grad_state,
-                                satisfies_requires_implicit_stepping,
+                                fusion_stepping,
                             )
                         })
                         .collect();
@@ -922,29 +909,30 @@ fn generate_fusion_schedule_registry(manifest_dir: &str, models: &[solver::model
 fn include_kernel_in_schedule(
     condition: solver::model::kernel::KernelConditionId,
     has_grad_state: bool,
-    satisfies_requires_implicit_stepping: bool,
+    stepping: solver::model::kernel::KernelFusionStepping,
 ) -> bool {
+    let explicit = stepping == solver::model::kernel::KernelFusionStepping::Explicit;
     match condition {
         solver::model::kernel::KernelConditionId::Always => true,
         solver::model::kernel::KernelConditionId::RequiresGradState => has_grad_state,
         solver::model::kernel::KernelConditionId::RequiresNoGradState => !has_grad_state,
         solver::model::kernel::KernelConditionId::RequiresImplicitStepping => {
-            satisfies_requires_implicit_stepping
+            !explicit
         }
         solver::model::kernel::KernelConditionId::RequiresExplicitStepping => {
-            !satisfies_requires_implicit_stepping
+            explicit
         }
         solver::model::kernel::KernelConditionId::RequiresGradStateAndImplicitStepping => {
-            has_grad_state && satisfies_requires_implicit_stepping
+            has_grad_state && !explicit
         }
         solver::model::kernel::KernelConditionId::RequiresNoGradStateAndImplicitStepping => {
-            !has_grad_state && satisfies_requires_implicit_stepping
+            !has_grad_state && !explicit
         }
         solver::model::kernel::KernelConditionId::RequiresGradStateAndExplicitStepping => {
-            has_grad_state && !satisfies_requires_implicit_stepping
+            has_grad_state && explicit
         }
         solver::model::kernel::KernelConditionId::RequiresNoGradStateAndExplicitStepping => {
-            !has_grad_state && !satisfies_requires_implicit_stepping
+            !has_grad_state && explicit
         }
     }
 }

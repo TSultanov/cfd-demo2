@@ -53,6 +53,25 @@ impl ModelSpec {
                 self.id
             ));
         }
+        // Pressure-based (Rhie–Chow collocated) models carry a `d_p` coupling
+        // coefficient produced by the Update-phase dp_init/dp_update kernels and
+        // read back by the pressure residual as `lap(rho*d_p, p)`. The matrix-free
+        // RK stages never run the Update phase (and there is no assembled diagonal
+        // to derive d_p from), so that elliptic pressure–velocity coupling term
+        // would silently vanish (d_p stays at its zero-init value) and the
+        // collocated pressure field checkerboards. Exclude such models until an
+        // explicit d_p closure is defined.
+        if self
+            .state_layout
+            .fields()
+            .iter()
+            .any(|field| field.name() == "d_p")
+        {
+            return Err(format!(
+                "model '{}' uses Rhie–Chow pressure coupling (a `d_p` field produced only by the implicit Update phase); explicit RK4 has no d_p closure and would lose pressure–velocity coupling",
+                self.id
+            ));
+        }
         let primitives = self.explicit_primitives.as_ref().unwrap_or(&self.primitives);
         for equation in self.system.equations() {
             let target = equation.target();

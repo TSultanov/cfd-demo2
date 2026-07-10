@@ -5231,7 +5231,18 @@ fn structured_pin_dt(
         // target_cfl only makes the acoustic mass term `psi_precond·V/dt` comparable
         // to the pressure Laplacian (R = 1/(4·α_u·CFL_β²)), which de-ellipticises the
         // pressure and stalls/destabilises the flow.
-        let wave_speed = adv_speed + effective_sound_speed;
+        // Explicit RK4 integrates the real acoustics directly (no implicit
+        // pressure solve, no low-Mach preconditioning of the residual), so its
+        // acoustic CFL MUST use the TRUE sound speed. The `effective_sound_speed`
+        // reduction is valid only for the implicit/coupled paths; reusing it under
+        // RK4 sizes dt against a preconditioned wave speed ~10^3–10^4x too small
+        // and the explicit compressible step diverges.
+        let acoustic_speed = if params.time_scheme == GpuTimeScheme::RK4 {
+            sound_speed
+        } else {
+            effective_sound_speed
+        };
+        let wave_speed = adv_speed + acoustic_speed;
         let min_h = s.st_min_cell_size();
         let mut stable_dt = if min_h > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
             Some(params.target_cfl * min_h / wave_speed)

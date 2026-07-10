@@ -262,9 +262,6 @@ fn explicit_capability_is_derived_from_the_model_math() {
         scalar_transport_model().expect("transport"),
         compressible_model().expect("compressible"),
         compressible_structured_model().expect("structured compressible"),
-        allmach_pressure_model().expect("allmach"),
-        allmach_thermal_model().expect("allmach thermal"),
-        allmach_thermal_structured_model().expect("structured allmach thermal"),
     ] {
         model
             .validate_explicit_rk4()
@@ -283,6 +280,22 @@ fn explicit_capability_is_derived_from_the_model_math() {
         biharmonic.validate_explicit_rk4().is_err(),
         "auxiliary elliptic constraint rows need a dedicated explicit closure"
     );
+    // Pressure-based (Rhie–Chow) all-Mach models carry a `d_p` coupling
+    // coefficient produced only by the implicit Update phase, which the
+    // matrix-free RK stages never run; without an explicit d_p closure the
+    // elliptic pressure–velocity coupling would silently vanish, so they are
+    // deliberately excluded from the fully explicit path.
+    for model in [
+        allmach_pressure_model().expect("allmach"),
+        allmach_thermal_model().expect("allmach thermal"),
+        allmach_thermal_structured_model().expect("structured allmach thermal"),
+    ] {
+        assert!(
+            model.validate_explicit_rk4().is_err(),
+            "{} uses Rhie–Chow d_p coupling and must not be presented as a matrix-free explicit ODE",
+            model.id
+        );
+    }
 }
 
 #[test]
@@ -330,9 +343,13 @@ fn compressible_uniform_freestream_is_preserved() {
 }
 
 #[test]
-fn allmach_uniform_rest_state_is_preserved() {
+fn allmach_pressure_based_models_are_rejected_from_explicit_rk4() {
+    // Pressure-based all-Mach models depend on the Rhie–Chow `d_p` coupling that
+    // only the implicit Update phase produces; the matrix-free RK path cannot
+    // build an RK4 solver for them and must fail loudly at construction rather
+    // than silently drop the pressure–velocity coupling.
     let mesh = generate_structured_rect_mesh(4, 4, 1.0, 1.0, BoundarySides::wall());
-    let mut solver = CpuSolver::with_stepping(
+    let err = CpuSolver::with_stepping(
         &mesh,
         allmach_pressure_model().expect("allmach"),
         Scheme::QUICKVanLeer,
@@ -340,38 +357,12 @@ fn allmach_uniform_rest_state_is_preserved() {
         SteppingMode::Explicit,
         CpuBackendConfig::default(),
     )
-    .expect("explicit allmach solver");
-    assert!(solver.debug_is_fully_matrix_free());
-    solver.set_dt(1.0e-3);
-    solver.set_density(1.0);
-    solver
-        .set_field_vec2("U", &vec![(0.0, 0.0); mesh.num_cells()])
-        .unwrap();
-    solver.set_field_scalar("p", &vec![0.0; mesh.num_cells()]).unwrap();
-    solver
-        .set_field_scalar("psi", &vec![0.01; mesh.num_cells()])
-        .unwrap();
-    solver
-        .set_field_scalar("psi_precond", &vec![0.01; mesh.num_cells()])
-        .unwrap();
-    solver.set_field_scalar("rho", &vec![1.0; mesh.num_cells()]).unwrap();
-    solver.initialize_history();
-
-    solver.step();
-
-    let p_error = solver
-        .get_field_scalar("p")
-        .unwrap()
-        .into_iter()
-        .map(f64::abs)
-        .fold(0.0_f64, f64::max);
-    let u_error = solver
-        .get_field_vec2("U")
-        .unwrap()
-        .into_iter()
-        .map(|(x, y)| x.abs().max(y.abs()))
-        .fold(0.0_f64, f64::max);
-    assert!(p_error < 2.0e-6 && u_error < 2.0e-6, "allmach rest drift p={p_error:e} u={u_error:e}");
+    .err()
+    .expect("allmach_pressure must be rejected from the explicit RK4 path");
+    assert!(
+        err.contains("d_p") || err.to_lowercase().contains("rhie"),
+        "unexpected rejection reason for allmach_pressure under RK4: {err}"
+    );
 }
 
 #[test]

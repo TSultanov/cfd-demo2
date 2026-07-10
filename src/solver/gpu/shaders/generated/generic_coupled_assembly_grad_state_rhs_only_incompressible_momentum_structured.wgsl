@@ -200,7 +200,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     }
                 }
             }
-            rhs_0 -= phi_0 * (rec_0_phi_ho - select(state[idx * 9u + 0u], state[other_idx * 9u + 0u], phi_0 < 0.0));
+            rhs_0 -= phi_0 * (rec_0_phi_ho - select(state[idx * 9u + 0u], state[other_idx * 9u + 0u], phi_0 < 0.0)) * select(1.0, 0.0, abs(state[idx * 9u + 8u]) + abs(state[other_idx * 9u + 8u]) > 0.0);
         } else {
             if (bc_kind[face_idx * 3u + 0u] == 1u) {
                 rhs_0 -= min(phi_0, 0.0) * bc_value[face_idx * 3u + 0u];
@@ -237,7 +237,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     }
                 }
             }
-            rhs_1 -= phi_1 * (rec_1_phi_ho - select(state[idx * 9u + 1u], state[other_idx * 9u + 1u], phi_1 < 0.0));
+            rhs_1 -= phi_1 * (rec_1_phi_ho - select(state[idx * 9u + 1u], state[other_idx * 9u + 1u], phi_1 < 0.0)) * select(1.0, 0.0, abs(state[idx * 9u + 8u]) + abs(state[other_idx * 9u + 8u]) > 0.0);
         } else {
             if (bc_kind[face_idx * 3u + 1u] == 1u) {
                 rhs_1 -= min(phi_1, 0.0) * bc_value[face_idx * 3u + 1u];
@@ -254,14 +254,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else {
             rhs_1 -= 0.5 * area * normal.y * select(select(state[idx * 9u + 2u], bc_value[face_idx * 3u + 2u], bc_kind[face_idx * 3u + 2u] == 1u), state[idx * 9u + 2u] + bc_value[face_idx * 3u + 2u] * dist, bc_kind[face_idx * 3u + 2u] == 2u) * 2.0;
         }
-        let diff_coeff_p = select(constants.density * state[idx * 9u + 3u], constants.density * state[idx * 9u + 3u] * lambda_f + constants.density * state[other_idx * 9u + 3u] * (1.0 - lambda_f), !is_boundary) * area / dist;
+        let diff_coeff_p = select(constants.density * state[idx * 9u + 3u], select((constants.density * lambda_f + constants.density * (1.0 - lambda_f)) * min(state[idx * 9u + 3u], state[other_idx * 9u + 3u]), constants.density * state[idx * 9u + 3u] * lambda_f + constants.density * state[other_idx * 9u + 3u] * (1.0 - lambda_f), abs(state[idx * 9u + 8u]) > 0.0), !is_boundary) * area / dist;
         if (!is_boundary) {
         } else {
             if (bc_kind[face_idx * 3u + 2u] == 1u) {
                 rhs_2 += diff_coeff_p * bc_value[face_idx * 3u + 2u];
             } else {
                 if (bc_kind[face_idx * 3u + 2u] == 2u) {
-                    rhs_2 += select(constants.density * state[idx * 9u + 3u], constants.density * state[idx * 9u + 3u] * lambda_f + constants.density * state[other_idx * 9u + 3u] * (1.0 - lambda_f), !is_boundary) * area * bc_value[face_idx * 3u + 2u];
+                    rhs_2 += select(constants.density * state[idx * 9u + 3u], select((constants.density * lambda_f + constants.density * (1.0 - lambda_f)) * min(state[idx * 9u + 3u], state[other_idx * 9u + 3u]), constants.density * state[idx * 9u + 3u] * lambda_f + constants.density * state[other_idx * 9u + 3u] * (1.0 - lambda_f), abs(state[idx * 9u + 8u]) > 0.0), !is_boundary) * area * bc_value[face_idx * 3u + 2u];
                 }
             }
         }

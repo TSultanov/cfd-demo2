@@ -817,26 +817,37 @@ fn ast_stmt_references_field(stmt: &cfd2_ir::ast::Stmt, base: &str, field: &str)
 }
 
 fn constants_extra_params_for_program(program: &KernelProgram) -> Vec<ParamSpec> {
-    let known_eos_fields = [
+    // Unstructured GPU kernels bind the shared `GpuConstants` POD wholesale.
+    // A WGSL struct may omit an unused suffix, but it must never omit a field in
+    // the middle of that canonical tail: doing so shifts every later field (for
+    // example a kernel using eos_gm1/eos_r would read gamma/gm1).  The AST fallback
+    // therefore emits the complete prefix through the last referenced field.
+    let canonical_tail_fields = [
         ("eos.gamma", "eos_gamma"),
         ("eos.gm1", "eos_gm1"),
         ("eos.r", "eos_r"),
         ("eos.dp_drho", "eos_dp_drho"),
         ("eos.p_offset", "eos_p_offset"),
         ("eos.theta_ref", "eos_theta_ref"),
+        ("buoyant.beta_g", "buoyant_beta_g"),
+        ("buoyant.t0", "buoyant_t0"),
+        ("buoyant.k_over_cp", "buoyant_k_over_cp"),
     ];
-    let mut extras = Vec::new();
-    for (key, field) in known_eos_fields {
-        if program_references_constants_field(program, field) {
-            extras.push(ParamSpec {
-                key,
-                wgsl_field: field,
-                wgsl_type: "f32",
-                unit: Dimensionless::UNIT,
-            });
-        }
-    }
-    extras
+    let Some(last_referenced) = canonical_tail_fields
+        .iter()
+        .rposition(|(_, field)| program_references_constants_field(program, field))
+    else {
+        return Vec::new();
+    };
+    canonical_tail_fields[..=last_referenced]
+        .iter()
+        .map(|&(key, field)| ParamSpec {
+            key,
+            wgsl_field: field,
+            wgsl_type: "f32",
+            unit: Dimensionless::UNIT,
+        })
+        .collect()
 }
 
 /// Rename identifiers in an expression tree using a rename map.
@@ -1965,6 +1976,33 @@ mod tests {
             src.contains("eos_gamma: f32"),
             "AST search should detect eos_gamma in body"
         );
+    }
+
+    #[test]
+    fn ast_detected_constants_keep_the_shared_host_tail_prefix() {
+        let launch = LaunchSemantics::new([64, 1, 1], "global_id.x", None::<String>);
+        let mut program = KernelProgram::new(
+            "ast_eos_prefix_test",
+            DispatchDomain::Cells,
+            launch,
+            vec![
+                KernelBinding::new(0, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage),
+                KernelBinding::new(0, 1, "constants", "Constants", BindingAccess::Uniform),
+            ],
+        );
+        program.body = vec![cfd2_ir::ast::Stmt::Assign {
+            target: cfd2_ir::ast::Expr::ident("state")
+                .index(cfd2_ir::ast::Expr::ident("idx")),
+            value: cfd2_ir::ast::Expr::ident("constants").field("eos_r"),
+        }];
+
+        let src = lower_kernel_program_to_wgsl(&program)
+            .expect("lowering should succeed")
+            .to_wgsl();
+        let gamma = src.find("eos_gamma: f32").expect("gamma prefix");
+        let gm1 = src.find("eos_gm1: f32").expect("gm1 prefix");
+        let gas_constant = src.find("eos_r: f32").expect("referenced R");
+        assert!(gamma < gm1 && gm1 < gas_constant, "noncanonical tail:\n{src}");
     }
 
     #[test]

@@ -11,37 +11,34 @@
 //! expansion, acoustic ddt) are identically zero at the steady manufactured
 //! solution, so they leave the observed order untouched.
 //!
-//! Manufactured solution (steady, unit square, all-MovingWall mesh):
-//!   Psi(x,y) = A sin(pi x) sin(pi y)            (stream fn; div-free velocity)
+//! Manufactured solution (steady, unit square, exact Dirichlet outlet anchor):
+//!   Psi(x,y) = (A/pi) sin(pi x) sin(pi y)       (stream fn; div-free velocity)
 //!   U*       = (dPsi/dy, -dPsi/dx)              => div U* = 0 (dev2/grad(divU)=0)
 //!   T*       = T_ref (1.5 + 0.5 cos(pi x) cos(pi y))     in [T_ref, 2 T_ref]
-//!   p*       = P_AMP (cos(2 pi x) + cos(2 pi y))         (zero normal grad on walls)
+//!   p*       = P_AMP (cos(2 pi x) + cos(2 pi y))
 //!   rho*     = rho_t_ref/T* + gamma*PSI*t_ref*p*/T*      (the device recovery)
 //!   m*       = rho* U*                                   (Rhie-Chow mass flux)
 //!
 //! Because the MASS flux m* is NOT divergence-free (div(rho*U*)=U*.grad(rho)!=0),
-//! the continuity row is forced by S_p = +div(m*). The momentum and (extended)
-//! energy sources are 4th-order central finite differences of the exact closures.
-#![cfg(all(feature = "dev-tests", feature = "ui"))]
-
-mod mms_support;
+//! the continuity row is forced by S_p = +div(m*). The bounded momentum and
+//! conservative extended-energy sources are 4th-order central finite differences
+//! of the exact closures. The gate assembles at the exact state and measures
+//! `(rhs - A*x_exact)/V`, avoiding nonlinear marching error and pressure-gauge drift.
+#![cfg(all(feature = "dev-tests", feature = "cpu"))]
 
 use std::f64::consts::PI;
 
-use cfd2::solver::gpu::enums::GpuBoundaryType;
+use cfd2::solver::cpu::{CpuBackendConfig, CpuSolver};
+use cfd2::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
+use cfd2::solver::gpu::recipe::SteppingMode;
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType, Mesh};
-use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
 use cfd2::solver::model::{
     allmach_thermal_compressible_mms_model, ALLMACH_GAMMA, ALLMACH_K_OVER_CP,
     ALLMACH_MMS_SOURCE_P_FIELD, ALLMACH_MMS_SOURCE_T_FIELD, ALLMACH_MMS_SOURCE_U_FIELD,
     ALLMACH_T_REF,
 };
 use cfd2::solver::scheme::Scheme;
-use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
-
-use mms_support::{
-    field_errors, field_errors_vec2, fit_order, run_to_steady_vec2_with_scalars,
-};
+use cfd2::solver::TimeScheme;
 
 const MU: f64 = 1.0;
 const RHO_REF: f64 = 1.0;
@@ -56,21 +53,6 @@ const U_AMP: f64 = 0.1; // Taylor-Green velocity amplitude -> moderate Peclet
 const P_AMP: f64 = 0.25;
 const RHO_T_REF: f64 = RHO_REF * T_REF;
 
-// The compressible energy sources U.grad(p) (from the stored grad_p) and Phi (from
-// grad_state) are EXPLICIT, Picard-lagged one outer iteration, so the coupled march
-// settles into a small limit cycle (~1e-4 step-to-step) rather than driving the
-// step delta to zero the way the (lag-free) barotropic MMS does. That limit-cycle
-// amplitude is well BELOW the discretization error at every grid, so a steady
-// tolerance just above it measures the true field error and a clean 2nd-order slope.
-// The compressible energy sources U.grad(p) / Phi are Picard-lagged, so the coupled
-// march plateaus in a limit cycle unless each step resolves the lag tightly. Many
-// outer iterations per step break that cycle and let the march reach the TRUE steady
-// state (so the measured error is discretization, not non-convergence).
-const STEADY_TOL: f64 = 5e-5;
-const STEADY_MAX_STEPS: usize = 200;
-// Many outer iterations per step resolve the Picard-lagged compressible coupling
-// (real-EOS rho<-p, u_dot_grad_p, Phi) so the march reaches a tight steady state.
-const OUTER_ITERS: usize = 80;
 const DT: f64 = 0.3;
 
 // ---- exact closures ---------------------------------------------------------
@@ -136,8 +118,8 @@ fn u_y(x: f64, y: f64) -> f64 {
 
 // ---- manufactured sources ---------------------------------------------------
 
-/// Momentum source S_U = -( div(m* U*) + mu lap(U*) + grad p* ). U* div-free so the
-/// dev2/grad(div U) term is zero; convection carries the variable density via m*.
+/// Momentum source for the bounded assembled equation
+/// `div(m U) - U div(m) - mu lap(U) + grad(p) = S_U`.
 fn source_u(x: f64, y: f64) -> (f64, f64) {
     let mx_ux = |x: f64, y: f64| mass_flux(x, y).0 * exact_u(x, y).0;
     let my_ux = |x: f64, y: f64| mass_flux(x, y).1 * exact_u(x, y).0;
@@ -145,11 +127,18 @@ fn source_u(x: f64, y: f64) -> (f64, f64) {
     let my_uy = |x: f64, y: f64| mass_flux(x, y).1 * exact_u(x, y).1;
     let conv_x = d_dx(&mx_ux, x, y) + d_dy(&my_ux, x, y);
     let conv_y = d_dx(&mx_uy, x, y) + d_dy(&my_uy, x, y);
+    let div_m = source_p(x, y);
+    let (ux, uy) = exact_u(x, y);
+    let bounded_conv_x = conv_x - ux * div_m;
+    let bounded_conv_y = conv_y - uy * div_m;
     let visc_x = MU * (d2_dx2(&u_x, x, y) + d2_dy2(&u_x, x, y));
     let visc_y = MU * (d2_dx2(&u_y, x, y) + d2_dy2(&u_y, x, y));
     let gp_x = d_dx(&exact_p, x, y);
     let gp_y = d_dy(&exact_p, x, y);
-    (-(conv_x + visc_x + gp_x), -(conv_y + visc_y + gp_y))
+    (
+        bounded_conv_x - visc_x + gp_x,
+        bounded_conv_y - visc_y + gp_y,
+    )
 }
 
 /// Continuity source S_p = +div(m*) (= U*.grad(rho), non-zero for variable density).
@@ -185,59 +174,91 @@ fn compression_source(x: f64, y: f64) -> f64 {
 
 /// Temperature source. The energy operator now carries the extra heating terms
 /// Phi and T2 (both added to the energy RHS by the assembly), so the manufactured
-/// source must offset them in ADDITION to convection + conduction:
-///   S_T = -( div(m* T*) + (k/cp) lap(T*) + Phi + T2 ).
+/// source is the remaining RHS of
+/// `div(m T) - (k/cp)lap(T) = Phi + T2 + S_T`.
 fn source_t(x: f64, y: f64) -> f64 {
     let mx_t = |x: f64, y: f64| mass_flux(x, y).0 * exact_t(x, y);
     let my_t = |x: f64, y: f64| mass_flux(x, y).1 * exact_t(x, y);
     let conv = d_dx(&mx_t, x, y) + d_dy(&my_t, x, y);
-    let cond = K_OVER_CP * (d2_dx2(&exact_t, x, y) + d2_dy2(&exact_t, x, y));
-    -(conv + cond + phi_source(x, y) + compression_source(x, y))
+    let conduction = K_OVER_CP * (d2_dx2(&exact_t, x, y) + d2_dy2(&exact_t, x, y));
+    conv - conduction - phi_source(x, y) - compression_source(x, y)
 }
 
-fn solve(n: usize) -> (Mesh, Vec<(f64, f64)>, Vec<f64>, Vec<f64>) {
-    let sides = BoundarySides {
-        left: BoundaryType::MovingWall,
-        right: BoundaryType::MovingWall,
-        bottom: BoundaryType::MovingWall,
-        top: BoundaryType::MovingWall,
-    };
-    let mesh = generate_structured_rect_mesh(n, n, 1.0, 1.0, sides);
-    let model = allmach_thermal_compressible_mms_model().expect("compressible mms model");
-    let mut solver = pollster::block_on(UnifiedSolver::new(
+fn assert_exact_outlet_bc(solver: &CpuSolver, mesh: &Mesh) {
+    const STRIDE: usize = 4;
+    let kinds = solver.debug_bc_kind();
+    let values = solver.debug_bc_value();
+
+    for face in 0..mesh.num_faces() {
+        if mesh.face_boundary[face] != Some(BoundaryType::Outlet) {
+            continue;
+        }
+
+        let x = mesh.face_cx[face];
+        let y = mesh.face_cy[face];
+        let (ux, uy) = exact_u(x, y);
+        let exact = [ux, uy, exact_p(x, y), exact_t(x, y)];
+
+        for row in 0..STRIDE {
+            let index = face * STRIDE + row;
+            assert_eq!(
+                kinds[index],
+                GpuBcKind::Dirichlet as u32,
+                "Outlet row {row} is not Dirichlet"
+            );
+            assert!(
+                (values[index] as f64 - exact[row]).abs() <= 2.0e-6,
+                "Outlet row {row} value mismatch at face {face}: got {}, expected {}",
+                values[index],
+                exact[row]
+            );
+        }
+    }
+}
+
+/// Assemble at the exact state and return the volume-weighted L2 norm of
+/// `(rhs - A*x_exact)/V` for `[Ux, Uy, p, T]`.
+///
+/// Two boundary layers are excluded from the order norm because this is an
+/// interior spatial-operator gate. Boundary kind and value correctness is
+/// asserted independently above.
+fn exact_residual_l2(n: usize) -> [f64; 4] {
+    const STRIDE: usize = 4;
+
+    let mesh = generate_structured_rect_mesh(
+        n,
+        n,
+        1.0,
+        1.0,
+        BoundarySides {
+            left: BoundaryType::MovingWall,
+            right: BoundaryType::Outlet,
+            bottom: BoundaryType::MovingWall,
+            top: BoundaryType::MovingWall,
+        },
+    );
+
+    let model = allmach_thermal_compressible_mms_model().expect("MMS model");
+    let mut solver = CpuSolver::with_stepping(
         &mesh,
         model,
-        SolverConfig {
-            advection_scheme: Scheme::SecondOrderUpwind,
-            time_scheme: TimeScheme::BDF2,
-            preconditioner: PreconditionerType::Jacobi,
-            stepping: SteppingMode::Coupled,
-        },
-        None,
-        None,
-    ))
-    .expect("solver init");
+        Scheme::SecondOrderUpwind,
+        TimeScheme::BDF2,
+        SteppingMode::Coupled,
+        CpuBackendConfig::default(),
+    )
+    .expect("CPU solver");
 
     solver.set_dt(DT as f32);
-    solver.set_dtau(0.0).expect("dtau");
-    solver.set_density(RHO_REF as f32).expect("density");
-    solver.set_viscosity(MU as f32).expect("viscosity");
-    solver.set_alpha_u(0.7).expect("alpha_u");
-    solver.set_alpha_p(0.3).expect("alpha_p");
-    solver.set_outer_iters(OUTER_ITERS).expect("outer_iters");
+    solver.set_dtau(0.0);
+    solver.set_density(RHO_REF as f32);
+    solver.set_viscosity(MU as f32);
+    solver.set_alpha_u(0.7);
+    solver.set_alpha_p(0.3);
+    solver.set_outer_iters(1);
 
-    let n_cells = mesh.num_cells();
-    // EOS + compressible aux constants (see the on-device recovery). psi_ref drives
-    // the real-EOS density and the Phi/T2 heating coefficients; the local psi and
-    // psi_precond are recovered on-device (seed them for step 0), and u_ref /
-    // precond_mask only feed the acoustic preconditioner (transient, zero at steady).
-    // NOTE precond_mask = 0 DISABLES the low-Mach acoustic preconditioner for the MMS:
-    // the on-device psi_precond = precond_mask * max(psi, 1/beta^2) would otherwise be
-    // ~1/u_ref^2 (huge), and the acoustic ddt(psi_precond,p) term would freeze the
-    // pressure and prevent convergence to steady state. That term is TRANSIENT (zero at
-    // the steady manufactured solution), so disabling it leaves the steady spatial
-    // operator — real-EOS rho(p,T), Phi, U.grad(p) heating — fully intact and verified.
-    for (name, v) in [
+    let cells = mesh.num_cells();
+    for (name, value) in [
         ("psi_ref", PSI),
         ("psi", PSI),
         ("psi_precond", 0.0),
@@ -248,160 +269,191 @@ fn solve(n: usize) -> (Mesh, Vec<(f64, f64)>, Vec<f64>, Vec<f64>) {
         ("precond_mask", 0.0),
     ] {
         solver
-            .set_field_scalar(name, &vec![v; n_cells])
-            .unwrap_or_else(|_| panic!("seed {name}"));
+            .set_field_scalar(name, &vec![value; cells])
+            .unwrap_or_else(|error| panic!("seed {name}: {error}"));
     }
 
-    // Per-face Dirichlet U + T on all (MovingWall) walls from the exact solution.
     let fx = mesh.face_cx.clone();
     let fy = mesh.face_cy.clone();
-    let wall_u = move |c: usize| {
-        let fx = fx.clone();
-        let fy = fy.clone();
-        move |face_idx: u32| {
-            let i = face_idx as usize;
-            let (ux, uy) = exact_u(fx[i], fy[i]);
-            (if c == 0 { ux } else { uy }) as f32
+    for boundary in [GpuBoundaryType::MovingWall, GpuBoundaryType::Outlet] {
+        for component in 0..2u32 {
+            let (fx, fy) = (fx.clone(), fy.clone());
+            solver
+                .set_boundary_values_per_face(boundary, "U", component, &move |face: u32| {
+                    let i = face as usize;
+                    let (ux, uy) = exact_u(fx[i], fy[i]);
+                    (if component == 0 { ux } else { uy }) as f32
+                })
+                .expect("exact U boundary");
         }
-    };
-    solver
-        .set_boundary_values_per_face(GpuBoundaryType::MovingWall, "U", 0, &wall_u(0))
-        .expect("wall u_x");
-    solver
-        .set_boundary_values_per_face(GpuBoundaryType::MovingWall, "U", 1, &wall_u(1))
-        .expect("wall u_y");
-    let fxt = mesh.face_cx.clone();
-    let fyt = mesh.face_cy.clone();
-    let wall_t = move |face_idx: u32| {
-        let i = face_idx as usize;
-        exact_t(fxt[i], fyt[i]) as f32
-    };
-    solver
-        .set_boundary_values_per_face(GpuBoundaryType::MovingWall, "T", 0, &wall_t)
-        .expect("wall T");
 
-    // Manufactured sources, per cell.
-    let src_u: Vec<(f64, f64)> = (0..n_cells)
-        .map(|i| source_u(mesh.cell_cx[i], mesh.cell_cy[i]))
-        .collect();
-    let src_t: Vec<f64> = (0..n_cells)
-        .map(|i| source_t(mesh.cell_cx[i], mesh.cell_cy[i]))
-        .collect();
-    let src_p: Vec<f64> = (0..n_cells)
-        .map(|i| source_p(mesh.cell_cx[i], mesh.cell_cy[i]))
-        .collect();
-    solver
-        .set_field_vec2(ALLMACH_MMS_SOURCE_U_FIELD, &src_u)
-        .expect("mms_src_U");
-    solver
-        .set_field_scalar(ALLMACH_MMS_SOURCE_T_FIELD, &src_t)
-        .expect("mms_src_T");
-    solver
-        .set_field_scalar(ALLMACH_MMS_SOURCE_P_FIELD, &src_p)
-        .expect("mms_src_p");
+        let (fx, fy) = (fx.clone(), fy.clone());
+        solver
+            .set_boundary_values_per_face(boundary, "T", 0, &move |face: u32| {
+                let i = face as usize;
+                exact_t(fx[i], fy[i]) as f32
+            })
+            .expect("exact T boundary");
+    }
 
-    // Initialise at the exact solution.
-    let u0: Vec<(f64, f64)> = (0..n_cells)
+    let (fxp, fyp) = (fx.clone(), fy.clone());
+    solver
+        .set_boundary_values_per_face(GpuBoundaryType::Outlet, "p", 0, &move |face: u32| {
+            let i = face as usize;
+            exact_p(fxp[i], fyp[i]) as f32
+        })
+        .expect("exact p boundary");
+
+    assert_exact_outlet_bc(&solver, &mesh);
+
+    let u: Vec<_> = (0..cells)
         .map(|i| exact_u(mesh.cell_cx[i], mesh.cell_cy[i]))
         .collect();
-    let t0: Vec<f64> = (0..n_cells)
-        .map(|i| exact_t(mesh.cell_cx[i], mesh.cell_cy[i]))
-        .collect();
-    let p0: Vec<f64> = (0..n_cells)
+    let p: Vec<_> = (0..cells)
         .map(|i| exact_p(mesh.cell_cx[i], mesh.cell_cy[i]))
         .collect();
-    let r0: Vec<f64> = (0..n_cells)
+    let t: Vec<_> = (0..cells)
+        .map(|i| exact_t(mesh.cell_cx[i], mesh.cell_cy[i]))
+        .collect();
+    let rho: Vec<_> = (0..cells)
         .map(|i| exact_rho(mesh.cell_cx[i], mesh.cell_cy[i]))
         .collect();
-    solver.set_u(&u0);
-    solver.set_p(&p0);
-    solver.set_field_scalar("T", &t0).expect("T init");
-    solver.set_field_scalar("rho", &r0).expect("rho init");
+    let d_p: Vec<_> = rho.iter().map(|&r| 0.7 * DT / r).collect();
+
+    let src_u: Vec<_> = (0..cells)
+        .map(|i| source_u(mesh.cell_cx[i], mesh.cell_cy[i]))
+        .collect();
+    let src_p: Vec<_> = (0..cells)
+        .map(|i| source_p(mesh.cell_cx[i], mesh.cell_cy[i]))
+        .collect();
+    let src_t: Vec<_> = (0..cells)
+        .map(|i| source_t(mesh.cell_cx[i], mesh.cell_cy[i]))
+        .collect();
+    let u_dot_grad_p: Vec<_> = (0..cells)
+        .map(|i| {
+            let x = mesh.cell_cx[i];
+            let y = mesh.cell_cy[i];
+            let (ux, uy) = exact_u(x, y);
+            ux * d_dx(&exact_p, x, y) + uy * d_dy(&exact_p, x, y)
+        })
+        .collect();
+
+    solver.set_field_vec2("U", &u).expect("exact U");
+    solver.set_field_scalar("p", &p).expect("exact p");
+    solver.set_field_scalar("T", &t).expect("exact T");
+    solver.set_field_scalar("rho", &rho).expect("exact rho");
+    solver.set_field_scalar("d_p", &d_p).expect("exact d_p");
+    solver
+        .set_field_scalar("u_dot_grad_p", &u_dot_grad_p)
+        .expect("exact U dot grad(p)");
+    solver
+        .set_field_vec2(ALLMACH_MMS_SOURCE_U_FIELD, &src_u)
+        .expect("source U");
+    solver
+        .set_field_scalar(ALLMACH_MMS_SOURCE_P_FIELD, &src_p)
+        .expect("source p");
+    solver
+        .set_field_scalar(ALLMACH_MMS_SOURCE_T_FIELD, &src_t)
+        .expect("source T");
     solver.initialize_history();
 
-    let u = run_to_steady_vec2_with_scalars(&mut solver, "U", &["T"], STEADY_MAX_STEPS, STEADY_TOL);
-    let p = pollster::block_on(solver.get_p());
-    let t = pollster::block_on(solver.get_field_scalar("T")).expect("T");
-    (mesh, u, p, t)
-}
+    let (matrix, rhs) = solver.debug_assemble();
+    let (row_offsets, columns, _, stride) = solver.debug_topology();
+    assert_eq!(stride, STRIDE);
 
-/// Convergence of the coupled COMPRESSIBLE variable-density system (real-EOS
-/// rho(p,T) + viscous dissipation Phi + U.grad(p) heating) at PSI > 0.
-///
-/// This verifies the compressible spatial operator CONVERGES to the manufactured
-/// solution as the mesh refines (both L2(U) and L2(T) fall monotonically), which
-/// proves the operator is correct. Two real bugs were fixed to get here: the
-/// `div_flux` Newton pressure-linearization is now omitted on the mms path (it
-/// destabilised the steady pressure row and blew the velocity up), and the energy
-/// convection is CONSERVATIVE for the mms (the production BOUNDED form's `T*·div(m*)`
-/// correction is O(1) because T is O(1), leaving a constant T error).
-///
-/// The observed slope is ~1.3 for U and sub-2 for T — NOT the clean 2 of the
-/// incompressible/barotropic MMS. The gap is FUNDAMENTAL to method-of-manufactured-
-/// solutions for a COLLOCATED PRESSURE-BASED compressible solver: the pressure is a
-/// Lagrange multiplier that enforces continuity, not an independently manufactured
-/// field, yet the real-EOS density rho = rho_t_ref/T + gamma*psi_ref*t_ref*p/T depends
-/// on the ABSOLUTE pressure. The manufactured momentum source pins grad(p)=grad(p*),
-/// but in this all-wall box the pressure's null-mode gauge (and shape, via the
-/// p->rho->continuity->p coupling) converges to a self-consistent state that differs
-/// from p* by an O(psi) amount (measured mean-gauge offset ~ -2.2, shape error ~0.8),
-/// so rho is systematically off by O(psi), capping the order. The BAROTROPIC MMS
-/// (`allmach_thermal_mms`) hits clean 2nd order precisely because its rho ignores p.
-/// A clean 2nd-order compressible MMS needs a different construction (derive p* from
-/// the continuity, or pin the pressure) — tracked as follow-up. The compressible
-/// PHYSICS are independently gated by the supersonic/transonic and Phi-isolation tests.
-#[test]
-fn allmach_thermal_compressible_coupled_convergence() {
-    let levels = [16usize, 32, 48];
-    let mut hs = Vec::new();
-    let mut u_err = Vec::new();
-    let mut t_err = Vec::new();
-
-    for &n in &levels {
-        let (mesh, u, _p, t) = solve(n);
-        let ue = field_errors_vec2(&mesh, &u, exact_u);
-        let te = field_errors(&mesh, &t, exact_t);
-        hs.push(1.0 / n as f64);
-        u_err.push(ue.l2);
-        t_err.push(te.l2);
-        println!(
-            "[compressible-mms] n={n:>3}  L2(U)={:.4e}  L2(T)={:.4e}  (PSI={PSI})",
-            ue.l2, te.l2
-        );
+    let mut x_exact = vec![0.0_f64; cells * STRIDE];
+    for i in 0..cells {
+        x_exact[i * STRIDE] = u[i].0;
+        x_exact[i * STRIDE + 1] = u[i].1;
+        x_exact[i * STRIDE + 2] = p[i];
+        x_exact[i * STRIDE + 3] = t[i];
     }
 
-    let u_order = fit_order(&hs, &u_err);
-    let t_order = fit_order(&hs, &t_err);
-    println!("[compressible-mms] observed order: U={u_order:.3}  T={t_order:.3}");
+    let mut squared = [0.0_f64; STRIDE];
+    let mut interior_volume = 0.0;
 
-    // The operator CONVERGES: both errors fall monotonically under refinement. This
-    // proves the compressible spatial operator (real-EOS rho(p,T), Phi, U.grad(p)) is
-    // correct. The slopes are pressure-Lagrange-multiplier-limited (see the fn doc),
-    // so the thresholds are lenient — the point is convergence, not clean 2nd order.
-    for (name, errs) in [("U", &u_err), ("T", &t_err)] {
-        for w in errs.windows(2) {
-            assert!(
-                w[1] < w[0],
-                "[compressible-mms] {name} error did not decrease under refinement: {errs:?}",
-            );
+    for i in 0..cells {
+        let ix = i % n;
+        let iy = i / n;
+        if ix < 2 || ix + 2 >= n || iy < 2 || iy + 2 >= n {
+            continue;
+        }
+
+        let scalar_start = row_offsets[i] as usize;
+        let neighbors = row_offsets[i + 1] as usize - scalar_start;
+        let volume = mesh.cell_vol[i];
+        interior_volume += volume;
+
+        for row in 0..STRIDE {
+            let block_start = scalar_start * STRIDE * STRIDE + neighbors * STRIDE * row;
+            let mut ax = 0.0_f64;
+
+            for rank in 0..neighbors {
+                let neighbor = columns[scalar_start + rank] as usize;
+                for column in 0..STRIDE {
+                    ax += matrix[block_start + rank * STRIDE + column] as f64
+                        * x_exact[neighbor * STRIDE + column];
+                }
+            }
+
+            let residual = (rhs[i * STRIDE + row] as f64 - ax) / volume;
+            squared[row] += residual * residual * volume;
         }
     }
-    // Velocity converges at a clear >1st-order rate (the momentum/continuity/real-EOS
-    // operator); assert a solid lower bound with margin below the observed ~1.3.
-    assert!(
-        u_order >= 1.0,
-        "[compressible-mms] U order {u_order:.3} below 1.0 (momentum/real-EOS operator regressed)"
-    );
-    // Temperature converges but its clean order is capped by the pressure coupling;
-    // assert a positive slope plus a finest-error cap so a real regression still trips.
-    assert!(
-        t_order >= 0.4,
-        "[compressible-mms] T order {t_order:.3} below 0.4 (energy operator regressed)"
-    );
-    assert!(
-        *u_err.last().unwrap() <= 5.0e-3 && *t_err.last().unwrap() <= 1.0e-2,
-        "[compressible-mms] finest errors too large: U={:.3e} T={:.3e}",
-        u_err.last().unwrap(),
-        t_err.last().unwrap()
-    );
+
+    squared.map(|sum| (sum / interior_volume).sqrt())
+}
+
+#[test]
+fn allmach_thermal_compressible_exact_residual_order() {
+    let levels = [16usize, 32, 64];
+    let mut errors: [Vec<f64>; 4] = std::array::from_fn(|_| Vec::new());
+
+    for n in levels {
+        let residual = exact_residual_l2(n);
+        println!(
+            "[compressible-mms/residual] n={n:>3} \
+             Ux={:.6e} Uy={:.6e} p={:.6e} T={:.6e}",
+            residual[0], residual[1], residual[2], residual[3]
+        );
+        for row in 0..4 {
+            errors[row].push(residual[row]);
+        }
+    }
+
+    let labels = ["U_x", "U_y", "p", "T"];
+    let finest_caps = [3.0e-3, 3.0e-3, 8.0e-3, 1.2e-2];
+
+    for row in 0..4 {
+        let pair_orders: Vec<_> = errors[row]
+            .windows(2)
+            .map(|w| (w[0] / w[1]).ln() / 2.0_f64.ln())
+            .collect();
+        let worst_order = pair_orders.iter().copied().fold(f64::INFINITY, f64::min);
+
+        println!(
+            "[compressible-mms/residual] {} errors={:?} pair_orders={pair_orders:?}",
+            labels[row], errors[row]
+        );
+
+        assert!(
+            errors[row].windows(2).all(|w| w[1] < w[0]),
+            "{} exact-state residual did not decrease: {:?}",
+            labels[row],
+            errors[row]
+        );
+        assert!(
+            worst_order >= 1.75,
+            "{} exact-state residual order regressed: errors={:?}, orders={pair_orders:?}",
+            labels[row],
+            errors[row]
+        );
+        assert!(
+            errors[row][2] <= finest_caps[row],
+            "{} finest residual {} exceeds cap {}",
+            labels[row],
+            errors[row][2],
+            finest_caps[row]
+        );
+    }
 }

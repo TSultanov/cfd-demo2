@@ -3,36 +3,32 @@
 //! + temperature system with a VARIABLE density recovered on-device from the EOS
 //! `rho = rho_t_ref/T + psi*p`.
 //!
-//! Manufactured solution (steady, unit square, all-wall mesh):
-//!   - mass flux from a stream function, so it is divergence-free by construction
-//!       Psi(x,y) = A sin(pi x) sin(pi y)
-//!       m*(x,y)  = ( dPsi/dy, -dPsi/dx )            ==> div(m*) = 0 exactly
-//!   - temperature with ZERO normal gradient on every wall (matches the model's
-//!     adiabatic Wall BC, so no temperature boundary override is needed)
+//! Manufactured solution (steady, unit square, exact Dirichlet outlet contract):
+//!   - divergence-free Taylor-Green velocity from
+//!       Psi(x,y) = (A/pi) sin(pi x) sin(pi y)
+//!       U*(x,y)  = ( dPsi/dy, -dPsi/dx )            ==> div(U*) = 0 exactly
+//!   - temperature
 //!       T*(x,y)  = T_ref (1.5 + 0.5 cos(pi x) cos(pi y))     in [T_ref, 2 T_ref]
-//!   - pressure with zero normal gradient on every wall (gauge-free; demeaned)
+//!   - pressure, with an exact right-outlet value
 //!       p*(x,y)  = P_AMP (cos(2 pi x) + cos(2 pi y))
 //!   - EOS density (psi = 0 here, isolating the thermal 1/T variation)
 //!       rho*(x,y) = rho_t_ref / T*                            (the solver recovers this)
-//!   - velocity recovered from the mass flux:  U* = m* / rho*  (NOT divergence-free)
+//!   - mass flux m* = rho* U*, which is not divergence-free for variable rho
 //!
-//! Because the MASS FLUX is divergence-free, the continuity (pressure) row needs
-//! NO source. The momentum and temperature sources are computed by 4th-order
-//! finite differences of the exact closures, with the sign convention pinned to
-//! the incompressible momentum MMS:
-//!   assembled momentum = div(phi,U) + lap(mu,U) + grad(p) + dev2 + S_U = 0
-//!   => S_U = -( div(rho*U*(x)U*) + mu lap(U*) + grad(p*) + mu grad(div U*) )
-//!   assembled energy   = div(phi,T) + lap(k/cp,T) + S_T = 0
-//!   => S_T = -( div(rho*U* T*) + (k/cp) lap(T*) )
-//! (div(phi,U*) carries the variable density via the mass flux m* = rho* U*; the
-//! dev2/grad(div U) term is non-zero because U* itself is not divergence-free.)
+//! Therefore continuity uses S_p = div(m*). The bounded momentum and conservative
+//! temperature sources match the assembled equations:
+//!   S_U = div(m* U*) - U* div(m*) - mu lap(U*) + grad(p*)
+//!   S_T = div(m* T*) - (k/cp) lap(T*)
+//! Exact U/T data are imposed on every edge and the Outlet kinds are asserted.
+//! At PSI=0 pressure remains a saddle-point gauge field, so its shape error is
+//! demeaned; the compressible companion separately gates absolute pressure.
 #![cfg(all(feature = "dev-tests", feature = "ui"))]
 
 mod mms_support;
 
 use std::f64::consts::PI;
 
-use cfd2::solver::gpu::enums::GpuBoundaryType;
+use cfd2::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
 use cfd2::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType, Mesh};
 use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
 use cfd2::solver::model::{
@@ -55,6 +51,8 @@ const PSI: f64 = 0.0; // isolate the thermal (1/T) density variation
 const U_AMP: f64 = 0.1; // Taylor-Green velocity amplitude -> moderate Peclet
 const P_AMP: f64 = 0.25;
 const RHO_T_REF: f64 = RHO_REF * T_REF;
+const MMS_DT: f64 = 0.2;
+const ALPHA_U: f64 = 0.7;
 
 const STEADY_TOL: f64 = 5e-6;
 const STEADY_MAX_STEPS: usize = 400;
@@ -118,9 +116,8 @@ fn u_y(x: f64, y: f64) -> f64 {
     exact_u(x, y).1
 }
 
-/// Momentum source S_U = -( convection + viscous + grad p ). U* is divergence-
-/// free (Taylor-Green) so the dev2/grad(div U) term is identically zero; the
-/// convection carries the variable density through the mass flux m* = rho* U*.
+/// Momentum source for the assembled bounded equation
+/// `div(m U) - U div(m) - mu lap(U) + grad(p) = S_U`.
 fn source_u(x: f64, y: f64) -> (f64, f64) {
     // convection: d/dx(m_x U_i) + d/dy(m_y U_i)
     let mx_ux = |x: f64, y: f64| mass_flux(x, y).0 * exact_u(x, y).0;
@@ -129,6 +126,10 @@ fn source_u(x: f64, y: f64) -> (f64, f64) {
     let my_uy = |x: f64, y: f64| mass_flux(x, y).1 * exact_u(x, y).1;
     let conv_x = d_dx(&mx_ux, x, y) + d_dy(&my_ux, x, y);
     let conv_y = d_dx(&mx_uy, x, y) + d_dy(&my_uy, x, y);
+    let div_m = source_p(x, y);
+    let (ux, uy) = exact_u(x, y);
+    let bounded_conv_x = conv_x - ux * div_m;
+    let bounded_conv_y = conv_y - uy * div_m;
 
     // viscous: mu lap(U)
     let visc_x = MU * (d2_dx2(&u_x, x, y) + d2_dy2(&u_x, x, y));
@@ -138,7 +139,10 @@ fn source_u(x: f64, y: f64) -> (f64, f64) {
     let gp_x = d_dx(&exact_p, x, y);
     let gp_y = d_dy(&exact_p, x, y);
 
-    (-(conv_x + visc_x + gp_x), -(conv_y + visc_y + gp_y))
+    (
+        bounded_conv_x - visc_x + gp_x,
+        bounded_conv_y - visc_y + gp_y,
+    )
 }
 
 /// Continuity source S_p = +div(rho* U*) = +div(mass flux). NON-ZERO for variable
@@ -152,33 +156,52 @@ fn source_p(x: f64, y: f64) -> f64 {
     d_dx(&mx, x, y) + d_dy(&my, x, y)
 }
 
-/// Temperature source S_T = -( div(m* T*) + (k/cp) lap(T*) ).
+/// Temperature source for `div(m T) - (k/cp) lap(T) = S_T`.
 fn source_t(x: f64, y: f64) -> f64 {
     let mx_t = |x: f64, y: f64| mass_flux(x, y).0 * exact_t(x, y);
     let my_t = |x: f64, y: f64| mass_flux(x, y).1 * exact_t(x, y);
     let conv = d_dx(&mx_t, x, y) + d_dy(&my_t, x, y);
-    let visc = K_OVER_CP * (d2_dx2(&exact_t, x, y) + d2_dy2(&exact_t, x, y));
-    -(conv + visc)
+    let conduction = K_OVER_CP * (d2_dx2(&exact_t, x, y) + d2_dy2(&exact_t, x, y));
+    conv - conduction
 }
 
-fn volume_mean(mesh: &Mesh, f: &[f64]) -> f64 {
-    let mut sum = 0.0;
-    let mut vol = 0.0;
-    for i in 0..mesh.num_cells() {
-        sum += mesh.cell_vol[i] * f[i];
-        vol += mesh.cell_vol[i];
+fn volume_mean(mesh: &Mesh, field: &[f64]) -> f64 {
+    let total_volume = mesh.cell_vol.iter().sum::<f64>();
+    field
+        .iter()
+        .zip(&mesh.cell_vol)
+        .map(|(&value, &volume)| value * volume)
+        .sum::<f64>()
+        / total_volume
+}
+
+fn assert_mms_outlet_boundary_contract() {
+    let model = allmach_thermal_mms_model().expect("MMS model");
+    for (field, components) in [("U", 2usize), ("p", 1), ("T", 1)] {
+        let conditions = &model
+            .boundaries
+            .field(field)
+            .unwrap_or_else(|| panic!("missing {field} boundary spec"))
+            .by_boundary[&GpuBoundaryType::Outlet];
+        assert_eq!(conditions.len(), components);
+        assert!(
+            conditions
+                .iter()
+                .all(|condition| condition.kind == GpuBcKind::Dirichlet),
+            "MMS Outlet {field} must remain Dirichlet"
+        );
     }
-    sum / vol
 }
 
 fn solve(n: usize) -> (Mesh, Vec<(f64, f64)>, Vec<f64>, Vec<f64>) {
-    // All-MovingWall: the model's MovingWall type imposes Dirichlet U AND
-    // Dirichlet T, so the temperature gauge is pinned to the exact solution.
+    // Exact U/T Dirichlet on every edge. The right edge is Outlet-labelled so
+    // its exact pressure value removes the pure-Neumann pressure null mode;
+    // the MMS model deliberately keeps U/T Dirichlet on that patch.
     // (A zero-gradient T wall leaves T determined only up to a constant, which
     // would corrupt rho = rho_t_ref/T and hence the whole coupled solve.)
     let sides = BoundarySides {
         left: BoundaryType::MovingWall,
-        right: BoundaryType::MovingWall,
+        right: BoundaryType::Outlet,
         bottom: BoundaryType::MovingWall,
         top: BoundaryType::MovingWall,
     };
@@ -198,17 +221,19 @@ fn solve(n: usize) -> (Mesh, Vec<(f64, f64)>, Vec<f64>, Vec<f64>) {
     ))
     .expect("solver init");
 
-    solver.set_dt(0.2);
+    solver.set_dt(MMS_DT as f32);
     solver.set_dtau(0.0).expect("dtau");
     solver.set_density(RHO_REF as f32).expect("density");
     solver.set_viscosity(MU as f32).expect("viscosity");
-    solver.set_alpha_u(0.7).expect("alpha_u");
+    solver.set_alpha_u(ALPHA_U as f32).expect("alpha_u");
     solver.set_alpha_p(0.3).expect("alpha_p");
     solver.set_outer_iters(25).expect("outer_iters");
 
     let n_cells = mesh.num_cells();
     // EOS aux fields (see the on-device recovery rho = rho_t_ref/T + psi*p).
-    solver.set_field_scalar("psi", &vec![PSI; n_cells]).expect("psi");
+    solver
+        .set_field_scalar("psi", &vec![PSI; n_cells])
+        .expect("psi");
     // The pressure-row ddt reads the decoupled `psi_precond`; seed it equal to PSI
     // (=0 here) so the residual is byte-identical to the physical psi. The term
     // vanishes at steady state; this just removes buffer-init dependence.
@@ -239,6 +264,12 @@ fn solve(n: usize) -> (Mesh, Vec<(f64, f64)>, Vec<f64>, Vec<f64>) {
     solver
         .set_boundary_values_per_face(GpuBoundaryType::MovingWall, "U", 1, &wall_u(1))
         .expect("wall u_y");
+    solver
+        .set_boundary_values_per_face(GpuBoundaryType::Outlet, "U", 0, &wall_u(0))
+        .expect("outlet u_x");
+    solver
+        .set_boundary_values_per_face(GpuBoundaryType::Outlet, "U", 1, &wall_u(1))
+        .expect("outlet u_y");
     let fxt = mesh.face_cx.clone();
     let fyt = mesh.face_cy.clone();
     let wall_t = move |face_idx: u32| {
@@ -248,6 +279,18 @@ fn solve(n: usize) -> (Mesh, Vec<(f64, f64)>, Vec<f64>, Vec<f64>) {
     solver
         .set_boundary_values_per_face(GpuBoundaryType::MovingWall, "T", 0, &wall_t)
         .expect("wall T");
+    solver
+        .set_boundary_values_per_face(GpuBoundaryType::Outlet, "T", 0, &wall_t)
+        .expect("outlet T");
+    let fxp = mesh.face_cx.clone();
+    let fyp = mesh.face_cy.clone();
+    let outlet_p = move |face_idx: u32| {
+        let i = face_idx as usize;
+        exact_p(fxp[i], fyp[i]) as f32
+    };
+    solver
+        .set_boundary_values_per_face(GpuBoundaryType::Outlet, "p", 0, &outlet_p)
+        .expect("outlet p");
 
     // Manufactured sources, per cell.
     let src_u: Vec<(f64, f64)> = (0..n_cells)
@@ -279,8 +322,11 @@ fn solve(n: usize) -> (Mesh, Vec<(f64, f64)>, Vec<f64>, Vec<f64>) {
     let r0: Vec<f64> = (0..n_cells)
         .map(|i| exact_rho(mesh.cell_cx[i], mesh.cell_cy[i]))
         .collect();
+    let p0: Vec<f64> = (0..n_cells)
+        .map(|i| exact_p(mesh.cell_cx[i], mesh.cell_cy[i]))
+        .collect();
     solver.set_u(&u0);
-    solver.set_p(&vec![0.0; n_cells]);
+    solver.set_p(&p0);
     solver.set_field_scalar("T", &t0).expect("T init");
     solver.set_field_scalar("rho", &r0).expect("rho init");
     solver.initialize_history();
@@ -296,6 +342,7 @@ fn solve(n: usize) -> (Mesh, Vec<(f64, f64)>, Vec<f64>, Vec<f64>) {
 /// is pinned at the saddle-point floor (>= ~1, as in the incompressible MMS).
 #[test]
 fn allmach_thermal_coupled_second_order() {
+    assert_mms_outlet_boundary_contract();
     let levels = [16usize, 32, 48];
     let mut hs = Vec::new();
     let mut u_errs = Vec::new();
@@ -305,14 +352,15 @@ fn allmach_thermal_coupled_second_order() {
         let (mesh, u, p, t) = solve(n);
         let u_err = field_errors_vec2(&mesh, &u, exact_u).l2;
         let t_err = field_errors(&mesh, &t, exact_t).l2;
+        // PSI=0 deliberately leaves the pressure as a saddle-point gauge field.
+        // The boundary contract is asserted above; compare its convergent shape
+        // after removing the remaining global constant.
         let p_mean = volume_mean(&mesh, &p);
-        let exact_pmean = {
-            let e: Vec<f64> = (0..mesh.num_cells())
-                .map(|i| exact_p(mesh.cell_cx[i], mesh.cell_cy[i]))
-                .collect();
-            volume_mean(&mesh, &e)
-        };
-        let p_err = field_errors(&mesh, &p, |x, y| exact_p(x, y) - exact_pmean + p_mean).l2;
+        let exact: Vec<_> = (0..mesh.num_cells())
+            .map(|i| exact_p(mesh.cell_cx[i], mesh.cell_cy[i]))
+            .collect();
+        let exact_mean = volume_mean(&mesh, &exact);
+        let p_err = field_errors(&mesh, &p, |x, y| exact_p(x, y) - exact_mean + p_mean).l2;
         println!("[mms][allmach_thermal] n={n} u_l2={u_err:.4e} t_l2={t_err:.4e} p_l2={p_err:.4e}");
         hs.push(1.0 / n as f64);
         u_errs.push(u_err);
@@ -322,22 +370,126 @@ fn allmach_thermal_coupled_second_order() {
     // Velocity and temperature carry the thermal physics (energy equation,
     // variable-density momentum/flux, on-device EOS rho-from-T coupling) and both
     // converge at ~2nd order.
-    assert_convergence_order("allmach_thermal_u", &hs, &u_errs, 2.0, 0.35, 3.0e-3);
+    assert!(
+        u_errs.windows(2).all(|pair| pair[1] < pair[0]),
+        "allmach_thermal_u did not decrease monotonically: {u_errs:?}"
+    );
+    assert_convergence_order(
+        "allmach_thermal_u_fine",
+        &hs[1..],
+        &u_errs[1..],
+        2.0,
+        0.35,
+        2.0e-3,
+    );
     // T amplitude (~1.5) is ~15x the velocity amplitude, so its absolute L2 error
     // floor scales up accordingly.
-    assert_convergence_order("allmach_thermal_T", &hs, &t_errs, 2.0, 0.35, 2.0e-2);
+    assert_convergence_order(
+        "allmach_thermal_T_fine",
+        &hs[1..],
+        &t_errs[1..],
+        2.0,
+        0.35,
+        5.0e-4,
+    );
 
-    // PRESSURE FIELD: only a bounded sanity check, NOT an order. grad(p) IS
-    // validated — the velocity converges at 2nd order driven by grad(p). The
-    // pressure FIELD's L2 carries a bounded null-space/checkerboard mode: the
-    // steady pressure equation is singular (pure-Neumann gauge, psi=0) and this
-    // MMS sources grad(p*) directly, exciting a zero-grad pressure mode the
-    // velocity never sees. The mode is bounded and decelerating.
+    // The gauge-free pressure shape must converge as well (its saddle-point
+    // field order is lower than the transported variables, as in the
+    // incompressible MMS).
     let p_order = fit_order(&hs, &p_errs);
     let p_finest = *p_errs.last().unwrap();
-    println!("[mms][allmach_thermal] pressure field L2 order {p_order:.3} (errs {p_errs:?}) — bounded, not asserted");
+    println!("[mms][allmach_thermal] pressure field L2 order {p_order:.3} (errs {p_errs:?})");
     assert!(
-        p_finest < 1.0,
-        "pressure field L2 diverged: finest {p_finest:.3e} (errs {p_errs:?})"
+        p_order >= 1.0 && p_finest < 3.0e-2,
+        "pressure field failed anchored convergence: order {p_order:.3}, finest {p_finest:.3e}, errors {p_errs:?}"
+    );
+}
+
+fn exact_pressure_row_residual_l2(n: usize) -> f64 {
+    let h = 1.0 / n as f64;
+    let kappa = ALPHA_U * MMS_DT;
+    let cell = |i: usize, j: usize| i * n + j;
+    let mut rho = vec![0.0; n * n];
+    let mut ux = vec![0.0; n * n];
+    let mut uy = vec![0.0; n * n];
+    let mut p = vec![0.0; n * n];
+    for i in 0..n {
+        for j in 0..n {
+            let x = (i as f64 + 0.5) * h;
+            let y = (j as f64 + 0.5) * h;
+            let c = cell(i, j);
+            rho[c] = exact_rho(x, y);
+            (ux[c], uy[c]) = exact_u(x, y);
+            p[c] = exact_p(x, y);
+        }
+    }
+    let mut gx = vec![0.0; n * n];
+    let mut gy = vec![0.0; n * n];
+    for i in 0..n {
+        for j in 0..n {
+            let c = cell(i, j);
+            gx[c] = if i == 0 {
+                (p[cell(1, j)] - p[c]) / (2.0 * h)
+            } else if i + 1 == n {
+                (p[c] - p[cell(i - 1, j)]) / (2.0 * h)
+            } else {
+                (p[cell(i + 1, j)] - p[cell(i - 1, j)]) / (2.0 * h)
+            };
+            gy[c] = if j == 0 {
+                (p[cell(i, 1)] - p[c]) / (2.0 * h)
+            } else if j + 1 == n {
+                (p[c] - p[cell(i, j - 1)]) / (2.0 * h)
+            } else {
+                (p[cell(i, j + 1)] - p[cell(i, j - 1)]) / (2.0 * h)
+            };
+        }
+    }
+    let mut fx = vec![0.0; (n + 1) * n];
+    let mut fy = vec![0.0; n * (n + 1)];
+    for i in 1..n {
+        for j in 0..n {
+            let left = cell(i - 1, j);
+            let right = cell(i, j);
+            fx[i * n + j] = 0.5 * (rho[left] * ux[left] + rho[right] * ux[right])
+                + kappa * (0.5 * (gx[left] + gx[right]) - (p[right] - p[left]) / h);
+        }
+    }
+    for i in 0..n {
+        for j in 1..n {
+            let bottom = cell(i, j - 1);
+            let top = cell(i, j);
+            fy[i * (n + 1) + j] = 0.5 * (rho[bottom] * uy[bottom] + rho[top] * uy[top])
+                + kappa * (0.5 * (gy[bottom] + gy[top]) - (p[top] - p[bottom]) / h);
+        }
+    }
+    let mut sum_sq = 0.0;
+    for i in 0..n {
+        for j in 0..n {
+            let div_h = (fx[(i + 1) * n + j] - fx[i * n + j]) / h
+                + (fy[i * (n + 1) + j + 1] - fy[i * (n + 1) + j]) / h;
+            let x = (i as f64 + 0.5) * h;
+            let y = (j as f64 + 0.5) * h;
+            let error = div_h - source_p(x, y);
+            sum_sq += error * error;
+        }
+    }
+    (sum_sq / (n * n) as f64).sqrt()
+}
+
+#[test]
+fn allmach_thermal_pressure_row_exact_state_is_second_order() {
+    let levels = [16usize, 32, 64];
+    let hs: Vec<_> = levels.iter().map(|&n| 1.0 / n as f64).collect();
+    let errors: Vec<_> = levels
+        .iter()
+        .map(|&n| exact_pressure_row_residual_l2(n))
+        .collect();
+    assert_convergence_order(
+        "allmach_thermal_pressure_row_exact_state",
+        &hs,
+        &errors,
+        2.0,
+        0.05,
+        4.0e-3,
     );
 }

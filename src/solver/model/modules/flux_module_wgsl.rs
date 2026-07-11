@@ -1191,7 +1191,30 @@ fn face_stmts(
                 .dot(&typed::VecExpr::<2>::from_expr(Expr::ident("normal_vec"))),
         ),
     ));
-    body.push(dsl::let_expr("dist", dsl::max("dist_proj", 1e-6)));
+    // Match unified pressure assembly's degeneracy fallback. For a valid FV
+    // face `|n.d|` is the compact normal distance; on a near-tangent face the
+    // flux and matrix must both fall back to `|d|` instead of using conductances
+    // that differ by orders of magnitude.
+    body.push(dsl::let_expr(
+        "dist_euc",
+        dsl::sqrt(
+            Expr::ident("d_vec").field("x") * Expr::ident("d_vec").field("x")
+                + Expr::ident("d_vec").field("y") * Expr::ident("d_vec").field("y"),
+        ),
+    ));
+    body.push(dsl::var_typed_expr(
+        "dist",
+        Type::F32,
+        Some(dsl::max("dist_euc", 1e-6)),
+    ));
+    body.push(dsl::if_block_expr(
+        Expr::ident("dist_proj").gt(1e-6),
+        dsl::block(vec![dsl::assign_expr(
+            Expr::ident("dist"),
+            Expr::ident("dist_proj"),
+        )]),
+        None,
+    ));
 
     let mut state_keys = HashSet::new();
     collect_state_keys_from_flux_spec(spec, primitives, resolver, &mut state_keys);
@@ -1949,6 +1972,7 @@ fn collect_state_keys_from_scalar<'a>(
         | FaceScalarExpr::Builtin(_)
         | FaceScalarExpr::Constant { .. }
         | FaceScalarExpr::LowMachParam(_)
+        | FaceScalarExpr::BoundaryDirichlet { .. }
         | FaceScalarExpr::MeshFlux => {}
         FaceScalarExpr::State { side, name } => {
             out.insert(StateKey {
@@ -1957,6 +1981,8 @@ fn collect_state_keys_from_scalar<'a>(
                 component: 0,
             });
         }
+        // Raw cell reads deliberately bypass the BC-applied state precompute.
+        FaceScalarExpr::CellState { .. } => {}
         FaceScalarExpr::Primitive { side, name } => {
             let prim = primitives.get(name.as_str()).unwrap_or_else(|| {
                 panic!("primitive '{}' not found in PrimitiveDerivations", name)
@@ -2190,6 +2216,10 @@ impl<'a> FaceCseScope<'a> {
             S::Constant { name } => (fcse_str(3, name), 1),
             S::LowMachParam(p) => (fcse_mix(4, *p as u64), 1),
             S::State { side, name } => (fcse_mix(fcse_side(*side), fcse_str(5, name)), 1),
+            S::CellState { side, name } => {
+                (fcse_mix(fcse_side(*side), fcse_str(19, name)), 1)
+            }
+            S::BoundaryDirichlet { name } => (fcse_str(20, name), 1),
             S::Primitive { side, name } => (
                 fcse_mix(fcse_side(*side), fcse_str(6, name)),
                 FCSE_PRIMITIVE_WEIGHT,
@@ -2308,6 +2338,8 @@ impl<'a> FaceCseScope<'a> {
             | S::Constant { .. }
             | S::LowMachParam(_)
             | S::State { .. }
+            | S::CellState { .. }
+            | S::BoundaryDirichlet { .. }
             | S::Primitive { .. }
             | S::MeshFlux => {}
             S::Add(a, b)
@@ -2545,15 +2577,14 @@ fn lower_vec2<'a>(
             // `grad_*` vectors as zero on boundary faces.
             //
             // Exception: for Rhie–Chow-style mass fluxes, `grad_p` participates in the HbyA
-            // predictor. On outlet faces (zero-gradient velocity), we allow `grad_p` to be
-            // non-zero so the pressure equation sees the same predictor term OpenFOAM uses,
-            // while still forcing it to zero on other boundary types (e.g. walls/inlets) to
-            // avoid injecting normal flux where the velocity BC is Dirichlet.
+            // predictor. Its boundary projection is selected from the pressure BC kind by the
+            // derived expression, so it must remain available whether pressure Dirichlet lives
+            // on an inlet or an outlet. Prescribed-gradient boundaries use their compact
+            // contribution directly and cannot inject an unmatched normal flux.
             if *side == FaceSide::Neighbor && field.starts_with("grad_") {
                 let is_boundary = Expr::ident("is_boundary");
                 let zero_cond = if field == "grad_p" {
-                    let is_outlet = Expr::ident("boundary_type").eq(Expr::from(2u32));
-                    is_boundary & !is_outlet
+                    Expr::from(false)
                 } else {
                     is_boundary
                 };
@@ -2872,6 +2903,32 @@ fn lower_scalar<'a>(
             LowMachParam::Eps4 => Expr::ident("low_mach_params").field("eps4"),
         },
         FaceScalarExpr::State { side, name } => ctx.state_scalar(*side, name.as_str(), 0),
+        FaceScalarExpr::CellState { side, name } => {
+            let idx = match side {
+                FaceSide::Owner => Expr::ident("owner"),
+                FaceSide::Neighbor => Expr::ident("neigh_idx"),
+            };
+            state_component_at_resolver(ctx.resolver, "state", idx, name.as_str(), 0)
+        }
+        FaceScalarExpr::BoundaryDirichlet { name } => {
+            let unknown_offset = ctx.flux_layout.offset_for(name).unwrap_or_else(|| {
+                panic!(
+                    "boundary Dirichlet query field '{}' is not a coupled flux unknown",
+                    name
+                )
+            });
+            let bc_face_idx = if ctx.structured {
+                Expr::ident("sfd_face_id")
+            } else {
+                Expr::ident("idx")
+            };
+            let bc = BcTable::new(bc_face_idx, Expr::from(ctx.flux_layout.stride));
+            let is_dirichlet = Expr::ident("is_boundary")
+                & bc
+                    .kind_raw(Expr::from(unknown_offset))
+                    .eq(Expr::from(1u32));
+            dsl::select(0.0, 1.0, is_dirichlet)
+        }
         FaceScalarExpr::Primitive { side, name } => {
             let prim = ctx.primitives.get(name.as_str()).unwrap_or_else(|| {
                 panic!("primitive '{}' not found in PrimitiveDerivations", name)
@@ -2964,6 +3021,8 @@ fn scalar_uses_low_mach(expr: &FaceScalarExpr) -> bool {
         | FaceScalarExpr::Builtin(_)
         | FaceScalarExpr::Constant { .. }
         | FaceScalarExpr::State { .. }
+        | FaceScalarExpr::CellState { .. }
+        | FaceScalarExpr::BoundaryDirichlet { .. }
         | FaceScalarExpr::Primitive { .. }
         | FaceScalarExpr::MeshFlux => false,
         FaceScalarExpr::Add(a, b)
@@ -3031,6 +3090,8 @@ fn scalar_uses_mesh_flux(expr: &FaceScalarExpr) -> bool {
         | FaceScalarExpr::Constant { .. }
         | FaceScalarExpr::LowMachParam(_)
         | FaceScalarExpr::State { .. }
+        | FaceScalarExpr::CellState { .. }
+        | FaceScalarExpr::BoundaryDirichlet { .. }
         | FaceScalarExpr::Primitive { .. } => false,
         FaceScalarExpr::Add(a, b)
         | FaceScalarExpr::Sub(a, b)

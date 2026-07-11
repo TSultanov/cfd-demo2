@@ -19,6 +19,8 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
+    inlet_velocity: f32,
+    inlet_ramp_time: f32,
     eos_gamma: f32,
     eos_gm1: f32,
     eos_r: f32,
@@ -42,6 +44,7 @@ struct Constants {
 @group(0) @binding(11) var<storage, read> diagonal_indices: array<u32>;
 @group(0) @binding(12) var<storage, read> face_boundary: array<u32>;
 @group(0) @binding(13) var<storage, read> face_centers: array<Vector2>;
+@group(0) @binding(14) var<storage, read> face_wrap_shift: array<Vector2>;
 @group(0) @binding(15) var<storage, read> cell_vols_old_old: array<f32>;
 @group(1) @binding(0) var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) var<storage, read> state_old: array<f32>;
@@ -189,9 +192,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         var is_boundary: bool = false;
         var other_idx: u32 = idx;
         var other_center: Vector2;
+        let wrap_shift = face_wrap_shift[face_idx];
+        var center_frame: Vector2 = center;
         if (owner != idx) {
             normal.x = -normal.x;
             normal.y = -normal.y;
+            center_frame.x += wrap_shift.x;
+            center_frame.y += wrap_shift.y;
         }
         if (neighbor_raw != -1) {
             let neighbor = u32(neighbor_raw);
@@ -200,20 +207,24 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 other_idx = owner;
             }
             other_center = cell_centers[other_idx];
+            if (owner == idx) {
+                other_center.x += wrap_shift.x;
+                other_center.y += wrap_shift.y;
+            }
         } else {
             is_boundary = true;
             other_idx = idx;
             other_center = f_center;
         }
-        let dx = other_center.x - center.x;
-        let dy = other_center.y - center.y;
+        let dx = other_center.x - center_frame.x;
+        let dy = other_center.y - center_frame.y;
         let dist_proj = abs(dx * normal.x + dy * normal.y);
         let dist_euc = sqrt(dx * dx + dy * dy);
         var dist: f32 = max(dist_euc, 0.000001);
         if (dist_proj > 0.000001) {
             dist = dist_proj;
         }
-        let lam_d_own = abs((f_center.x - center.x) * normal.x + (f_center.y - center.y) * normal.y);
+        let lam_d_own = abs((f_center.x - center_frame.x) * normal.x + (f_center.y - center_frame.y) * normal.y);
         let lam_d_neigh = abs((other_center.x - f_center.x) * normal.x + (other_center.y - f_center.y) * normal.y);
         let lam_total = lam_d_own + lam_d_neigh;
         var lambda_f: f32 = 0.5;

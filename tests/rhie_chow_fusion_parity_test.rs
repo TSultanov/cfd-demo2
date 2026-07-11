@@ -315,28 +315,6 @@ fn run_with_policy_outer_iterations(
     solver.step_stats().outer_iterations.unwrap_or(0)
 }
 
-fn run_with_policy_submission_stats(
-    mesh: &Mesh,
-    policy: KernelFusionPolicy,
-    steps: usize,
-    outer_iters: usize,
-    fixed_outer_iterations_mode: bool,
-    outer_batched_mode: bool,
-) -> SubmissionStats {
-    let _lock = solver_test_lock()
-        .lock()
-        .expect("dispatch/submission test lock poisoned");
-
-    run_with_policy_submission_stats_no_lock(
-        mesh,
-        policy,
-        steps,
-        outer_iters,
-        fixed_outer_iterations_mode,
-        outer_batched_mode,
-    )
-}
-
 fn run_with_policy_submission_stats_no_lock(
     mesh: &Mesh,
     policy: KernelFusionPolicy,
@@ -394,25 +372,6 @@ fn run_with_policy_submission_stats_no_lock(
         solver.step();
     }
     get_submission_stats()
-}
-
-fn run_with_policy_submission_count(
-    mesh: &Mesh,
-    policy: KernelFusionPolicy,
-    steps: usize,
-    outer_iters: usize,
-    fixed_outer_iterations_mode: bool,
-    outer_batched_mode: bool,
-) -> u64 {
-    run_with_policy_submission_stats(
-        mesh,
-        policy,
-        steps,
-        outer_iters,
-        fixed_outer_iterations_mode,
-        outer_batched_mode,
-    )
-    .total_submissions
 }
 
 fn assert_snapshots_match(
@@ -985,9 +944,24 @@ fn coupled_outer_batched_mode_does_not_increase_kernel_graph_dispatch_count() {
     );
 }
 
+/// The host-driven outer loop has its own submission fusion: assembly, the
+/// linear solve, convergence reductions and update share the solve's first and
+/// last restart chunks.  Keep that optimization pinned against its documented
+/// `CFD2_NO_HOST_FUSION` fallback instead of comparing it with the independent
+/// fixed-batch scheduler (whose full linear budget may require more chunks).
 #[test]
-fn coupled_outer_batched_mode_reduces_queue_submission_count() {
+fn coupled_host_fusion_reduces_queue_submission_count_vs_explicit_opt_out() {
     std::env::set_var("CFD2_QUIET", "1");
+
+    let _lock = solver_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _fusion_guard = EnvVarGuard::capture("CFD2_NO_HOST_FUSION");
+    let _chunked_guard = EnvVarGuard::capture("CFD2_NO_HOST_CHUNKED");
+    let _seed_guard = EnvVarGuard::capture("CFD2_ENABLE_ENCODED_SEED_BASIS0");
+    std::env::remove_var("CFD2_NO_HOST_FUSION");
+    std::env::remove_var("CFD2_NO_HOST_CHUNKED");
+    std::env::remove_var("CFD2_ENABLE_ENCODED_SEED_BASIS0");
 
     let mesh = generate_structured_rect_mesh(
         16,
@@ -1004,7 +978,7 @@ fn coupled_outer_batched_mode_reduces_queue_submission_count() {
 
     let steps = 2usize;
     let outer_iters = 5usize;
-    let non_batched = run_with_policy_submission_count(
+    let fused = run_with_policy_submission_stats_no_lock(
         &mesh,
         KernelFusionPolicy::Safe,
         steps,
@@ -1012,32 +986,47 @@ fn coupled_outer_batched_mode_reduces_queue_submission_count() {
         true,
         false,
     );
-    let batched = run_with_policy_submission_count(
+
+    std::env::set_var("CFD2_NO_HOST_FUSION", "1");
+    let explicit_opt_out = run_with_policy_submission_stats_no_lock(
         &mesh,
         KernelFusionPolicy::Safe,
         steps,
         outer_iters,
         true,
-        true,
-    );
-    eprintln!(
-        "[submission_counter][coupled_batch_tail] non_batched={} batched={} delta={}",
-        non_batched,
-        batched,
-        non_batched.saturating_sub(batched)
+        false,
     );
 
-    assert!(
-        non_batched > 0,
-        "submission counter should observe queue submissions during coupled steps"
+    eprintln!(
+        "[submission_counter][host_fusion] fused={} explicit_opt_out={} delta={}",
+        fused.total_submissions,
+        explicit_opt_out.total_submissions,
+        explicit_opt_out
+            .total_submissions
+            .saturating_sub(fused.total_submissions)
+    );
+    eprintln!("[submission_counter][host_fusion_on] {fused:?}");
+    eprintln!("[submission_counter][host_fusion_off] {explicit_opt_out:?}");
+
+    assert_eq!(
+        fused.by_category.get("Module Graph").copied().unwrap_or(0),
+        0,
+        "host fusion must not submit assembly/update module graphs separately"
     );
     assert!(
-        batched <= non_batched,
-        "expected batched outer loop to avoid increasing queue submissions vs non-batched fixed mode (non_batched={non_batched}, batched={batched})"
+        explicit_opt_out
+            .by_category
+            .get("Module Graph")
+            .copied()
+            .unwrap_or(0)
+            > 0,
+        "the explicit host-fusion opt-out must exercise separate module-graph submissions"
     );
     assert!(
-        batched < non_batched,
-        "expected batched outer loop to reduce queue submissions vs non-batched fixed mode (non_batched={non_batched}, batched={batched})"
+        fused.total_submissions < explicit_opt_out.total_submissions,
+        "expected host fusion to reduce queue submissions versus its explicit opt-out (fused={}, explicit_opt_out={})",
+        fused.total_submissions,
+        explicit_opt_out.total_submissions,
     );
 }
 
@@ -1282,33 +1271,26 @@ fn host_driven_encoded_seed_basis0_default_on_matches_opt_out() {
     );
 }
 
-/// Assert that the one-submission batched path reduces the queue-submission
-/// count relative to the non-batched baseline.
-///
-/// With per-FGMRES-restart-chunk submission the count scales with the number
-/// of restart chunks rather than the number of host-side convergence
-/// round-trips.
-///
-/// RECALIBRATION NOTE: this gate originally demanded a ≥50% reduction,
-/// implicitly calibrated against a baseline that needed many convergence
-/// round-trips per solve. That regime was an ARTIFACT of the sign-flipped
-/// outlet pressure force (the mirror closure at Dirichlet-p faces): once the
-/// BC-aware boundary gradient landed, the outlet system conditions so well
-/// that the baseline converges within ~1-2 restarts per solve at ANY mesh
-/// size (16×8 through 64×32 all measure ~3.3 submissions/solve) — the
-/// baseline itself sits near the chunk-schedule floor. The gate now asserts
-/// the unconditional mechanism guarantees: strictly fewer submissions, with
-/// a meaningful margin (≥10%), which still fails if batching stops batching.
+/// Pin the fixed-batch submission topology independently of solver convergence.
+/// A one-iteration diagnostic budget makes every outer solve exactly one
+/// FGMRES chunk; the only other submissions are the per-step state copy and the
+/// final state/delta convergence reductions.  Numerical/default-budget parity
+/// is covered by the neighboring snapshot and convergence tests.
 #[test]
-fn one_submission_mode_submission_count_at_expected_floor() {
+fn fixed_outer_batch_submission_count_matches_chunk_schedule() {
     std::env::set_var("CFD2_QUIET", "1");
-    // Clear legacy tuning knobs so we measure the default chunk schedule.
-    std::env::remove_var("CFD2_ONE_SUBMISSION_SOLUTION_OMEGA");
-    std::env::remove_var("CFD2_ONE_SUBMISSION_TAIL_OMEGA");
-    std::env::remove_var("CFD2_ONE_SUBMISSION_CHUNKS");
+
+    let _lock = solver_test_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _restart_guard = EnvVarGuard::capture("CFD2_ONE_SUBMISSION_RESTART_BUDGET");
+    let _total_guard = EnvVarGuard::capture("CFD2_ONE_SUBMISSION_TOTAL_ITERS");
+    let _tail_guard = EnvVarGuard::capture("CFD2_ONE_SUBMISSION_MIN_TAIL");
+    let _batch_guard = EnvVarGuard::capture("CFD2_NO_BATCH");
     std::env::remove_var("CFD2_ONE_SUBMISSION_RESTART_BUDGET");
-    std::env::remove_var("CFD2_ONE_SUBMISSION_TOTAL_ITERS");
     std::env::remove_var("CFD2_ONE_SUBMISSION_MIN_TAIL");
+    std::env::remove_var("CFD2_NO_BATCH");
+    std::env::set_var("CFD2_ONE_SUBMISSION_TOTAL_ITERS", "1");
 
     let mesh = generate_structured_rect_mesh(
         16,
@@ -1326,17 +1308,7 @@ fn one_submission_mode_submission_count_at_expected_floor() {
     let steps = 2usize;
     let outer_iters = 5usize;
 
-    let non_batched = run_with_policy_submission_count(
-        &mesh,
-        KernelFusionPolicy::Safe,
-        steps,
-        outer_iters,
-        true,
-        false,
-    );
-
-    // One-submission is always active when outer_batched_mode is true.
-    let one_submission = run_with_policy_submission_count(
+    let stats = run_with_policy_submission_stats_no_lock(
         &mesh,
         KernelFusionPolicy::Safe,
         steps,
@@ -1345,24 +1317,23 @@ fn one_submission_mode_submission_count_at_expected_floor() {
         true,
     );
 
-    eprintln!(
-        "[submission_counter][one_submission_chunked] non_batched={} one_submission={} delta={}",
-        non_batched,
-        one_submission,
-        non_batched.saturating_sub(one_submission)
-    );
+    let label_count = |label: &str| stats.by_label.get(label).copied().unwrap_or(0);
+    let expected_steps = steps as u64;
+    let expected_solves = (steps * outer_iters) as u64;
+    let expected_total = expected_solves + 3 * expected_steps;
 
-    // Strictly fewer submissions, by a meaningful margin (≥10% of the
-    // baseline): if the chunked path stops batching, the counts converge and
-    // this fails.
-    let max_allowed = non_batched - (non_batched / 10).max(2);
-    assert!(
-        one_submission <= max_allowed,
-        "expected one-submission chunked path to use at most {} submissions \
-         (baseline non_batched={}), but got {}",
-        max_allowed,
-        non_batched,
-        one_submission
+    eprintln!("[submission_counter][fixed_batch_one_chunk] {stats:?}");
+    assert_eq!(label_count("pre_step_copy"), expected_steps);
+    assert_eq!(
+        label_count("fgmres:one_submission_chunk"),
+        expected_solves,
+        "one diagnostic chunk must be submitted for every fixed outer solve"
+    );
+    assert_eq!(label_count("outer_convergence:state"), expected_steps);
+    assert_eq!(label_count("outer_convergence:delta"), expected_steps);
+    assert_eq!(
+        stats.total_submissions, expected_total,
+        "unexpected submission outside the fixed-batch chunk schedule: {stats:?}"
     );
 }
 

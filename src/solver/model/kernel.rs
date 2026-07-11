@@ -14,7 +14,7 @@ impl KernelId {
 
     /// Rhie-Chow post-solve pressure-gradient refresh.
     /// Schedule logic keys on this (see [`Self::refreshes_grad_p`]): it writes
-    /// the SAME state grad_p slots with the SAME Green-Gauss stencil as
+    /// the SAME state grad_p slots with the SAME pressure reconstruction as
     /// [`Self::FLUX_MODULE_GRADIENTS`], which both backends therefore skip on
     /// outer iterations after the first.
     pub const RHIE_CHOW_GRAD_P_UPDATE: KernelId = KernelId("rhie_chow/grad_p_update");
@@ -62,6 +62,7 @@ impl KernelId {
     pub const GENERIC_COUPLED_UPDATE: KernelId = KernelId("generic_coupled_update");
     pub const EXPLICIT_RESIDUAL: KernelId = KernelId("explicit_residual");
     pub const EXPLICIT_RESIDUAL_GRAD_STATE: KernelId = KernelId("explicit_residual_grad_state");
+    pub const EXPLICIT_PRIMITIVE_RECOVERY: KernelId = KernelId("explicit_primitive_recovery");
     pub const EXPLICIT_RK4_STAGE_1: KernelId = KernelId("explicit_rk4_stage_1");
     pub const EXPLICIT_RK4_STAGE_2: KernelId = KernelId("explicit_rk4_stage_2");
     pub const EXPLICIT_RK4_STAGE_3: KernelId = KernelId("explicit_rk4_stage_3");
@@ -874,6 +875,34 @@ pub(crate) fn generate_explicit_residual_grad_state_kernel_program(
         model,
         schemes,
         true,
+    )
+}
+
+pub(crate) fn generate_explicit_primitive_recovery_kernel_program(
+    model: &crate::solver::model::ModelSpec,
+    schemes: &crate::solver::ir::SchemeRegistry,
+) -> Result<crate::solver::ir::KernelProgram, String> {
+    let discrete = cfd2_codegen::solver::codegen::lower_system_unchecked(&model.system, schemes);
+    let slots = resolved_slots_from_layout(&model.state_layout);
+    let ordered = model
+        .explicit_primitives
+        .as_ref()
+        .unwrap_or(&model.primitives)
+        .ordered()
+        .map_err(|e| format!("explicit primitive recovery ordering failed: {e}"))?;
+    let primitives: Vec<(u32, cfd2_ir::ast::Expr)> = ordered
+        .into_iter()
+        .filter_map(|(name, expr)| {
+            resolve_offset_from_slots(&slots, &name).map(|offset| (offset, expr))
+        })
+        .collect();
+    let eos_params = extract_eos_params(model);
+    cfd2_codegen::solver::codegen::explicit_rk::generate_primitive_recovery_kernel_program(
+        KernelId::EXPLICIT_PRIMITIVE_RECOVERY.as_str(),
+        &discrete,
+        &slots,
+        &primitives,
+        &eos_params,
     )
 }
 
@@ -2348,8 +2377,9 @@ mod tests {
         // arithmetic blend everywhere, no seal, no penalty reads — pinning
         // that the gate keys on layout field presence and nothing else.
         let base = crate::solver::model::incompressible_momentum_model().expect("model");
-        let base_flux = generate_kernel_wgsl_for_model_by_id(&base, &schemes, KernelId::FLUX_MODULE)
-            .expect("flux_module WGSL");
+        let base_flux =
+            generate_kernel_wgsl_for_model_by_id(&base, &schemes, KernelId::FLUX_MODULE)
+                .expect("flux_module WGSL");
         assert!(
             base_flux.contains("s_own_d_p * lambda + s_neigh_d_p * lambda_other"),
             "non-IBM flux module keeps the distance-weighted face d_p blend"
@@ -2365,7 +2395,8 @@ mod tests {
         )
         .expect("generic_coupled_assembly WGSL");
         assert!(
-            !base_asm.contains(") * min(state[") && !base_asm.contains("select(1.0, 0.0, abs(state["),
+            !base_asm.contains(") * min(state[")
+                && !base_asm.contains("select(1.0, 0.0, abs(state["),
             "non-IBM assembly must keep the pre-fix blend and deferred correction"
         );
     }

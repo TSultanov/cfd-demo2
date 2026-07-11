@@ -319,7 +319,10 @@ pub fn run_to_steady(
             .map(|(a, b)| (a - b).abs())
             .fold(0.0f64, f64::max);
         if max_delta < steady_tol {
-            println!("[mms] steady after {} steps (max_delta={max_delta:.3e})", step + 1);
+            println!(
+                "[mms] steady after {} steps (max_delta={max_delta:.3e})",
+                step + 1
+            );
             return cur;
         }
         if step % 10 == 0 {

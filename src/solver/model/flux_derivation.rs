@@ -34,11 +34,21 @@ pub struct DerivedRhieChow {
 /// - density: the state-layout `rho` if present, else the uniform density.
 ///
 /// The flux is the Rhie–Chow-style mass flux
-///   `phi = rho_f * (HbyA_f . n) * A  -  rho_f * d_p_f * ((p_N - p_O)/dist) * A`
-/// with `HbyA ~= U + d_p * grad(p)`; the pressure row receives the predicted
-/// flux (first term only) and all other rows the corrected flux. The
-/// pressure-gradient correction uses the same face-normal distance
-/// projection as the Laplacian discretization so the two stay consistent.
+///   `phi_pred = rho_adv,f*(U_f.n)*A`
+///   `           + I_f[(rho*d_p)*grad(p)].d/(n.d)*A`
+///   `phi      = phi_pred - I_f(rho*d_p)*((p_N-p_O)/dist)*A`.
+/// The compact coefficient `I_f(rho*d_p)` is exactly the face conductance used
+/// by the pressure Laplacian; interpolating `rho` and `d_p` independently is
+/// not equivalent when density varies.  The predictor also interpolates the
+/// complete cell product `(rho*d_p)*grad(p)`, which is the variable-coefficient
+/// momentum interpolation. Its projection along the cell-centre line `d`
+/// incorporates the deferred non-orthogonal part of `snGrad(p)` on interior
+/// faces: the corrected pressure flux is therefore zero for a linear pressure
+/// field even when `d` is not parallel to the face normal `n`. Dirichlet
+/// boundaries use the owner-to-face line for the same affine cancellation;
+/// Neumann boundaries use their compact prescribed-normal-gradient term. The
+/// pressure row receives `phi_pred` and all other rows receive the corrected
+/// `phi`.
 pub fn derive_rhie_chow(
     system: &EquationSystem,
     layout: &StateLayout,
@@ -79,7 +89,10 @@ fn derive_rhie_chow_flux(
     system: &EquationSystem,
     layout: &StateLayout,
 ) -> Result<(FluxModuleKernelSpec, String), String> {
-    use crate::solver::model::backend::{Coefficient as BackendCoeff, FieldKind, FieldRef, TermOp};
+    use crate::solver::model::backend::ast::TopologyMode;
+    use crate::solver::model::backend::{
+        Coefficient as BackendCoeff, FieldKind, FieldRef, TermOp,
+    };
     use std::collections::{HashMap, HashSet};
 
     fn collect_coeff_fields(coeff: &BackendCoeff, out: &mut Vec<FieldRef>) {
@@ -280,12 +293,30 @@ fn derive_rhie_chow_flux(
             ));
         }
     };
+    // The face flux below mirrors the pressure matrix's complete coefficient.
+    // Do not silently keep deriving `rho*d_p` if a model later changes its
+    // pressure Laplacian (for example by adding a scale or another field): that
+    // would recreate the very flux/matrix mismatch Rhie--Chow is meant to cure.
+    let is_field = |coefficient: &BackendCoeff, name: &str| {
+        matches!(coefficient, BackendCoeff::Field(field) if field.name() == name)
+    };
+    let is_rho_dp = match coeff {
+        BackendCoeff::Product(lhs, rhs) => {
+            (is_field(lhs, "rho") && is_field(rhs, &d_p))
+                || (is_field(lhs, &d_p) && is_field(rhs, "rho"))
+        }
+        _ => false,
+    };
+    if !is_rho_dp {
+        return Err(format!(
+            "Rhie-Chow currently requires the pressure Laplacian coefficient to be exactly rho*{d_p}; derive the complete face conductance before changing that coefficient"
+        ));
+    }
 
-    // Rhie–Chow-style mass flux:
-    //   phi = rho * (u_f · n) * area  -  rho * d_p_f * ((p_N - p_O) / dist) * area
-    // The pressure-gradient term uses the same face-normal distance projection
-    // (`dist`) as the Laplacian discretization, so the two stay consistent.
-    let rho_face = density_face_expr(&registry, system.is_ale())?;
+    // Advective density can be upwinded for the thermal all-Mach model. It is
+    // deliberately separate from the pressure conductance below: the latter
+    // must match the pressure Laplacian's interpolation exactly.
+    let rho_advective_face = density_face_expr(&registry, system.is_ale())?;
 
     // Face interpolation of d_p.
     //
@@ -326,9 +357,44 @@ fn derive_rhie_chow_flux(
         )
     };
 
-    // `HbyA` is the momentum predictor for the "predicted" mass flux (pressure
-    // equation RHS); the explicit pressure correction is subtracted after.
-    //   HbyA ≈ U + d_p * grad(p)
+    // One canonical Rhie--Chow pressure conductance for both halves of the
+    // bracket. Non-IBM pressure assembly interpolates the complete coefficient
+    // `rho*d_p`, so do exactly that here. IBM pressure assembly uses the
+    // distance-interpolated remaining factor (`rho`) times min(d_p) on fluid
+    // rows; mirror that construction. This differs intentionally from the
+    // possibly-upwind `rho_advective_face` above.
+    let rho_own = S::state(FaceSide::Owner, "rho");
+    let rho_neigh = S::state(FaceSide::Neighbor, "rho");
+    let dp_own = S::state(FaceSide::Owner, d_p.clone());
+    let dp_neigh = S::state(FaceSide::Neighbor, d_p.clone());
+    let has_state_density = registry
+        .validate_scalar_field::<Density>("derive_rhie_chow", "rho")
+        .is_ok();
+    let pressure_conductance_face = if has_state_density {
+        if ibm_seal {
+            S::Mul(
+                Box::new(S::Lerp(Box::new(rho_own), Box::new(rho_neigh))),
+                Box::new(d_p_face.clone()),
+            )
+        } else {
+            S::Lerp(
+                Box::new(S::Mul(Box::new(rho_own), Box::new(dp_own))),
+                Box::new(S::Mul(Box::new(rho_neigh), Box::new(dp_neigh))),
+            )
+        }
+    } else {
+        S::Mul(
+            Box::new(S::constant("density")),
+            Box::new(d_p_face.clone()),
+        )
+    };
+
+    // The momentum predictor for the pressure-equation flux is
+    //   phi_pred = rho_adv,f*(U_f.n)*A
+    //            + I[(rho*d_p)*grad(p)].d/(n.d)*A.
+    // The second projection incorporates the deferred non-orthogonal part of
+    // snGrad(p), leaving the same compact pressure difference as the matrix.
+    // Its coefficient I(rho*d_p) matches the Laplacian assembly exactly.
     let grad_p_field = format!("grad_{}", pressure);
     let u_face = V::Lerp(
         Box::new(V::state_vec2(FaceSide::Owner, momentum.clone())),
@@ -336,30 +402,146 @@ fn derive_rhie_chow_flux(
     );
     let grad_p_face = V::Lerp(
         Box::new(V::state_vec2(FaceSide::Owner, grad_p_field.clone())),
-        Box::new(V::state_vec2(FaceSide::Neighbor, grad_p_field)),
+        Box::new(V::state_vec2(FaceSide::Neighbor, grad_p_field.clone())),
     );
-    let hby_a_face = V::Add(
-        Box::new(u_face),
-        Box::new(V::MulScalar(
+    let u_n = S::Dot(Box::new(u_face), Box::new(V::normal()));
+    // Momentum-weighted interpolation: interpolate the cell predictor product
+    // `(rho*d_p)*grad(p)`, not the product of separately interpolated factors.
+    // For a linear pressure field this is exactly
+    // `I(rho*d_p)*grad(p)`, so the compact correction cancels identically even
+    // when rho/d_p vary. IBM uses its min-based face conductance directly.
+    let weighted_grad_p_face = if ibm_seal {
+        V::MulScalar(
             Box::new(grad_p_face),
-            Box::new(d_p_face.clone()),
-        )),
-    );
-    let u_n = S::Dot(Box::new(hby_a_face), Box::new(V::normal()));
-    let phi_pred = S::Mul(
-        Box::new(S::Mul(Box::new(rho_face.clone()), Box::new(u_n))),
-        Box::new(S::area()),
-    );
+            Box::new(pressure_conductance_face.clone()),
+        )
+    } else if has_state_density {
+        V::Lerp(
+            Box::new(V::MulScalar(
+                Box::new(V::state_vec2(FaceSide::Owner, grad_p_field.clone())),
+                Box::new(S::Mul(
+                    Box::new(S::state(FaceSide::Owner, "rho")),
+                    Box::new(S::state(FaceSide::Owner, d_p.clone())),
+                )),
+            )),
+            Box::new(V::MulScalar(
+                Box::new(V::state_vec2(FaceSide::Neighbor, grad_p_field)),
+                Box::new(S::Mul(
+                    Box::new(S::state(FaceSide::Neighbor, "rho")),
+                    Box::new(S::state(FaceSide::Neighbor, d_p.clone())),
+                )),
+            )),
+        )
+    } else {
+        // Uniform-density models may still use a spatially varying assembled
+        // d_p. Preserve the same momentum-weighted interpolation instead of
+        // multiplying I(d_p) by I(grad p).
+        V::MulScalar(
+            Box::new(V::Lerp(
+                Box::new(V::MulScalar(
+                    Box::new(V::state_vec2(FaceSide::Owner, grad_p_field.clone())),
+                    Box::new(S::state(FaceSide::Owner, d_p.clone())),
+                )),
+                Box::new(V::MulScalar(
+                    Box::new(V::state_vec2(FaceSide::Neighbor, grad_p_field)),
+                    Box::new(S::state(FaceSide::Neighbor, d_p.clone())),
+                )),
+            )),
+            Box::new(S::constant("density")),
+        )
+    };
     let dp = S::Sub(
         Box::new(S::state(FaceSide::Neighbor, pressure.clone())),
-        Box::new(S::state(FaceSide::Owner, pressure.clone())),
+        // Keep the owner CELL pressure raw at a Dirichlet boundary. Ordinary
+        // `State(Owner,p)` lowers to the patch value so face interpolation sees
+        // the exact patch state; using it here made p_N-p_O identically zero and
+        // silently removed the Rhie--Chow correction from momentum/temperature
+        // boundary fluxes while the pressure Laplacian still applied it.
+        Box::new(S::cell_state(FaceSide::Owner, pressure.clone())),
     );
     let dp_over_dist = S::Div(Box::new(dp), Box::new(S::dist()));
-    let phi_p = S::Mul(
+    let compact_pressure_projection = S::Mul(
+        Box::new(pressure_conductance_face.clone()),
+        Box::new(dp_over_dist),
+    );
+
+    // The projection is selected by geometry and by the PRESSURE BC kind, not
+    // by a mesh patch label:
+    //
+    // * interior: q.d/|n.d|, so the deferred non-orthogonal piece and compact
+    //   pressure jump cancel for an affine pressure field;
+    // * Dirichlet boundary: q.r_Pf/|n.r_Pf|, for the same affine cancellation
+    //   on a skew face;
+    // * Neumann boundary: use kappa*(p_b-p_P)/dist directly. The prescribed
+    //   normal gradient then matches the pressure matrix exactly and the
+    //   corrected boundary mass flux remains the velocity BC's advective flux.
+    let normal_projection = S::Dot(
+        Box::new(weighted_grad_p_face.clone()),
+        Box::new(V::normal()),
+    );
+    let (interior_projection, dirichlet_boundary_projection) =
+        if system.topology() == TopologyMode::Unstructured {
+            // d = C_N-C_O = (C_f-C_O) - (C_f-C_N), including periodic lift.
+            let center_line = V::Sub(
+                Box::new(V::cell_to_face(FaceSide::Owner)),
+                Box::new(V::cell_to_face(FaceSide::Neighbor)),
+            );
+            let interior = S::Div(
+                Box::new(S::Dot(
+                    Box::new(weighted_grad_p_face.clone()),
+                    Box::new(center_line),
+                )),
+                Box::new(S::dist()),
+            );
+            let owner_to_face = V::cell_to_face(FaceSide::Owner);
+            let boundary_dirichlet = S::Div(
+                Box::new(S::Dot(
+                    Box::new(weighted_grad_p_face),
+                    Box::new(owner_to_face),
+                )),
+                Box::new(S::dist()),
+            );
+            (interior, boundary_dirichlet)
+        } else {
+            // Cartesian structured faces are orthogonal by construction.
+            (normal_projection.clone(), normal_projection)
+        };
+    let is_boundary = S::is_boundary();
+    let is_dirichlet = S::boundary_dirichlet(pressure.clone());
+    let boundary_projection = S::Add(
         Box::new(S::Mul(
-            Box::new(S::Mul(Box::new(rho_face), Box::new(d_p_face))),
-            Box::new(dp_over_dist),
+            Box::new(is_dirichlet.clone()),
+            Box::new(dirichlet_boundary_projection),
         )),
+        Box::new(S::Mul(
+            Box::new(S::Sub(Box::new(S::lit(1.0)), Box::new(is_dirichlet))),
+            Box::new(compact_pressure_projection.clone()),
+        )),
+    );
+    let weighted_grad_p_projection = S::Add(
+        Box::new(S::Mul(
+            Box::new(S::Sub(
+                Box::new(S::lit(1.0)),
+                Box::new(is_boundary.clone()),
+            )),
+            Box::new(interior_projection),
+        )),
+        Box::new(S::Mul(
+            Box::new(is_boundary),
+            Box::new(boundary_projection),
+        )),
+    );
+    let phi_advective = S::Mul(
+        Box::new(S::Mul(Box::new(rho_advective_face), Box::new(u_n))),
+        Box::new(S::area()),
+    );
+    let phi_grad_p = S::Mul(
+        Box::new(weighted_grad_p_projection),
+        Box::new(S::area()),
+    );
+    let phi_pred = S::Add(Box::new(phi_advective), Box::new(phi_grad_p));
+    let phi_p = S::Mul(
+        Box::new(compact_pressure_projection),
         Box::new(S::area()),
     );
     let phi_corr = S::Sub(Box::new(phi_pred.clone()), Box::new(phi_p));
@@ -509,6 +691,77 @@ fn derive_advecting_velocity_flux(
 mod tests {
     use super::*;
 
+    fn is_center_line(expr: &crate::solver::ir::FaceVec2Expr) -> bool {
+        use crate::solver::ir::{FaceVec2Builtin as B, FaceVec2Expr as V};
+        matches!(
+            expr,
+            V::Sub(owner, neighbor)
+                if matches!(owner.as_ref(), V::Builtin(B::CellToFace { side: FaceSide::Owner }))
+                    && matches!(neighbor.as_ref(), V::Builtin(B::CellToFace { side: FaceSide::Neighbor }))
+        )
+    }
+
+    fn has_center_line_projection(expr: &crate::solver::ir::FaceScalarExpr) -> bool {
+        use crate::solver::ir::{FaceScalarBuiltin as B, FaceScalarExpr as S};
+        match expr {
+            S::Div(numerator, denominator)
+                if matches!(denominator.as_ref(), S::Builtin(B::Dist))
+                    && matches!(
+                        numerator.as_ref(),
+                        S::Dot(_, direction) if is_center_line(direction)
+                    ) =>
+            {
+                true
+            }
+            S::Add(a, b)
+            | S::Sub(a, b)
+            | S::Mul(a, b)
+            | S::Div(a, b)
+            | S::Max(a, b)
+            | S::Min(a, b)
+            | S::Lerp(a, b) => has_center_line_projection(a) || has_center_line_projection(b),
+            S::Neg(a) | S::Abs(a) | S::Sqrt(a) => has_center_line_projection(a),
+            _ => false,
+        }
+    }
+
+    fn has_raw_owner_pressure(expr: &crate::solver::ir::FaceScalarExpr) -> bool {
+        use crate::solver::ir::FaceScalarExpr as S;
+        match expr {
+            S::CellState {
+                side: FaceSide::Owner,
+                name,
+            } if name == "p" => true,
+            S::Add(a, b)
+            | S::Sub(a, b)
+            | S::Mul(a, b)
+            | S::Div(a, b)
+            | S::Max(a, b)
+            | S::Min(a, b)
+            | S::Lerp(a, b) => has_raw_owner_pressure(a) || has_raw_owner_pressure(b),
+            S::Neg(a) | S::Abs(a) | S::Sqrt(a) => has_raw_owner_pressure(a),
+            _ => false,
+        }
+    }
+
+    fn has_pressure_bc_kind_query(expr: &crate::solver::ir::FaceScalarExpr) -> bool {
+        use crate::solver::ir::FaceScalarExpr as S;
+        match expr {
+            S::BoundaryDirichlet { name } if name == "p" => true,
+            S::Add(a, b)
+            | S::Sub(a, b)
+            | S::Mul(a, b)
+            | S::Div(a, b)
+            | S::Max(a, b)
+            | S::Min(a, b)
+            | S::Lerp(a, b) => {
+                has_pressure_bc_kind_query(a) || has_pressure_bc_kind_query(b)
+            }
+            S::Neg(a) | S::Abs(a) | S::Sqrt(a) => has_pressure_bc_kind_query(a),
+            _ => false,
+        }
+    }
+
     #[test]
     fn derive_rhie_chow_matches_model_construction() {
         // The incompressible model consumes the deriver; pin the inferred
@@ -535,6 +788,18 @@ mod tests {
         assert_ne!(
             flux[0], flux[2],
             "pressure slot gets the predicted (uncorrected) flux"
+        );
+        assert!(
+            has_center_line_projection(&flux[0]) && has_center_line_projection(&flux[2]),
+            "unstructured Rhie-Chow must fold the non-orthogonal correction into the predictor"
+        );
+        assert!(
+            has_raw_owner_pressure(&flux[0]),
+            "compact Dirichlet pressure difference must retain the raw owner cell value"
+        );
+        assert!(
+            has_pressure_bc_kind_query(&flux[0]),
+            "boundary Rhie-Chow projection must follow the runtime pressure BC kind"
         );
         assert_eq!(derived.aux_module.name, "rhie_chow_aux");
     }

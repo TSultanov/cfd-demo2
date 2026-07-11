@@ -26,6 +26,8 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
+    inlet_velocity: f32,
+    inlet_ramp_time: f32,
     eos_gamma: f32,
     eos_gm1: f32,
     eos_r: f32,
@@ -112,14 +114,17 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let lambda_other = 1.0 - lambda;
         let d_vec: vec2<f32> = c_neigh_vec - c_owner_vec;
         let dist_proj = abs(dot(d_vec, normal_vec));
-        let dist = max(dist_proj, 0.000001);
+        let dist_euc = sqrt(d_vec.x * d_vec.x + d_vec.y * d_vec.y);
+        var dist: f32 = max(dist_euc, 0.000001);
+        if (dist_proj > 0.000001) {
+            dist = dist_proj;
+        }
         let s_own_U_x = select(bc_neighbor_scalar(state[owner * 9u + 0u], state[owner * 9u + 0u], bc_kind[sfd_face_id * 3u + 0u], bc_value[sfd_face_id * 3u + 0u], d_own, is_boundary), state[owner * 9u + 0u] - (state[owner * 9u + 0u] * normal_vec.x + state[owner * 9u + 1u] * normal_vec.y) * normal_vec.x, is_boundary && boundary_type == 4u);
         let s_own_U_y = select(bc_neighbor_scalar(state[owner * 9u + 1u], state[owner * 9u + 1u], bc_kind[sfd_face_id * 3u + 1u], bc_value[sfd_face_id * 3u + 1u], d_own, is_boundary), state[owner * 9u + 1u] - (state[owner * 9u + 0u] * normal_vec.x + state[owner * 9u + 1u] * normal_vec.y) * normal_vec.y, is_boundary && boundary_type == 4u);
         let s_own_d_p = state[owner * 9u + 3u];
         let s_own_grad_p_x = state[owner * 9u + 4u];
         let s_own_grad_p_y = state[owner * 9u + 5u];
         let s_own_ibm_penalty_U = state[owner * 9u + 8u];
-        let s_own_p = bc_neighbor_scalar(state[owner * 9u + 2u], state[owner * 9u + 2u], bc_kind[sfd_face_id * 3u + 2u], bc_value[sfd_face_id * 3u + 2u], d_own, is_boundary);
         let s_neigh_U_x = select(bc_neighbor_scalar(state[neigh_idx * 9u + 0u], state[owner * 9u + 0u], bc_kind[sfd_face_id * 3u + 0u], bc_value[sfd_face_id * 3u + 0u], d_own, is_boundary), state[owner * 9u + 0u] - (state[owner * 9u + 0u] * normal_vec.x + state[owner * 9u + 1u] * normal_vec.y) * normal_vec.x, is_boundary && boundary_type == 4u);
         let s_neigh_U_y = select(bc_neighbor_scalar(state[neigh_idx * 9u + 1u], state[owner * 9u + 1u], bc_kind[sfd_face_id * 3u + 1u], bc_value[sfd_face_id * 3u + 1u], d_own, is_boundary), state[owner * 9u + 1u] - (state[owner * 9u + 0u] * normal_vec.x + state[owner * 9u + 1u] * normal_vec.y) * normal_vec.y, is_boundary && boundary_type == 4u);
         let s_neigh_d_p = select(state[neigh_idx * 9u + 3u], state[owner * 9u + 3u], is_boundary);
@@ -127,8 +132,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let s_neigh_grad_p_y = select(state[neigh_idx * 9u + 5u], state[owner * 9u + 5u], is_boundary);
         let s_neigh_ibm_penalty_U = select(state[neigh_idx * 9u + 8u], state[owner * 9u + 8u], is_boundary);
         let s_neigh_p = bc_neighbor_scalar(state[neigh_idx * 9u + 2u], state[owner * 9u + 2u], bc_kind[sfd_face_id * 3u + 2u], bc_value[sfd_face_id * 3u + 2u], d_own, is_boundary);
-        fluxes[sfd_face_id * 3u + 0u] = (constants.density * dot(vec2<f32>(s_own_U_x, s_own_U_y) * lambda + vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other + (vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * lambda + vec2<f32>(select(s_neigh_grad_p_x, 0.0, is_boundary && !(boundary_type == 2u)), select(s_neigh_grad_p_y, 0.0, is_boundary && !(boundary_type == 2u))) * lambda_other) * min(s_own_d_p, s_neigh_d_p), normal_vec) * area - constants.density * min(s_own_d_p, s_neigh_d_p) * (s_neigh_p - s_own_p) / dist * area) * (1.0 - min(abs(s_own_ibm_penalty_U) + abs(s_neigh_ibm_penalty_U), 1.0));
-        fluxes[sfd_face_id * 3u + 1u] = (constants.density * dot(vec2<f32>(s_own_U_x, s_own_U_y) * lambda + vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other + (vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * lambda + vec2<f32>(select(s_neigh_grad_p_x, 0.0, is_boundary && !(boundary_type == 2u)), select(s_neigh_grad_p_y, 0.0, is_boundary && !(boundary_type == 2u))) * lambda_other) * min(s_own_d_p, s_neigh_d_p), normal_vec) * area - constants.density * min(s_own_d_p, s_neigh_d_p) * (s_neigh_p - s_own_p) / dist * area) * (1.0 - min(abs(s_own_ibm_penalty_U) + abs(s_neigh_ibm_penalty_U), 1.0));
-        fluxes[sfd_face_id * 3u + 2u] = constants.density * dot(vec2<f32>(s_own_U_x, s_own_U_y) * lambda + vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other + (vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * lambda + vec2<f32>(select(s_neigh_grad_p_x, 0.0, is_boundary && !(boundary_type == 2u)), select(s_neigh_grad_p_y, 0.0, is_boundary && !(boundary_type == 2u))) * lambda_other) * min(s_own_d_p, s_neigh_d_p), normal_vec) * area * (1.0 - min(abs(s_own_ibm_penalty_U) + abs(s_neigh_ibm_penalty_U), 1.0));
+        fluxes[sfd_face_id * 3u + 0u] = (constants.density * dot(vec2<f32>(s_own_U_x, s_own_U_y) * lambda + vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other, normal_vec) * area + ((1.0 - select(0.0, 1.0, is_boundary)) * dot((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * lambda + vec2<f32>(select(s_neigh_grad_p_x, 0.0, false), select(s_neigh_grad_p_y, 0.0, false)) * lambda_other) * constants.density * min(s_own_d_p, s_neigh_d_p), normal_vec) + select(0.0, 1.0, is_boundary) * (select(0.0, 1.0, is_boundary && bc_kind[sfd_face_id * 3u + 2u] == 1u) * dot((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * lambda + vec2<f32>(select(s_neigh_grad_p_x, 0.0, false), select(s_neigh_grad_p_y, 0.0, false)) * lambda_other) * constants.density * min(s_own_d_p, s_neigh_d_p), normal_vec) + (1.0 - select(0.0, 1.0, is_boundary && bc_kind[sfd_face_id * 3u + 2u] == 1u)) * constants.density * min(s_own_d_p, s_neigh_d_p) * (s_neigh_p - state[owner * 9u + 2u]) / dist)) * area - constants.density * min(s_own_d_p, s_neigh_d_p) * (s_neigh_p - state[owner * 9u + 2u]) / dist * area) * (1.0 - min(abs(s_own_ibm_penalty_U) + abs(s_neigh_ibm_penalty_U), 1.0));
+        fluxes[sfd_face_id * 3u + 1u] = (constants.density * dot(vec2<f32>(s_own_U_x, s_own_U_y) * lambda + vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other, normal_vec) * area + ((1.0 - select(0.0, 1.0, is_boundary)) * dot((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * lambda + vec2<f32>(select(s_neigh_grad_p_x, 0.0, false), select(s_neigh_grad_p_y, 0.0, false)) * lambda_other) * constants.density * min(s_own_d_p, s_neigh_d_p), normal_vec) + select(0.0, 1.0, is_boundary) * (select(0.0, 1.0, is_boundary && bc_kind[sfd_face_id * 3u + 2u] == 1u) * dot((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * lambda + vec2<f32>(select(s_neigh_grad_p_x, 0.0, false), select(s_neigh_grad_p_y, 0.0, false)) * lambda_other) * constants.density * min(s_own_d_p, s_neigh_d_p), normal_vec) + (1.0 - select(0.0, 1.0, is_boundary && bc_kind[sfd_face_id * 3u + 2u] == 1u)) * constants.density * min(s_own_d_p, s_neigh_d_p) * (s_neigh_p - state[owner * 9u + 2u]) / dist)) * area - constants.density * min(s_own_d_p, s_neigh_d_p) * (s_neigh_p - state[owner * 9u + 2u]) / dist * area) * (1.0 - min(abs(s_own_ibm_penalty_U) + abs(s_neigh_ibm_penalty_U), 1.0));
+        fluxes[sfd_face_id * 3u + 2u] = (constants.density * dot(vec2<f32>(s_own_U_x, s_own_U_y) * lambda + vec2<f32>(s_neigh_U_x, s_neigh_U_y) * lambda_other, normal_vec) * area + ((1.0 - select(0.0, 1.0, is_boundary)) * dot((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * lambda + vec2<f32>(select(s_neigh_grad_p_x, 0.0, false), select(s_neigh_grad_p_y, 0.0, false)) * lambda_other) * constants.density * min(s_own_d_p, s_neigh_d_p), normal_vec) + select(0.0, 1.0, is_boundary) * (select(0.0, 1.0, is_boundary && bc_kind[sfd_face_id * 3u + 2u] == 1u) * dot((vec2<f32>(s_own_grad_p_x, s_own_grad_p_y) * lambda + vec2<f32>(select(s_neigh_grad_p_x, 0.0, false), select(s_neigh_grad_p_y, 0.0, false)) * lambda_other) * constants.density * min(s_own_d_p, s_neigh_d_p), normal_vec) + (1.0 - select(0.0, 1.0, is_boundary && bc_kind[sfd_face_id * 3u + 2u] == 1u)) * constants.density * min(s_own_d_p, s_neigh_d_p) * (s_neigh_p - state[owner * 9u + 2u]) / dist)) * area) * (1.0 - min(abs(s_own_ibm_penalty_U) + abs(s_neigh_ibm_penalty_U), 1.0));
     }
 }

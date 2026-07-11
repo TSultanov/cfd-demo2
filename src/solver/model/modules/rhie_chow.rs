@@ -138,13 +138,13 @@ pub fn rhie_chow_aux_module(
             id: kernel_dp_init,
             phase: KernelPhaseId::Update,
             dispatch: DispatchKindId::Cells,
-            condition: KernelConditionId::Always,
+            condition: KernelConditionId::RequiresImplicitStepping,
         },
         ModelKernelSpec {
             id: kernel_dp_update_from_diag,
             phase: KernelPhaseId::Update,
             dispatch: DispatchKindId::Cells,
-            condition: KernelConditionId::Always,
+            condition: KernelConditionId::RequiresImplicitStepping,
         },
         // Snapshot the pressure gradient before it is recomputed so velocity correction can use
         // the change in pressure gradient within the same nonlinear iteration.
@@ -152,7 +152,7 @@ pub fn rhie_chow_aux_module(
             id: kernel_store_grad_p,
             phase: KernelPhaseId::Update,
             dispatch: DispatchKindId::Cells,
-            condition: KernelConditionId::Always,
+            condition: KernelConditionId::RequiresImplicitStepping,
         },
         // Recompute `grad(p)` after the pressure update so velocity correction can use the
         // change in pressure gradient within the same nonlinear iteration.
@@ -160,13 +160,13 @@ pub fn rhie_chow_aux_module(
             id: kernel_grad_p_update,
             phase: KernelPhaseId::Update,
             dispatch: DispatchKindId::Cells,
-            condition: KernelConditionId::Always,
+            condition: KernelConditionId::RequiresImplicitStepping,
         },
         ModelKernelSpec {
             id: kernel_rhie_chow_correct_velocity_delta,
             phase: KernelPhaseId::Update,
             dispatch: DispatchKindId::Cells,
-            condition: KernelConditionId::Always,
+            condition: KernelConditionId::RequiresImplicitStepping,
         },
     ];
 
@@ -541,6 +541,7 @@ fn generate_dp_init_kernel_program(
 
     let stride = registry.state_layout().stride();
     let d_p_offset = d_p.offset();
+    let rho_offset = registry.state_layout().offset_for("rho");
     let mut program = KernelProgram::new(
         "dp_init",
         DispatchDomain::Cells,
@@ -560,7 +561,10 @@ fn generate_dp_init_kernel_program(
         DpFormulation::FromAssembledDiagonal { .. } | DpFormulation::FromAssembledRowSum { .. } => {
             let d_p_old = dsl::array_access("state", Expr::ident("base") + d_p_offset);
             let rho = dsl::max(
-                Expr::ident("constants").field("density"),
+                rho_offset.map_or_else(
+                    || Expr::ident("constants").field("density"),
+                    |offset| dsl::array_access("state", Expr::ident("base") + offset),
+                ),
                 Expr::lit_f32(1e-12),
             );
             let dt = dsl::max(Expr::ident("constants").field("dt"), Expr::lit_f32(0.0));
@@ -586,6 +590,16 @@ fn generate_dp_init_kernel_program(
                 0,
                 format!("state:{d_p_offset}"),
             ));
+        if let Some(rho_offset) = rho_offset {
+            program
+                .side_effects
+                .read_set
+                .insert(EffectResource::component(
+                    0,
+                    0,
+                    format!("state:{rho_offset}"),
+                ));
+        }
     }
     program
         .side_effects
@@ -649,6 +663,13 @@ fn rhie_chow_grad_p_update_bindings() -> Vec<KernelBinding> {
             1,
             13,
             "face_centers",
+            "array<Vector2>",
+            BindingAccess::ReadOnlyStorage,
+        ),
+        KernelBinding::new(
+            1,
+            14,
+            "face_wrap_shift",
             "array<Vector2>",
             BindingAccess::ReadOnlyStorage,
         ),
@@ -751,6 +772,7 @@ fn generate_dp_update_from_diag_kernel_program(
 
     let stride = registry.state_layout().stride();
     let d_p_offset = d_p.offset();
+    let rho_offset = registry.state_layout().offset_for("rho");
 
     match dp_formulation {
         DpFormulation::ClosedForm => {
@@ -789,7 +811,12 @@ fn generate_dp_update_from_diag_kernel_program(
                 dsl::let_expr(
                     "rho",
                     dsl::max(
-                        Expr::ident("constants").field("density"),
+                        rho_offset.map_or_else(
+                            || Expr::ident("constants").field("density"),
+                            |offset| {
+                                dsl::array_access("state", Expr::ident("base") + offset)
+                            },
+                        ),
                         Expr::lit_f32(1e-12),
                     ),
                 ),
@@ -833,6 +860,16 @@ fn generate_dp_update_from_diag_kernel_program(
                     .side_effects
                     .read_set
                     .insert(EffectResource::component(0, 0, format!("state:{ibm_off}")));
+            }
+            if let Some(rho_offset) = rho_offset {
+                program
+                    .side_effects
+                    .read_set
+                    .insert(EffectResource::component(
+                        0,
+                        0,
+                        format!("state:{rho_offset}"),
+                    ));
             }
             program
                 .side_effects
@@ -907,6 +944,7 @@ fn generate_dp_update_from_assembled_diagonal(
     theta: f32,
     denominator: DpDenominator,
 ) -> Result<KernelProgram, String> {
+    let rho_offset = model.state_layout.offset_for("rho");
     // Dense Cartesian topology: the cell volume is `dx*dy` from the grid
     // uniform; the assembled CSR buffers (row splits + matrix_values) are
     // provided in both topologies by the generic-coupled backend.
@@ -990,7 +1028,10 @@ fn generate_dp_update_from_assembled_diagonal(
         dsl::let_expr(
             "rho",
             dsl::max(
-                Expr::ident("constants").field("density"),
+                rho_offset.map_or_else(
+                    || Expr::ident("constants").field("density"),
+                    |offset| dsl::array_access("state", Expr::ident("base") + offset),
+                ),
                 Expr::lit_f32(1e-12),
             ),
         ),
@@ -1161,6 +1202,16 @@ fn generate_dp_update_from_assembled_diagonal(
             0,
             format!("state:{d_p_offset}"),
         ));
+    if let Some(rho_offset) = rho_offset {
+        program
+            .side_effects
+            .read_set
+            .insert(EffectResource::component(
+                0,
+                0,
+                format!("state:{rho_offset}"),
+            ));
+    }
     program
         .side_effects
         .write_set
@@ -1220,9 +1271,9 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
     let p_other_state_expr =
         dsl::array_access("state", Expr::ident("other_idx") * state_stride + p_offset);
     let p_boundary_expr = bc.ghost_value(p_unknown_offset, p_state_expr.clone(), Expr::ident("d_own"));
-    let p_interp_expr = p_state_expr * Expr::ident("lambda")
+    let p_interp_expr = p_state_expr.clone() * Expr::ident("lambda")
         + dsl::select(
-            p_other_state_expr,
+            p_other_state_expr.clone(),
             p_boundary_expr,
             Expr::ident("is_boundary"),
         ) * Expr::ident("lambda_other");
@@ -1274,11 +1325,21 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
             dsl::array_access("cell_face_offsets", Expr::ident("idx") + 1u32),
         ));
     }
-    preamble_stmts.push(dsl::var_typed_expr(
-        "grad_acc_p",
-        Type::vec2_f32(),
-        Some(dsl::vec2_f32(0.0, 0.0)),
-    ));
+    if structured {
+        preamble_stmts.push(dsl::var_typed_expr(
+            "grad_acc_p",
+            Type::vec2_f32(),
+            Some(dsl::vec2_f32(0.0, 0.0)),
+        ));
+    } else {
+        for name in ["ls_mxx", "ls_mxy", "ls_myy", "ls_bx", "ls_by"] {
+            preamble_stmts.push(dsl::var_typed_expr(
+                name,
+                Type::F32,
+                Some(Expr::lit_f32(0.0)),
+            ));
+        }
+    }
 
     // The face-loop HEAD gathers the neighbour + face geometry; only this
     // prologue differs between topologies. On the structured path the shared
@@ -1347,6 +1408,27 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
                     Expr::ident("face_center").field("y"),
                 ),
             ),
+            dsl::let_expr(
+                "wrap_shift",
+                dsl::array_access("face_wrap_shift", Expr::ident("face_idx")),
+            ),
+            dsl::var_typed_expr(
+                "cell_center_frame_vec",
+                Type::vec2_f32(),
+                Some(Expr::ident("cell_center_vec")),
+            ),
+            dsl::if_block_expr(
+                Expr::ident("owner").ne(Expr::ident("idx")),
+                dsl::block(vec![dsl::assign_expr(
+                    Expr::ident("cell_center_frame_vec"),
+                    Expr::ident("cell_center_frame_vec")
+                        + dsl::vec2_f32(
+                            Expr::ident("wrap_shift").field("x"),
+                            Expr::ident("wrap_shift").field("y"),
+                        ),
+                )]),
+                None,
+            ),
             dsl::var_typed_expr(
                 "normal_vec",
                 Type::vec2_f32(),
@@ -1357,7 +1439,7 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
             ),
             dsl::if_block_expr(
                 dsl::dot_expr(
-                    Expr::ident("face_center_vec") - Expr::ident("cell_center_vec"),
+                    Expr::ident("face_center_vec") - Expr::ident("cell_center_frame_vec"),
                     Expr::ident("normal_vec"),
                 )
                 .lt(Expr::lit_f32(0.0)),
@@ -1400,46 +1482,192 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
                             Expr::ident("other_center").field("y"),
                         ),
                     ),
+                    dsl::if_block_expr(
+                        Expr::ident("owner").eq(Expr::ident("idx")),
+                        dsl::block(vec![dsl::assign_expr(
+                            Expr::ident("other_center_vec"),
+                            Expr::ident("other_center_vec")
+                                + dsl::vec2_f32(
+                                    Expr::ident("wrap_shift").field("x"),
+                                    Expr::ident("wrap_shift").field("y"),
+                                ),
+                        )]),
+                        None,
+                    ),
                 ]),
                 None,
             ),
         ]);
     }
 
-    // Shared Green–Gauss physics tail (byte-identical across topologies).
-    face_loop_body.extend(vec![
-        dsl::let_expr(
-                    "d_own",
-                    dsl::abs(dsl::dot_expr(
-                        Expr::ident("face_center_vec") - Expr::ident("cell_center_vec"),
-                        Expr::ident("normal_vec"),
-                    )),
+    if structured {
+        // Cartesian cells retain the compact Green–Gauss form (it is affine
+        // exact on the orthogonal grid and avoids changing structured WGSL).
+        face_loop_body.extend(vec![
+            dsl::let_expr(
+                "d_own",
+                dsl::abs(dsl::dot_expr(
+                    Expr::ident("face_center_vec") - Expr::ident("cell_center_vec"),
+                    Expr::ident("normal_vec"),
+                )),
+            ),
+            dsl::let_expr(
+                "d_neigh",
+                dsl::abs(dsl::dot_expr(
+                    Expr::ident("other_center_vec") - Expr::ident("face_center_vec"),
+                    Expr::ident("normal_vec"),
+                )),
+            ),
+            dsl::let_expr("total_dist", Expr::ident("d_own") + Expr::ident("d_neigh")),
+            dsl::var_typed_expr("lambda", Type::F32, Some(Expr::lit_f32(0.5))),
+            dsl::if_block_expr(
+                Expr::ident("total_dist").gt(Expr::lit_f32(0.000001)),
+                dsl::block(vec![dsl::assign_expr(
+                    Expr::ident("lambda"),
+                    Expr::ident("d_neigh") / Expr::ident("total_dist"),
+                )]),
+                None,
+            ),
+            dsl::let_expr("lambda_other", Expr::lit_f32(1.0) - Expr::ident("lambda")),
+            dsl::let_expr("_unused_boundary_type", Expr::ident("boundary_type")),
+            dsl::assign_op_expr(
+                AssignOp::Add,
+                Expr::ident("grad_acc_p"),
+                Expr::ident("normal_vec") * p_interp_expr * Expr::ident("area"),
+            ),
+        ]);
+    } else {
+        // Normalized inverse-distance least squares.  Each row is
+        //     u_f . grad(p) = delta(p) / |d|
+        // with u_f=d/|d|, so an affine pressure is reproduced exactly on a
+        // skew cell. Dirichlet rows use the face centre; Neumann/zero-gradient
+        // rows impose the declared outward-normal derivative directly.
+        let bc_kind = bc.kind_raw(p_unknown_offset);
+        let bc_value = bc.value(p_unknown_offset);
+        let is_dirichlet = bc_kind.clone().eq(Expr::from(1u32));
+        let is_neumann = bc_kind.eq(Expr::from(2u32));
+        face_loop_body.extend(vec![
+            dsl::let_expr(
+                "ls_dx_interior",
+                Expr::ident("other_center_vec").field("x")
+                    - Expr::ident("cell_center_frame_vec").field("x"),
+            ),
+            dsl::let_expr(
+                "ls_dy_interior",
+                Expr::ident("other_center_vec").field("y")
+                    - Expr::ident("cell_center_frame_vec").field("y"),
+            ),
+            dsl::let_expr(
+                "ls_dx_boundary",
+                Expr::ident("face_center_vec").field("x")
+                    - Expr::ident("cell_center_frame_vec").field("x"),
+            ),
+            dsl::let_expr(
+                "ls_dy_boundary",
+                Expr::ident("face_center_vec").field("y")
+                    - Expr::ident("cell_center_frame_vec").field("y"),
+            ),
+            dsl::let_expr(
+                "ls_dx",
+                dsl::select(
+                    Expr::ident("ls_dx_interior"),
+                    Expr::ident("ls_dx_boundary"),
+                    Expr::ident("is_boundary"),
                 ),
-                dsl::let_expr(
-                    "d_neigh",
-                    dsl::abs(dsl::dot_expr(
-                        Expr::ident("other_center_vec") - Expr::ident("face_center_vec"),
-                        Expr::ident("normal_vec"),
-                    )),
+            ),
+            dsl::let_expr(
+                "ls_dy",
+                dsl::select(
+                    Expr::ident("ls_dy_interior"),
+                    Expr::ident("ls_dy_boundary"),
+                    Expr::ident("is_boundary"),
                 ),
-                dsl::let_expr("total_dist", Expr::ident("d_own") + Expr::ident("d_neigh")),
-                dsl::var_typed_expr("lambda", Type::F32, Some(Expr::lit_f32(0.5))),
-                dsl::if_block_expr(
-                    Expr::ident("total_dist").gt(Expr::lit_f32(0.000001)),
-                    dsl::block(vec![dsl::assign_expr(
-                        Expr::ident("lambda"),
-                        Expr::ident("d_neigh") / Expr::ident("total_dist"),
-                    )]),
-                    None,
+            ),
+            dsl::let_expr(
+                "ls_dist",
+                dsl::max(
+                    dsl::sqrt(
+                        Expr::ident("ls_dx") * Expr::ident("ls_dx")
+                            + Expr::ident("ls_dy") * Expr::ident("ls_dy"),
+                    ),
+                    Expr::lit_f32(1.0e-12),
                 ),
-                dsl::let_expr("lambda_other", Expr::lit_f32(1.0) - Expr::ident("lambda")),
-                dsl::let_expr("_unused_boundary_type", Expr::ident("boundary_type")),
-        dsl::assign_op_expr(
-            AssignOp::Add,
-            Expr::ident("grad_acc_p"),
-            Expr::ident("normal_vec") * p_interp_expr * Expr::ident("area"),
-        ),
-    ]);
+            ),
+            dsl::let_expr(
+                "ls_normal_constraint",
+                Expr::ident("is_boundary") & !is_dirichlet.clone(),
+            ),
+            dsl::let_expr(
+                "ls_ux",
+                dsl::select(
+                    Expr::ident("ls_dx") / Expr::ident("ls_dist"),
+                    Expr::ident("normal_vec").field("x"),
+                    Expr::ident("ls_normal_constraint"),
+                ),
+            ),
+            dsl::let_expr(
+                "ls_uy",
+                dsl::select(
+                    Expr::ident("ls_dy") / Expr::ident("ls_dist"),
+                    Expr::ident("normal_vec").field("y"),
+                    Expr::ident("ls_normal_constraint"),
+                ),
+            ),
+            dsl::let_expr(
+                "ls_rhs_interior",
+                (p_other_state_expr.clone() - p_state_expr.clone()) / Expr::ident("ls_dist"),
+            ),
+            dsl::let_expr(
+                "ls_rhs_dirichlet",
+                (bc_value.clone() - p_state_expr.clone()) / Expr::ident("ls_dist"),
+            ),
+            dsl::let_expr(
+                "ls_rhs_normal",
+                dsl::select(Expr::lit_f32(0.0), bc_value, is_neumann),
+            ),
+            dsl::let_expr(
+                "ls_rhs_boundary",
+                dsl::select(
+                    Expr::ident("ls_rhs_normal"),
+                    Expr::ident("ls_rhs_dirichlet"),
+                    is_dirichlet,
+                ),
+            ),
+            dsl::let_expr(
+                "ls_rhs",
+                dsl::select(
+                    Expr::ident("ls_rhs_interior"),
+                    Expr::ident("ls_rhs_boundary"),
+                    Expr::ident("is_boundary"),
+                ),
+            ),
+            dsl::assign_op_expr(
+                AssignOp::Add,
+                Expr::ident("ls_mxx"),
+                Expr::ident("ls_ux") * Expr::ident("ls_ux"),
+            ),
+            dsl::assign_op_expr(
+                AssignOp::Add,
+                Expr::ident("ls_mxy"),
+                Expr::ident("ls_ux") * Expr::ident("ls_uy"),
+            ),
+            dsl::assign_op_expr(
+                AssignOp::Add,
+                Expr::ident("ls_myy"),
+                Expr::ident("ls_uy") * Expr::ident("ls_uy"),
+            ),
+            dsl::assign_op_expr(
+                AssignOp::Add,
+                Expr::ident("ls_bx"),
+                Expr::ident("ls_ux") * Expr::ident("ls_rhs"),
+            ),
+            dsl::assign_op_expr(
+                AssignOp::Add,
+                Expr::ident("ls_by"),
+                Expr::ident("ls_uy") * Expr::ident("ls_rhs"),
+            ),
+        ]);
+    }
 
     // Structured cells walk the 4 grid directions (S,W,E,N); unstructured cells
     // walk their CSR face slice.
@@ -1454,19 +1682,76 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
             Expr::ident("k").lt(Expr::ident("end")),
         )
     };
-    let body_stmts = vec![
-        dsl::for_loop_expr(
-            loop_init,
-            loop_cond,
-            ForStep::Increment(Expr::ident("k")),
-            dsl::block(face_loop_body),
-        ),
-        dsl::let_typed_expr(
+    let mut body_stmts = vec![dsl::for_loop_expr(
+        loop_init,
+        loop_cond,
+        ForStep::Increment(Expr::ident("k")),
+        dsl::block(face_loop_body),
+    )];
+    if structured {
+        body_stmts.push(dsl::let_typed_expr(
             "grad_out_p",
             Type::vec2_f32(),
             Expr::ident("grad_acc_p") * Expr::lit_f32(1.0)
                 / dsl::max(Expr::ident("vol"), Expr::lit_f32(1e-12)),
-        ),
+        ));
+    } else {
+        body_stmts.extend(vec![
+            dsl::let_expr(
+                "ls_det",
+                Expr::ident("ls_mxx") * Expr::ident("ls_myy")
+                    - Expr::ident("ls_mxy") * Expr::ident("ls_mxy"),
+            ),
+            dsl::let_expr("ls_trace", Expr::ident("ls_mxx") + Expr::ident("ls_myy")),
+            dsl::let_expr(
+                "ls_det_floor",
+                Expr::lit_f32(1.0e-5)
+                    * dsl::max(
+                        Expr::ident("ls_trace") * Expr::ident("ls_trace"),
+                        Expr::lit_f32(1.0e-12),
+                    ),
+            ),
+            dsl::var_typed_expr("ls_gx", Type::F32, Some(Expr::lit_f32(0.0))),
+            dsl::var_typed_expr("ls_gy", Type::F32, Some(Expr::lit_f32(0.0))),
+            dsl::if_block_expr(
+                Expr::ident("ls_det").gt(Expr::ident("ls_det_floor")),
+                dsl::block(vec![
+                    dsl::assign_expr(
+                        Expr::ident("ls_gx"),
+                        (Expr::ident("ls_myy") * Expr::ident("ls_bx")
+                            - Expr::ident("ls_mxy") * Expr::ident("ls_by"))
+                            / Expr::ident("ls_det"),
+                    ),
+                    dsl::assign_expr(
+                        Expr::ident("ls_gy"),
+                        (Expr::ident("ls_mxx") * Expr::ident("ls_by")
+                            - Expr::ident("ls_mxy") * Expr::ident("ls_bx"))
+                            / Expr::ident("ls_det"),
+                    ),
+                ]),
+                Some(dsl::block(vec![dsl::if_block_expr(
+                    Expr::ident("ls_trace").gt(Expr::lit_f32(1.0e-12)),
+                    dsl::block(vec![
+                        dsl::assign_expr(
+                            Expr::ident("ls_gx"),
+                            Expr::ident("ls_bx") / Expr::ident("ls_trace"),
+                        ),
+                        dsl::assign_expr(
+                            Expr::ident("ls_gy"),
+                            Expr::ident("ls_by") / Expr::ident("ls_trace"),
+                        ),
+                    ]),
+                    None,
+                )])),
+            ),
+            dsl::let_typed_expr(
+                "grad_out_p",
+                Type::vec2_f32(),
+                dsl::vec2_f32(Expr::ident("ls_gx"), Expr::ident("ls_gy")),
+            ),
+        ]);
+    }
+    body_stmts.extend(vec![
         dsl::assign_expr(
             dsl::array_access("state", Expr::ident("base") + grad_p_x),
             Expr::ident("grad_out_p").field("x"),
@@ -1475,7 +1760,7 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
             dsl::array_access("state", Expr::ident("base") + grad_p_y),
             Expr::ident("grad_out_p").field("y"),
         ),
-    ];
+    ]);
     program.indexing = indexing_stmts;
     program.preamble = preamble_stmts;
     program.body = body_stmts;
@@ -1495,6 +1780,7 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
             (1, 7),
             (1, 12),
             (1, 13),
+            (1, 14),
             (2, 0),
             (2, 1),
         ]
@@ -2001,7 +2287,14 @@ mod tests {
             ("rhie_chow/store_grad_p", vec![]),
             (
                 "rhie_chow/grad_p_update",
-                vec!["k", "face_idx", "lambda", "grad_out_p"],
+                vec![
+                    "k",
+                    "face_idx",
+                    "ls_ux",
+                    "ls_rhs",
+                    "ls_det",
+                    "grad_out_p",
+                ],
             ),
             (
                 "rhie_chow/correct_velocity_delta",

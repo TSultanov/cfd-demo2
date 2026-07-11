@@ -136,6 +136,12 @@ pub fn resolve_field_refs_dyn(
                         resolve_field_refs_dyn(&args[0], slots, cell_idx, state_array);
                     return inner_dyn.sqrt().expect("sqrt operation failed");
                 }
+                if name == "abs" && args.len() == 1 {
+                    let inner_dyn =
+                        resolve_field_refs_dyn(&args[0], slots, cell_idx, state_array);
+                    let combined = Expr::call_named(name, vec![inner_dyn.expr]);
+                    return DynExpr::new(combined, inner_dyn.ty, inner_dyn.unit);
+                }
                 // `max`/`min` PRESERVE units: clamping a quantity to a floor/ceiling of
                 // the SAME unit yields that unit (unlike the dimensionless fallback below,
                 // which would reject e.g. an EOS density floor `max(rho, rho_floor)`).

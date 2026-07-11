@@ -42,6 +42,8 @@ pub fn base_constant_field_names() -> &'static [&'static str] {
         "alpha_u",
         "stride_x",
         "time_scheme",
+        "inlet_velocity",
+        "inlet_ramp_time",
     ]
 }
 
@@ -70,6 +72,8 @@ fn base_constant_fields() -> Vec<StructField> {
         StructField::new("alpha_u", Type::F32),
         StructField::new("stride_x", Type::U32),
         StructField::new("time_scheme", Type::U32),
+        StructField::new("inlet_velocity", Type::F32),
+        StructField::new("inlet_ramp_time", Type::F32),
     ]
 }
 
@@ -99,11 +103,12 @@ mod tests {
     #[test]
     fn constants_struct_with_no_extra_params_has_base_fields_only() {
         let def = constants_struct(&[]);
+        let base_len = base_constant_field_names().len();
         assert_eq!(def.name, "Constants");
-        assert_eq!(def.fields.len(), 12);
+        assert_eq!(def.fields.len(), base_len);
 
         assert_eq!(def.fields[0].name, "dt");
-        assert_eq!(def.fields[11].name, "time_scheme");
+        assert_eq!(def.fields[base_len - 1].name, "inlet_ramp_time");
     }
 
     #[test]
@@ -124,12 +129,13 @@ mod tests {
         ];
 
         let def = constants_struct(&extra);
-        assert_eq!(def.fields.len(), 14); // 12 base + 2 extra
+        let base_len = base_constant_field_names().len();
+        assert_eq!(def.fields.len(), base_len + extra.len());
 
-        assert_eq!(def.fields[12].name, "eos_gamma");
-        assert_eq!(def.fields[12].ty, Type::F32);
-        assert_eq!(def.fields[13].name, "eos_gm1");
-        assert_eq!(def.fields[13].ty, Type::F32);
+        assert_eq!(def.fields[base_len].name, "eos_gamma");
+        assert_eq!(def.fields[base_len].ty, Type::F32);
+        assert_eq!(def.fields[base_len + 1].name, "eos_gm1");
+        assert_eq!(def.fields[base_len + 1].ty, Type::F32);
     }
 
     #[test]
@@ -150,7 +156,8 @@ mod tests {
         ];
 
         let def = constants_struct(&extra);
-        assert_eq!(def.fields[12].name, "eos_first");
-        assert_eq!(def.fields[13].name, "eos_second");
+        let base_len = base_constant_field_names().len();
+        assert_eq!(def.fields[base_len].name, "eos_first");
+        assert_eq!(def.fields[base_len + 1].name, "eos_second");
     }
 }

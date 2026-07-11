@@ -14,6 +14,8 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
+    inlet_velocity: f32,
+    inlet_ramp_time: f32,
 }
 
 
@@ -23,8 +25,8 @@ struct Constants {
 @compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.y * constants.stride_x + global_id.x;
-    if (idx >= (arrayLength(&state) / 12u)) { return; }
-    let base = idx * 12u;
+    if (idx >= (arrayLength(&state) / 14u)) { return; }
+    let base = idx * 14u;
     let d_p = state[base + 3u];
     let grad_px = state[base + 4u];
     let grad_py = state[base + 5u];

@@ -37,19 +37,33 @@ pub struct SolverDriver {
     /// `model().named_param_keys()` cached at build (drives the `has_param` gating
     /// in [`apply_params`](SolverDriver::apply_params)).
     named_params: Vec<&'static str>,
-    /// `sqrt(min cell volume)` — the adaptive-dt length scale.
+    /// `sqrt(min cell volume)` — the legacy implicit/density-based adaptive-dt
+    /// length scale. Explicit all-Mach RK uses `explicit_cell_metrics` below.
     min_cell_size: f64,
+    /// Per-cell finite-volume spectral geometry used by explicit RK. These
+    /// metrics resolve cut-cell slivers and aspect ratio; `sqrt(volume)` does
+    /// not.
+    explicit_cell_metrics: Vec<ExplicitCellMetric>,
+    /// Host geometry used to evaluate the accepted-state Rhie--Chow transport
+    /// rate. Explicit all-Mach already reads the accepted packed state every
+    /// step for thermodynamic validation; retaining the mesh lets that same
+    /// sample include amplitude-dependent pressure-flux turnover.
+    explicit_mesh: Mesh,
+    /// Maximum local acoustic + diffusive rate sampled from the last accepted
+    /// explicit all-Mach state. The next step is pinned from this value.
+    prev_explicit_rate: Option<f64>,
+    /// A live parameter edit can make the explicit mass block invalid before a
+    /// step is attempted. Preserve that diagnostic so `step` can reject the
+    /// transition without advancing time or corrupting RK history.
+    pending_explicit_error: Option<String>,
     /// The model exposes `eos.gamma` (so it has a meaningful sound speed).
     supports_sound_speed: bool,
     /// The model carries `rho`/`rho_u`/`rho_e`/`u` (density-based compressible).
     compressible: bool,
-    /// The model is `allmach_pressure`/`allmach_thermal` (pressure-based all-Mach):
-    /// it carries extra `psi`/`rho`/`dt_local` state fields this driver seeds at build,
-    /// keeps `psi` live in [`apply_params`](SolverDriver::apply_params), and refreshes
-    /// `rho = rho_ref + psi*p` from the gauge pressure on each *readback* (the caller's
-    /// readback cadence, not every step), with history-preserving current-buffer writes.
-    /// Between refreshes `rho` lags `p`; that is a bounded low-Mach approximation — the
-    /// stabilization is the implicit `ddt(psi,p)` diagonal, not the density coupling.
+    /// The model is `allmach_pressure`/`allmach_thermal` (pressure-based all-Mach).
+    /// It carries extra EOS and Rhie--Chow state fields seeded here. Thermal density
+    /// is recovered on-device; only the barotropic implicit path retains the
+    /// history-preserving host density refresh used by older models.
     allmach: bool,
     /// The all-Mach model is the THERMAL variant (`allmach_thermal{,_ale}`): it
     /// recovers `rho`, the LOCAL `psi = psi_ref*t_ref/T` and `psi_precond` on-device
@@ -128,6 +142,513 @@ const ALLMACH_PRECOND_UREF_MIN_DEFAULT: f64 = 0.2;
 /// floor (1e-5 Pa): inert wherever the pressure is physical.
 const ALLMACH_ABS_PRESSURE_FLOOR: f64 = 1.0e-5;
 
+/// Margin inside the RK4 stability region. `target_cfl` remains the user
+/// control; this factor accounts for non-normal/skew FV corrections.
+const EXPLICIT_RK_SAFETY: f64 = 0.8;
+
+/// Resolve an imposed velocity inlet over this many pseudo-acoustic cell
+/// crossing times. Rhie--Chow damping is fourth-order in wave number, so an
+/// instantaneous start excites broad 10--20-cell waves that are not a literal
+/// checkerboard and decay only over many domain transits. A cubic smoothstep
+/// over 16 cells removes that impulse without changing the final BC or MMS.
+const EXPLICIT_INLET_RAMP_CELLS: f64 = 16.0;
+
+pub(crate) fn explicit_allmach_inlet_ramp_time(
+    params: &RuntimeParams,
+    min_cell_size: f64,
+    allmach: bool,
+) -> f32 {
+    if params.time_scheme != crate::solver::TimeScheme::RK4
+        || !allmach
+        || params.pressure_inlet
+        || !(min_cell_size > 0.0)
+    {
+        return 0.0;
+    }
+    let pseudo_sound = ALLMACH_PRECOND_MACH_K
+        * (params.inlet_velocity.abs() as f64).max(allmach_precond_uref_target(
+            params.allmach_precond_uref_min as f64,
+        ));
+    if pseudo_sound > 1.0e-12 {
+        (EXPLICIT_INLET_RAMP_CELLS * min_cell_size / pseudo_sound) as f32
+    } else {
+        0.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ExplicitCellMetric {
+    /// `0.5 * sum(A_f) / V`, equal to `1/dx + 1/dy` on a Cartesian cell.
+    hyperbolic: f64,
+    /// `sum(A_f/d_n) / V`, equal to `2/dx^2 + 2/dy^2` on a Cartesian cell.
+    diffusive: f64,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct ExplicitStateSample {
+    max_rate: f64,
+    max_vel: f64,
+    invalid: usize,
+}
+
+fn explicit_cell_metrics(mesh: &Mesh) -> Vec<ExplicitCellMetric> {
+    (0..mesh.num_cells())
+        .map(|cell| {
+            let volume = mesh.cell_vol[cell].abs().max(1.0e-30);
+            let mut area_sum = 0.0;
+            let mut area_over_distance = 0.0;
+            for &face in
+                &mesh.cell_faces[mesh.cell_face_offsets[cell]..mesh.cell_face_offsets[cell + 1]]
+            {
+                let area = mesh.face_area[face].abs();
+                area_sum += area;
+                let (dx, dy) = if let Some(neighbor) = mesh.face_neighbor[face] {
+                    let other = if mesh.face_owner[face] == cell {
+                        neighbor
+                    } else {
+                        mesh.face_owner[face]
+                    };
+                    let shift = mesh
+                        .face_wrap_shift
+                        .get(face)
+                        .copied()
+                        .unwrap_or([0.0, 0.0]);
+                    let sign = if mesh.face_owner[face] == cell {
+                        1.0
+                    } else {
+                        -1.0
+                    };
+                    (
+                        mesh.cell_cx[other] + sign * shift[0] - mesh.cell_cx[cell],
+                        mesh.cell_cy[other] + sign * shift[1] - mesh.cell_cy[cell],
+                    )
+                } else {
+                    (
+                        mesh.face_cx[face] - mesh.cell_cx[cell],
+                        mesh.face_cy[face] - mesh.cell_cy[cell],
+                    )
+                };
+                let normal_distance = (dx * mesh.face_nx[face] + dy * mesh.face_ny[face])
+                    .abs()
+                    .max(1.0e-12);
+                area_over_distance += area / normal_distance;
+            }
+            ExplicitCellMetric {
+                hyperbolic: 0.5 * area_sum / volume,
+                diffusive: area_over_distance / volume,
+            }
+        })
+        .collect()
+}
+
+fn allmach_stabilization_times(
+    metrics: &[ExplicitCellMetric],
+    velocity: &[(f64, f64)],
+    chi_target: &[f64],
+    psi_ref: f64,
+) -> Vec<f64> {
+    metrics
+        .iter()
+        .enumerate()
+        .map(|(cell, metric)| {
+            let chi = chi_target
+                .get(cell)
+                .copied()
+                .unwrap_or(psi_ref)
+                .max(1.0e-30);
+            let sound = 1.0 / chi.sqrt();
+            let speed = velocity.get(cell).map_or(0.0, |&(ux, uy)| ux.hypot(uy));
+            let rate = metric.hyperbolic * (speed + sound);
+            if rate.is_finite() && rate > 1.0e-30 {
+                1.0 / rate
+            } else {
+                0.0
+            }
+        })
+        .collect()
+}
+
+fn pressure_dirichlet_value(
+    boundary: Option<crate::solver::mesh::BoundaryType>,
+    params: &RuntimeParams,
+) -> Option<f64> {
+    use crate::solver::mesh::BoundaryType;
+    match (params.pressure_inlet, boundary) {
+        (true, Some(BoundaryType::Inlet)) => Some(params.inlet_pressure as f64),
+        (false, Some(BoundaryType::Outlet)) => Some(params.outlet_back_pressure as f64),
+        _ => None,
+    }
+}
+
+/// Reconstruct the accepted pressure gradient with the same normalized WLS
+/// rows as the unstructured Rhie--Chow kernels. This is deliberately computed
+/// from `p`, rather than reading `grad_p`: immediately after RK4 acceptance the
+/// stored auxiliary still belongs to the k4 input state.
+pub(crate) fn explicit_pressure_gradients(
+    mesh: &Mesh,
+    pressure: &[f64],
+    params: &RuntimeParams,
+) -> Vec<(f64, f64)> {
+    let mut gradients = vec![(0.0, 0.0); mesh.num_cells()];
+    for cell in 0..mesh.num_cells() {
+        let mut mxx = 0.0;
+        let mut mxy = 0.0;
+        let mut myy = 0.0;
+        let mut bx = 0.0;
+        let mut by = 0.0;
+        for &face in
+            &mesh.cell_faces[mesh.cell_face_offsets[cell]..mesh.cell_face_offsets[cell + 1]]
+        {
+            let owner = mesh.face_owner[face];
+            let row = if let Some(neighbor) = mesh.face_neighbor[face] {
+                let wrap = mesh
+                    .face_wrap_shift
+                    .get(face)
+                    .copied()
+                    .unwrap_or([0.0, 0.0]);
+                let (other, dx, dy) = if owner == cell {
+                    (
+                        neighbor,
+                        mesh.cell_cx[neighbor] + wrap[0] - mesh.cell_cx[cell],
+                        mesh.cell_cy[neighbor] + wrap[1] - mesh.cell_cy[cell],
+                    )
+                } else {
+                    (
+                        owner,
+                        mesh.cell_cx[owner] - wrap[0] - mesh.cell_cx[cell],
+                        mesh.cell_cy[owner] - wrap[1] - mesh.cell_cy[cell],
+                    )
+                };
+                let distance = dx.hypot(dy);
+                (distance > 1.0e-12).then(|| {
+                    (
+                        dx / distance,
+                        dy / distance,
+                        (pressure[other] - pressure[cell]) / distance,
+                    )
+                })
+            } else if let Some(value) = pressure_dirichlet_value(mesh.face_boundary[face], params) {
+                let dx = mesh.face_cx[face] - mesh.cell_cx[cell];
+                let dy = mesh.face_cy[face] - mesh.cell_cy[cell];
+                let distance = dx.hypot(dy);
+                (distance > 1.0e-12).then(|| {
+                    (
+                        dx / distance,
+                        dy / distance,
+                        (value - pressure[cell]) / distance,
+                    )
+                })
+            } else {
+                // All production pressure-Neumann patches currently prescribe
+                // zero normal gradient. The face normal is owner-outward.
+                let sign = if owner == cell { 1.0 } else { -1.0 };
+                Some((sign * mesh.face_nx[face], sign * mesh.face_ny[face], 0.0))
+            };
+            let Some((ux, uy, rhs)) = row else {
+                continue;
+            };
+            mxx += ux * ux;
+            mxy += ux * uy;
+            myy += uy * uy;
+            bx += ux * rhs;
+            by += uy * rhs;
+        }
+        let det = mxx * myy - mxy * mxy;
+        let trace = mxx + myy;
+        let det_floor = 1.0e-5 * (trace * trace).max(1.0e-12);
+        gradients[cell] = if det > det_floor {
+            ((myy * bx - mxy * by) / det, (mxx * by - mxy * bx) / det)
+        } else if trace > 1.0e-12 {
+            (bx / trace, by / trace)
+        } else {
+            (0.0, 0.0)
+        };
+    }
+    gradients
+}
+
+/// Maximum accepted-state turnover introduced by the pressure-only
+/// Rhie--Chow face flux. The ordinary velocity-advection rate is already in
+/// `ExplicitStateSample::max_rate`; keeping this term pressure-only avoids
+/// counting it twice.
+fn explicit_rhie_chow_turnover_rate(
+    state: &[f32],
+    layout: &crate::solver::model::backend::state_layout::StateLayout,
+    mesh: &Mesh,
+    params: &RuntimeParams,
+    thermal: bool,
+) -> f64 {
+    let stride = layout.stride() as usize;
+    let offset = |name: &str| layout.offset_for(name).map(|value| value as usize);
+    let (Some(p_off), Some(dt_local_off)) = (offset("p"), offset("dt_local")) else {
+        return 0.0;
+    };
+    if state.len() < mesh.num_cells() * stride {
+        return f64::INFINITY;
+    }
+    let t_off = offset("T");
+    let t_ref_off = offset("t_ref");
+    let penalty_off = offset("ibm_penalty_U");
+    let psi0 = (params.compressibility_psi as f64).max(0.0);
+    let mut pressure = vec![0.0; mesh.num_cells()];
+    let mut density = vec![0.0; mesh.num_cells()];
+    let mut d_p = vec![0.0; mesh.num_cells()];
+    let mut penalty = vec![0.0; mesh.num_cells()];
+    for cell in 0..mesh.num_cells() {
+        let base = cell * stride;
+        let p = state[base + p_off] as f64;
+        pressure[cell] = p;
+        let rho = if thermal {
+            let (Some(t_off), Some(t_ref_off)) = (t_off, t_ref_off) else {
+                return f64::INFINITY;
+            };
+            let t = state[base + t_off] as f64;
+            let t_ref = state[base + t_ref_off] as f64;
+            let numerator = params.density as f64 * t_ref
+                + crate::solver::model::ALLMACH_GAMMA * psi0 * t_ref * p;
+            (numerator / t).max(psi0 * ALLMACH_ABS_PRESSURE_FLOOR)
+        } else {
+            (params.density as f64 + psi0 * p).max(psi0 * ALLMACH_ABS_PRESSURE_FLOOR)
+        };
+        if !(rho.is_finite() && rho > 0.0) {
+            return f64::INFINITY;
+        }
+        density[cell] = rho;
+        penalty[cell] = penalty_off.map_or(0.0, |off| (state[base + off] as f64).abs());
+        let dp0 = (state[base + dt_local_off] as f64).max(0.0) / rho;
+        d_p[cell] = dp0 / (1.0 + penalty[cell] * dp0);
+    }
+
+    let gradient = explicit_pressure_gradients(mesh, &pressure, params);
+    let mut absolute_flux_sum = vec![0.0; mesh.num_cells()];
+    for face in 0..mesh.num_faces() {
+        let owner = mesh.face_owner[face];
+        let area = mesh.face_area[face].abs();
+        let rc_flux = if let Some(neighbor) = mesh.face_neighbor[face] {
+            let wrap = mesh
+                .face_wrap_shift
+                .get(face)
+                .copied()
+                .unwrap_or([0.0, 0.0]);
+            let dx = mesh.cell_cx[neighbor] + wrap[0] - mesh.cell_cx[owner];
+            let dy = mesh.cell_cy[neighbor] + wrap[1] - mesh.cell_cy[owner];
+            let projected = (dx * mesh.face_nx[face] + dy * mesh.face_ny[face]).abs();
+            let euclidean = dx.hypot(dy);
+            let distance = if projected > 1.0e-6 {
+                projected
+            } else {
+                euclidean.max(1.0e-6)
+            };
+            let d_owner = ((mesh.face_cx[face] - mesh.cell_cx[owner]) * mesh.face_nx[face]
+                + (mesh.face_cy[face] - mesh.cell_cy[owner]) * mesh.face_ny[face])
+                .abs();
+            let d_neighbor = ((mesh.cell_cx[neighbor] + wrap[0] - mesh.face_cx[face])
+                * mesh.face_nx[face]
+                + (mesh.cell_cy[neighbor] + wrap[1] - mesh.face_cy[face]) * mesh.face_ny[face])
+                .abs();
+            let lambda = if d_owner + d_neighbor > 1.0e-6 {
+                d_neighbor / (d_owner + d_neighbor)
+            } else {
+                0.5
+            };
+            let other = 1.0 - lambda;
+            let seal = 1.0 - (penalty[owner] + penalty[neighbor]).min(1.0);
+            if penalty_off.is_some() {
+                let kappa = (lambda * density[owner] + other * density[neighbor])
+                    * d_p[owner].min(d_p[neighbor]);
+                let gx = lambda * gradient[owner].0 + other * gradient[neighbor].0;
+                let gy = lambda * gradient[owner].1 + other * gradient[neighbor].1;
+                seal * area
+                    * (kappa * (gx * dx + gy * dy) / distance
+                        - kappa * (pressure[neighbor] - pressure[owner]) / distance)
+            } else {
+                let k_owner = density[owner] * d_p[owner];
+                let k_neighbor = density[neighbor] * d_p[neighbor];
+                let kappa = lambda * k_owner + other * k_neighbor;
+                let qx = lambda * k_owner * gradient[owner].0
+                    + other * k_neighbor * gradient[neighbor].0;
+                let qy = lambda * k_owner * gradient[owner].1
+                    + other * k_neighbor * gradient[neighbor].1;
+                area * ((qx * dx + qy * dy) / distance
+                    - kappa * (pressure[neighbor] - pressure[owner]) / distance)
+            }
+        } else if let Some(boundary_pressure) =
+            pressure_dirichlet_value(mesh.face_boundary[face], params)
+        {
+            let rx = mesh.face_cx[face] - mesh.cell_cx[owner];
+            let ry = mesh.face_cy[face] - mesh.cell_cy[owner];
+            let projected = (rx * mesh.face_nx[face] + ry * mesh.face_ny[face]).abs();
+            let distance = if projected > 1.0e-6 {
+                projected
+            } else {
+                rx.hypot(ry).max(1.0e-6)
+            };
+            let kappa = density[owner] * d_p[owner];
+            let qx = kappa * gradient[owner].0;
+            let qy = kappa * gradient[owner].1;
+            let seal = 1.0 - (2.0 * penalty[owner]).min(1.0);
+            seal * area
+                * ((qx * rx + qy * ry) / distance
+                    - kappa * (boundary_pressure - pressure[owner]) / distance)
+        } else {
+            // The derived Neumann boundary projection is the compact term
+            // itself, so its corrected pressure-only flux is identically zero.
+            0.0
+        };
+        let magnitude = rc_flux.abs();
+        absolute_flux_sum[owner] += magnitude;
+        if let Some(neighbor) = mesh.face_neighbor[face] {
+            absolute_flux_sum[neighbor] += magnitude;
+        }
+    }
+
+    absolute_flux_sum
+        .iter()
+        .enumerate()
+        .map(|(cell, &sum)| sum / (density[cell] * mesh.cell_vol[cell].abs().max(1.0e-30)))
+        .fold(0.0, f64::max)
+}
+
+fn sample_allmach_explicit_state(
+    state: &[f32],
+    layout: &crate::solver::model::backend::state_layout::StateLayout,
+    metrics: &[ExplicitCellMetric],
+    mesh: &Mesh,
+    params: &RuntimeParams,
+    thermal: bool,
+) -> ExplicitStateSample {
+    let stride = layout.stride() as usize;
+    let offset = |name: &str| layout.offset_for(name).map(|v| v as usize);
+    let (Some(u), Some(rho), Some(a), Some(d_p)) = (
+        offset("U"),
+        offset("rho"),
+        offset("psi_precond"),
+        offset("d_p"),
+    ) else {
+        return ExplicitStateSample {
+            invalid: 1,
+            ..Default::default()
+        };
+    };
+    let rho_dt = offset("rho_dT");
+    let psi_ref = offset("psi_ref");
+    let t_ref = offset("t_ref");
+    let temperature = offset("T");
+    let pressure = offset("p");
+    let dt_local = offset("dt_local");
+    let rho_floor = offset("rho_floor");
+
+    if thermal
+        && (temperature.is_none()
+            || pressure.is_none()
+            || dt_local.is_none()
+            || psi_ref.is_none()
+            || t_ref.is_none())
+    {
+        return ExplicitStateSample {
+            invalid: metrics.len().max(1),
+            ..Default::default()
+        };
+    }
+
+    let mut sample = ExplicitStateSample::default();
+    for (cell, metric) in metrics.iter().enumerate() {
+        let base = cell * stride;
+        if base + stride > state.len() || state[base..base + stride].iter().any(|v| !v.is_finite())
+        {
+            sample.invalid += 1;
+            continue;
+        }
+        let ux = state[base + u] as f64;
+        let uy = state[base + u + 1] as f64;
+        let speed = ux.hypot(uy);
+        sample.max_vel = sample.max_vel.max(speed);
+
+        // During a live GUI edit the stored algebraic fields still describe
+        // the previously accepted parameter set until the next stage-local
+        // primitive recovery. Re-evaluate the thermal closure from solved
+        // (p,T) and the new RuntimeParams so the very next dt is conservative.
+        let (density, mass_pp, b, local_d_p, t_valid, floor_valid, inv_cp) = if thermal {
+            let t = state[base + temperature.unwrap()] as f64;
+            let p = state[base + pressure.unwrap()] as f64;
+            let psi0 = (params.compressibility_psi as f64).max(0.0);
+            let t0 = state[base + t_ref.unwrap()] as f64;
+            let rho_numer =
+                params.density as f64 * t0 + crate::solver::model::ALLMACH_GAMMA * psi0 * t0 * p;
+            let floor = psi0 * ALLMACH_ABS_PRESSURE_FLOOR;
+            let rho_raw = rho_numer / t;
+            let density = rho_raw.max(floor);
+            let b = -rho_numer / (t * t);
+            let psi_local = (psi0 * t0 / t).max(psi0);
+            let u_ref = ALLMACH_PRECOND_MACH_K
+                * (params.inlet_velocity.abs() as f64).max(allmach_precond_uref_target(
+                    params.allmach_precond_uref_min as f64,
+                ));
+            let beta2 = (speed * speed).max(u_ref * u_ref).max(1.0e-12);
+            let mass_pp = if psi0 > 0.0 {
+                (crate::solver::model::ALLMACH_GAMMA - 1.0) * psi0 * t0 / t
+                    + psi_local.max(1.0 / beta2)
+            } else {
+                0.0
+            };
+            let tau = (state[base + dt_local.unwrap()] as f64).max(0.0);
+            let local_d_p = tau / density.max(1.0e-30);
+            (
+                density,
+                mass_pp,
+                b,
+                local_d_p,
+                t > 0.0,
+                rho_raw > floor * (1.0 + 1.0e-6),
+                (crate::solver::model::ALLMACH_GAMMA - 1.0) * psi0 * t0,
+            )
+        } else {
+            let density = state[base + rho] as f64;
+            (
+                density,
+                state[base + a] as f64,
+                rho_dt.map_or(0.0, |off| state[base + off] as f64),
+                state[base + d_p] as f64,
+                true,
+                rho_floor.is_none_or(|off| {
+                    density > (state[base + off] as f64).max(0.0) * (1.0 + 1.0e-6)
+                }),
+                0.0,
+            )
+        };
+        let chi = mass_pp + b * inv_cp / density.max(1.0e-30);
+        let chi_floor = mass_pp.abs().max(1.0e-30) * 1.0e-6;
+        if !(density > 0.0
+            && mass_pp > 0.0
+            && chi.is_finite()
+            && chi > chi_floor
+            && t_valid
+            && floor_valid)
+        {
+            sample.invalid += 1;
+            continue;
+        }
+
+        let sound = 1.0 / chi.sqrt();
+        let nu_long = 4.0 * (params.viscosity as f64).abs() / (3.0 * density);
+        let alpha_t = if thermal {
+            crate::solver::model::ALLMACH_K_OVER_CP * mass_pp / (density * chi)
+        } else {
+            0.0
+        };
+        let alpha_p = density * local_d_p.abs() / chi;
+        let rate = metric.hyperbolic * (speed + sound)
+            + 2.0 * metric.diffusive * nu_long.max(alpha_t).max(alpha_p);
+        if rate.is_finite() {
+            sample.max_rate = sample.max_rate.max(rate);
+        } else {
+            sample.invalid += 1;
+        }
+    }
+    sample.max_rate += explicit_rhie_chow_turnover_rate(state, layout, mesh, params, thermal);
+    sample
+}
+
 /// Low-Mach preconditioned pseudo-compressibility for the all-Mach pressure model.
 ///
 /// Returns the per-cell `psi_precond` the pressure-row `ddt` term consumes, decoupled
@@ -174,10 +695,29 @@ fn allmach_psi_precond(u: &[(f64, f64)], real_psi: f64, u_ref: f64, uref_min: f6
         .collect()
 }
 
+/// Seed the raw pressure-row coefficient at the reference temperature. There
+/// the T-row Schur subtraction is `(gamma-1)*psi_ref`; stage-local primitive
+/// recovery replaces this seed with the exact temperature-dependent
+/// `(gamma-1)*psi_ref*T_ref/T` coefficient before a thermal residual is used.
+/// Barotropic models have no T row.
+fn allmach_reference_pressure_mass_coeff(
+    mut target: Vec<f64>,
+    psi_ref: f64,
+    thermal: bool,
+) -> Vec<f64> {
+    if thermal && psi_ref > 0.0 {
+        let offset = (crate::solver::model::ALLMACH_GAMMA - 1.0) * psi_ref;
+        for value in &mut target {
+            *value += offset;
+        }
+    }
+    target
+}
+
 /// Resolve the preconditioner floor TARGET: the env `ALLMACH_PRECOND_UREF_MIN`
 /// (read once) overrides the runtime-param value for validation sweeps; otherwise
 /// the runtime param (GUI slider / model default) drives it.
-fn allmach_precond_uref_target(param_floor: f64) -> f64 {
+pub(crate) fn allmach_precond_uref_target(param_floor: f64) -> f64 {
     static ENV: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
     let env = *ENV.get_or_init(|| {
         std::env::var("ALLMACH_PRECOND_UREF_MIN")
@@ -198,6 +738,34 @@ fn forced_cpu_solver(
     config: SolverConfig,
 ) -> Result<UnifiedSolver, String> {
     UnifiedSolver::new_forced_cpu(mesh, model, config)
+}
+
+#[cfg(feature = "cpu")]
+fn forced_cpu_transpiled_solver(
+    mesh: &Mesh,
+    model: ModelSpec,
+    config: SolverConfig,
+) -> Result<UnifiedSolver, String> {
+    UnifiedSolver::new_forced_cpu_with_config(
+        mesh,
+        model,
+        config,
+        crate::solver::cpu::CpuBackendConfig {
+            engine: crate::solver::cpu::CpuEngine::Transpiled,
+            threads: 1,
+            simd: false,
+            precision: crate::solver::cpu::CpuPrecision::F64,
+        },
+    )
+}
+
+#[cfg(not(feature = "cpu"))]
+fn forced_cpu_transpiled_solver(
+    _mesh: &Mesh,
+    _model: ModelSpec,
+    _config: SolverConfig,
+) -> Result<UnifiedSolver, String> {
+    Err("transpiled CPU solver requires the `cpu` feature".into())
 }
 
 #[cfg(not(feature = "cpu"))]
@@ -232,7 +800,10 @@ impl SolverDriver {
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
     ) -> Result<DriverBuild, String> {
-        Self::build_inner(mesh, model, params, initial_u, initial_p, device, queue, false).await
+        Self::build_inner(
+            mesh, model, params, initial_u, initial_p, device, queue, false, false,
+        )
+        .await
     }
 
     /// [`Self::build`] on a CPU backend regardless of `CFD2_BACKEND` — the seam
@@ -248,7 +819,26 @@ impl SolverDriver {
         initial_u: &[(f64, f64)],
         initial_p: &[f64],
     ) -> Result<DriverBuild, String> {
-        Self::build_inner(mesh, model, params, initial_u, initial_p, None, None, true).await
+        Self::build_inner(
+            mesh, model, params, initial_u, initial_p, None, None, true, false,
+        )
+        .await
+    }
+
+    /// [`Self::build_forced_cpu`] with the transpiled CPU kernel engine selected
+    /// explicitly (no process-global environment mutation). Used by headless
+    /// GUI matrix gates and equivalent to the GUI's CPU-transpiled backend.
+    pub async fn build_forced_cpu_transpiled(
+        mesh: &Mesh,
+        model: ModelSpec,
+        params: &RuntimeParams,
+        initial_u: &[(f64, f64)],
+        initial_p: &[f64],
+    ) -> Result<DriverBuild, String> {
+        Self::build_inner(
+            mesh, model, params, initial_u, initial_p, None, None, true, true,
+        )
+        .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -261,11 +851,23 @@ impl SolverDriver {
         device: Option<wgpu::Device>,
         queue: Option<wgpu::Queue>,
         force_cpu: bool,
+        force_cpu_transpiled: bool,
     ) -> Result<DriverBuild, String> {
         let named_params = model.named_param_keys();
         let supports_preconditioner = named_params.iter().any(|&k| k == "preconditioner");
         let supports_sound_speed = named_params.iter().any(|&k| k == "eos.gamma");
         let unknowns_per_cell = model.system.unknowns_per_cell();
+        let production_allmach = model.state_layout.offset_for("psi").is_some()
+            && model.state_layout.offset_for("mms_src_U").is_none();
+        if params.time_scheme == crate::solver::TimeScheme::RK4
+            && production_allmach
+            && !(params.compressibility_psi > 0.0)
+        {
+            return Err(
+                "explicit all-Mach RK4 requires positive compressibility (the pressure mass block is singular at psi=0)"
+                    .to_string(),
+            );
+        }
 
         // Preconditioner: clamp BlockJacobi to Jacobi for wide blocks, and force
         // Jacobi when the model doesn't expose a preconditioner knob.
@@ -304,13 +906,21 @@ impl SolverDriver {
             crate::solver::model::apply_pressure_inlet_nozzle_bcs(&mut model);
         }
 
-        let mut solver = if force_cpu {
+        let mut solver = if force_cpu_transpiled {
+            forced_cpu_transpiled_solver(mesh, model, config)?
+        } else if force_cpu {
             forced_cpu_solver(mesh, model, config)?
         } else {
             UnifiedSolver::new(mesh, model, config, device, queue).await?
         };
 
         let n_cells = mesh.num_cells();
+        let explicit_cell_metrics = explicit_cell_metrics(mesh);
+        let min_cell_size = mesh
+            .cell_vol
+            .iter()
+            .map(|&v| v.sqrt())
+            .fold(f64::INFINITY, f64::min);
         let stride = solver.model().state_layout.stride() as usize;
         let _ = solver.write_state_f32(&vec![0.0f32; n_cells * stride]);
         solver.set_dt(params.requested_dt);
@@ -353,8 +963,7 @@ impl SolverDriver {
         // and are seeded from their manufactured solution by the MMS harness, so
         // the production IC seeding here is gated off for them (matching the prior
         // behaviour without depending on the `_mms` suffix).
-        let has_state_field =
-            |name: &str| solver.model().state_layout.offset_for(name).is_some();
+        let has_state_field = |name: &str| solver.model().state_layout.offset_for(name).is_some();
         let is_mms = has_state_field("mms_src_U");
         let allmach = has_state_field("psi") && !is_mms;
         let thermal = allmach && has_state_field("rho_t_ref");
@@ -378,6 +987,12 @@ impl SolverDriver {
             let _ = solver.set_alpha_u(params.alpha_u);
             let _ = solver.set_alpha_p(params.alpha_p);
             let _ = solver.set_inlet_velocity(params.inlet_velocity);
+            if allmach {
+                solver.set_inlet_ramp(
+                    params.inlet_velocity,
+                    explicit_allmach_inlet_ramp_time(params, min_cell_size, true),
+                );
+            }
             solver.set_u(initial_u);
             solver.set_p(initial_p);
             // Pressure-inlet nozzle: DEVELOP FROM SCRATCH. The IC is a quiescent field
@@ -390,8 +1005,9 @@ impl SolverDriver {
             // no concept of. `psi` (compressibility = 1/c^2) activates the
             // `ddt(psi,p)` term and sets the Mach regime; `rho` MUST start at the
             // reference density (0 would break the Rhie–Chow mass flux and the
-            // `ddt(rho,U)` coefficient — it is then refreshed to `rho_ref + psi*p`
-            // each readback); `dt_local = 0` selects the global (time-accurate) dt.
+            // `ddt(rho,U)` coefficient). `dt_local` is seeded from the local FV
+            // geometry and pseudo-acoustic scale for a time-step-independent
+            // explicit Rhie--Chow closure.
             // `set_field_scalar` (IC semantics, writes all history buffers) is intentional
             // HERE — this is the IC; the mid-run refreshes use `_current` instead.
             if allmach {
@@ -401,23 +1017,55 @@ impl SolverDriver {
                 // the IC velocity floored at k*U_inlet so step 0 is acoustic-CFL ~O(1),
                 // not ~667 — the cure for the real-psi step-0 blow-up. `set_field_scalar`
                 // (IC semantics) matches the other seeds here; readback refreshes per-cell.
-                let psi_precond = allmach_psi_precond(
+                let chi_target = allmach_psi_precond(
                     initial_u,
                     psi,
                     params.inlet_velocity.abs() as f64,
                     allmach_precond_uref_target(params.allmach_precond_uref_min as f64),
                 );
+                let psi_precond =
+                    allmach_reference_pressure_mass_coeff(chi_target.clone(), psi, thermal);
                 let _ = solver.set_field_scalar("psi_precond", &psi_precond);
                 let _ = solver.set_field_scalar("rho", &vec![params.density as f64; n_cells]);
-                let _ = solver.set_field_scalar("dt_local", &vec![0.0; n_cells]);
+                let stabilization_times = allmach_stabilization_times(
+                    &explicit_cell_metrics,
+                    initial_u,
+                    &chi_target,
+                    psi,
+                );
+                let _ = solver.set_field_scalar("dt_local", &stabilization_times);
+                let rc_scale = if params.time_scheme == crate::solver::TimeScheme::RK4 {
+                    1.0
+                } else {
+                    params.alpha_u as f64
+                };
+                let d_p: Vec<f64> = stabilization_times
+                    .iter()
+                    .map(|&tau| rc_scale * tau / (params.density as f64).abs().max(1.0e-12))
+                    .collect();
+                let _ = solver.set_field_scalar("d_p", &d_p);
+                // Inputs for the stage-local `psi_precond` primitive recovery.
+                // Present on both production barotropic and thermal all-Mach
+                // models (and harmless no-ops on stripped MMS layouts).
+                let u_ref = ALLMACH_PRECOND_MACH_K
+                    * (params.inlet_velocity.abs() as f64).max(allmach_precond_uref_target(
+                        params.allmach_precond_uref_min as f64,
+                    ));
+                let _ = solver.set_field_scalar("u_ref", &vec![u_ref; n_cells]);
+                let _ = solver.set_field_scalar(
+                    "precond_mask",
+                    &vec![if psi > 0.0 { 1.0 } else { 0.0 }; n_cells],
+                );
                 // Thermal variant: seed the temperature at the reference and the
                 // constant EOS reference `rho_t_ref = rho_ref * T_ref`. The density
                 // is recovered on-device as `rho = rho_t_ref/T + psi*p`; an unseeded
                 // (0) `rho_t_ref` would make `rho` blow up.
                 if thermal {
                     let t_ref = crate::solver::model::ALLMACH_T_REF;
-                    let _ = solver
-                        .set_field_scalar("rho_t_ref", &vec![params.density as f64 * t_ref; n_cells]);
+                    let _ = solver.set_field_scalar(
+                        "rho_t_ref",
+                        &vec![params.density as f64 * t_ref; n_cells],
+                    );
                     let _ = solver.set_field_scalar("T", &vec![t_ref; n_cells]);
                     // Reference-temperature field for the REAL T-varying compressibility in
                     // the density recovery (gamma*psi_ref*t_ref/T). Constant = T_ref.
@@ -426,21 +1074,9 @@ impl SolverDriver {
                     // EOS coefficients read, decoupled from the local `psi`. Seeded = psi
                     // so at the reference temperature the model is byte-unchanged.
                     let _ = solver.set_field_scalar("psi_ref", &vec![psi; n_cells]);
-                    // Preconditioner inputs for the on-device psi_precond recovery:
-                    // u_ref = k*max(U_inlet, floor) (the pseudo-acoustic velocity floor)
-                    // and the 0/1 enable mask (off when compressibility is off, so
-                    // psi_precond==0). The `max(.,floor)` is the SAME preconditioner floor
-                    // the host `allmach_psi_precond` applies for the barotropic path — it
-                    // both stops the slow-inlet outlet divergence and (raised toward ~1.0)
-                    // cleans the standing pressure mode (see `allmach_precond_uref_target`).
-                    let u_ref = ALLMACH_PRECOND_MACH_K
-                        * (params.inlet_velocity.abs() as f64)
-                            .max(allmach_precond_uref_target(params.allmach_precond_uref_min as f64));
-                    let _ = solver.set_field_scalar("u_ref", &vec![u_ref; n_cells]);
-                    let _ = solver.set_field_scalar(
-                        "precond_mask",
-                        &vec![if psi > 0.0 { 1.0 } else { 0.0 }; n_cells],
-                    );
+                    let _ = solver
+                        .set_field_scalar("rho_dT", &vec![-params.density as f64 / t_ref; n_cells]);
+                    let _ = solver.set_field_scalar("u_dot_grad_p", &vec![0.0; n_cells]);
                     // EOS density floor = psi * absolute-pressure floor (rho = psi*P_abs),
                     // so the on-device recovery clamps rho positive against a transient
                     // gauge-pressure undershoot through vacuum. Constant field; refreshed
@@ -455,11 +1091,27 @@ impl SolverDriver {
         };
         solver.initialize_history();
 
-        let min_cell_size = mesh
-            .cell_vol
-            .iter()
-            .map(|&v| v.sqrt())
-            .fold(f64::INFINITY, f64::min);
+        let prev_explicit_rate = if allmach && params.time_scheme == crate::solver::TimeScheme::RK4
+        {
+            let state = solver.read_state_f32().await;
+            let sample = sample_allmach_explicit_state(
+                &state,
+                &solver.model().state_layout,
+                &explicit_cell_metrics,
+                mesh,
+                params,
+                thermal,
+            );
+            if sample.invalid > 0 || !(sample.max_rate > 0.0) {
+                return Err(format!(
+                    "invalid initial all-Mach RK4 state ({} invalid cells, max rate {})",
+                    sample.invalid, sample.max_rate
+                ));
+            }
+            Some(sample.max_rate)
+        } else {
+            None
+        };
 
         Ok(DriverBuild {
             driver: SolverDriver {
@@ -467,6 +1119,10 @@ impl SolverDriver {
                 params: *params,
                 named_params,
                 min_cell_size,
+                explicit_cell_metrics,
+                explicit_mesh: mesh.clone(),
+                prev_explicit_rate,
+                pending_explicit_error: None,
                 supports_sound_speed,
                 compressible,
                 allmach,
@@ -476,6 +1132,34 @@ impl SolverDriver {
             cached_u,
             cached_p,
         })
+    }
+
+    fn resample_explicit_rate(&mut self) {
+        if self.params.time_scheme != crate::solver::TimeScheme::RK4 || !self.allmach {
+            self.prev_explicit_rate = None;
+            self.pending_explicit_error = None;
+            return;
+        }
+        let state = pollster::block_on(self.solver.read_state_f32());
+        let sample = sample_allmach_explicit_state(
+            &state,
+            &self.solver.model().state_layout,
+            &self.explicit_cell_metrics,
+            &self.explicit_mesh,
+            &self.params,
+            self.thermal,
+        );
+        if sample.invalid > 0 || !(sample.max_rate > 0.0) {
+            self.prev_explicit_rate = None;
+            self.pending_explicit_error = Some(format!(
+                "invalid all-Mach RK4 state after live parameter update ({} invalid cells)",
+                sample.invalid
+            ));
+        } else {
+            self.prev_explicit_rate = Some(sample.max_rate);
+            self.prev_max_vel = sample.max_vel;
+            self.pending_explicit_error = None;
+        }
     }
 
     /// Apply the runtime parameters to the live solver (phase 2).
@@ -515,7 +1199,8 @@ impl SolverDriver {
             let _ = solver.set_precond_theta_floor(params.low_mach_theta_floor);
         }
         if has_param("low_mach.pressure_coupling_alpha") {
-            let _ = solver.set_precond_pressure_coupling_alpha(params.low_mach_pressure_coupling_alpha);
+            let _ =
+                solver.set_precond_pressure_coupling_alpha(params.low_mach_pressure_coupling_alpha);
         }
         if has_param("advection_scheme") {
             solver.set_advection_scheme(params.advection_scheme);
@@ -542,13 +1227,19 @@ impl SolverDriver {
         } else {
             let _ = solver.set_inlet_velocity(params.inlet_velocity);
         }
+        if self.allmach {
+            solver.set_inlet_ramp(
+                params.inlet_velocity,
+                explicit_allmach_inlet_ramp_time(params, self.min_cell_size, true),
+            );
+        }
 
         // All-Mach: keep the compressibility `psi` live so the GUI slider takes
         // effect without a rebuild. `_current` (not set_field_scalar) updates only the
         // current buffer, preserving the BDF2 history — `psi` is the ddt(psi,p)
-        // coefficient at the current time, never read from history. `rho` is refreshed
-        // from the new `psi` on the next readback (≤ one snapshot interval); `dt_local`
-        // stays 0 (global time-accurate dt).
+        // coefficient at the current time, never read from history. The explicit
+        // closure refreshes thermal rho and uses a mesh/acoustic `dt_local` that is
+        // independent of the adaptive integration step.
         if self.allmach {
             let n = solver.num_cells() as usize;
             let psi = params.compressibility_psi.max(0.0) as f64;
@@ -556,19 +1247,36 @@ impl SolverDriver {
             // Keep psi_precond consistent with the new psi using the last-known velocity
             // scale (uniform); the next readback refreshes it per-cell. Ensures the ddt
             // coefficient stays >= the physical psi after a slider change.
-            let psi_precond = allmach_psi_precond(
+            let chi_target = allmach_psi_precond(
                 &vec![(self.prev_max_vel, 0.0); n],
                 psi,
                 params.inlet_velocity.abs() as f64,
                 allmach_precond_uref_target(params.allmach_precond_uref_min as f64),
             );
+            let psi_precond =
+                allmach_reference_pressure_mass_coeff(chi_target.clone(), psi, self.thermal);
             let _ = solver.set_field_scalar_current("psi_precond", &psi_precond);
+            let stabilization_times = allmach_stabilization_times(
+                &self.explicit_cell_metrics,
+                &vec![(self.prev_max_vel, 0.0); n],
+                &chi_target,
+                psi,
+            );
+            let _ = solver.set_field_scalar_current("dt_local", &stabilization_times);
+            let rc_scale = if params.time_scheme == crate::solver::TimeScheme::RK4 {
+                1.0
+            } else {
+                params.alpha_u as f64
+            };
+            let d_p: Vec<f64> = stabilization_times
+                .iter()
+                .map(|&tau| rc_scale * tau / (params.density as f64).abs().max(1.0e-12))
+                .collect();
+            let _ = solver.set_field_scalar_current("d_p", &d_p);
             // Keep the EOS density floor (= psi * absolute-pressure floor) consistent with
             // the new psi. A no-op for non-thermal / non-allmach (no `rho_floor` field).
-            let _ = solver.set_field_scalar_current(
-                "rho_floor",
-                &vec![psi * ALLMACH_ABS_PRESSURE_FLOOR; n],
-            );
+            let _ = solver
+                .set_field_scalar_current("rho_floor", &vec![psi * ALLMACH_ABS_PRESSURE_FLOOR; n]);
             // Keep the reference compressibility in step with the slider. Thermal only
             // (a no-op where the `psi_ref` field is absent). On the thermal model the
             // device recovers the LOCAL psi/psi_precond from this reference each Update,
@@ -576,6 +1284,12 @@ impl SolverDriver {
             // until the next recovery (and remain the live values for the non-thermal
             // model, which has no on-device recovery).
             let _ = solver.set_field_scalar_current("psi_ref", &vec![psi; n]);
+            if self.thermal {
+                let t_ref = crate::solver::model::ALLMACH_T_REF;
+                let _ = solver
+                    .set_field_scalar_current("rho_t_ref", &vec![params.density as f64 * t_ref; n]);
+                let _ = solver.set_field_scalar_current("t_ref", &vec![t_ref; n]);
+            }
             // Preconditioner inputs for the on-device psi_precond recovery (thermal
             // only; no-op where absent): u_ref tracks the inlet-velocity slider FLOORED by
             // the preconditioner floor (same `max(.,floor)` as the host barotropic path and
@@ -616,103 +1330,133 @@ impl SolverDriver {
                 );
             }
         }
+        self.resample_explicit_rate();
     }
 
     /// Advance one timestep and report the outcome.
     ///
-    /// Computes the timestep (acoustic-aware adaptive — true sound speed reduced by
-    /// the low-Mach preconditioning floor — or the fixed `requested_dt`), runs one
-    /// `step_with_stats`, and classifies divergence / steady-state. When `readback`
-    /// is true it reads the fields, updates the adaptive-dt velocity scale, and (if
-    /// the fields went non-finite) reports it as divergence. GUI-only side effects
-    /// (viz upload, publishing, trace) are left to the caller.
+    /// Computes the timestep (the full local p/T mass-block spectral rate for
+    /// explicit all-Mach, the legacy wave/diffusion estimate for other models, or
+    /// fixed `requested_dt`), runs one `step_with_stats`, and classifies divergence
+    /// and steady state. Explicit all-Mach state is validated every step regardless
+    /// of the GUI readback cadence.
     pub fn step(&mut self, readback: bool) -> StepOutcome {
+        if let Some(error) = self.pending_explicit_error.clone() {
+            return StepOutcome {
+                dt: self.solver.dt(),
+                step_time_ms: 0.0,
+                linear_stats: Vec::new(),
+                outer_iters: None,
+                outer_residual_u: None,
+                outer_residual_p: None,
+                diverged: Some(DivergeReason::StepError(error)),
+                should_stop: false,
+                readback: None,
+            };
+        }
         if self.params.adaptive_dt {
-            let sound_speed = if self.supports_sound_speed {
-                self.params.eos.sound_speed(self.params.density as f64)
+            if self.params.time_scheme == crate::solver::TimeScheme::RK4 && self.allmach {
+                if let Some(rate) = self
+                    .prev_explicit_rate
+                    .filter(|rate| rate.is_finite() && *rate > 0.0)
+                {
+                    let mut next_dt = EXPLICIT_RK_SAFETY
+                        * (self.params.target_cfl as f64).clamp(1.0e-6, 1.0)
+                        / rate;
+                    let current_dt = self.solver.dt() as f64;
+                    if next_dt > current_dt * 1.2 {
+                        next_dt = current_dt * 1.2;
+                    }
+                    if next_dt.is_finite() && next_dt > 0.0 {
+                        self.solver.set_dt(next_dt.min(100.0) as f32);
+                    }
+                }
             } else {
-                0.0
-            };
-            let adv_speed = self.prev_max_vel.max(self.params.inlet_velocity.abs() as f64);
-            let effective_sound_speed = match self.params.low_mach_model {
-                GpuLowMachPrecondModel::Off => sound_speed,
-                GpuLowMachPrecondModel::Legacy => sound_speed.min(adv_speed),
-                GpuLowMachPrecondModel::WeissSmith => {
-                    let theta = (self.params.low_mach_theta_floor as f64).max(0.0);
-                    let c_floor = sound_speed * theta.sqrt();
-                    sound_speed.min(adv_speed.max(c_floor))
+                let sound_speed = if self.supports_sound_speed {
+                    self.params.eos.sound_speed(self.params.density as f64)
+                } else {
+                    0.0
+                };
+                let adv_speed = self
+                    .prev_max_vel
+                    .max(self.params.inlet_velocity.abs() as f64);
+                let effective_sound_speed = match self.params.low_mach_model {
+                    GpuLowMachPrecondModel::Off => sound_speed,
+                    GpuLowMachPrecondModel::Legacy => sound_speed.min(adv_speed),
+                    GpuLowMachPrecondModel::WeissSmith => {
+                        let theta = (self.params.low_mach_theta_floor as f64).max(0.0);
+                        let c_floor = sound_speed * theta.sqrt();
+                        sound_speed.min(adv_speed.max(c_floor))
+                    }
+                };
+                // NB the all-Mach Turkel pseudo-sound-speed β = k·max(U_in, uref_min)
+                // deliberately does NOT enter here. The pressure row is solved
+                // IMPLICITLY (coupled block), so its pseudo-acoustic Courant number need
+                // not be ≤ 1 — and resolving it is actively harmful. Write the ratio of
+                // the acoustic mass term to the pressure Laplacian on a uniform grid:
+                //
+                //   R = (psi_precond·V/dt) / (Σ_f ρ·d_p·A/d) = h²/(4·α_u·β²·dt²)
+                //     = 1/(4·α_u·CFL_β²),        CFL_β = β·dt/h
+                //
+                // R is a function of CFL_β ALONE. Pinning CFL_β ≈ target_cfl pins R ≈ 0.4:
+                // the acoustic mass term becomes comparable to the pressure Laplacian, the
+                // pressure stops being elliptic, and pressure information crawls ~1 cell
+                // per step. The channel then needs O((L/h)²) steps to establish a pressure
+                // field and drifts (mass creation, standing long-wave p/U oscillation,
+                // slow divergence). It also defeats `allmach_precond_uref_target`, whose
+                // whole purpose is to raise β so `psi_precond = 1/β²` is SMALL: a β-CFL
+                // shrinks dt in exact proportion, leaving R unchanged.
+                //
+                // At the convective dt the same psi_precond gives R ~ 1e-4 (elliptic
+                // pressure) and the preconditioner does its job — damping the acoustic
+                // transient without being resolved in time.
+                // Explicit RK4 integrates the real acoustic terms directly — there is
+                // no implicit pressure solve and no low-Mach preconditioning of the
+                // residual — so its acoustic CFL MUST use the TRUE sound speed. The
+                // `effective_sound_speed` reduction above is only valid for the
+                // implicit/coupled paths (whose pressure row is solved implicitly);
+                // reusing it here would size dt against a preconditioned c ~10^3–10^4x
+                // too small a wave speed and the explicit step would diverge.
+                let acoustic_speed = if self.params.time_scheme == crate::solver::TimeScheme::RK4 {
+                    sound_speed
+                } else {
+                    effective_sound_speed
+                };
+                let wave_speed = adv_speed + acoustic_speed;
+                let mut stable_dt =
+                    if self.min_cell_size > 1e-12 && wave_speed.is_finite() && wave_speed > 1e-12 {
+                        Some(self.params.target_cfl * self.min_cell_size / wave_speed)
+                    } else {
+                        None
+                    };
+                // An explicit diffusion operator has the additional parabolic
+                // restriction dt=O(h^2/alpha).  The 0.25 coefficient stays inside
+                // classical RK4's negative-real-axis limit on a 2-D FV stencil and
+                // leaves margin for skew/non-orthogonal corrections.  Implicit
+                // schemes deliberately retain the historical wave-CFL-only policy.
+                if self.params.time_scheme == crate::solver::TimeScheme::RK4
+                    && self.min_cell_size > 1e-12
+                {
+                    let rho = (self.params.density as f64).abs().max(1.0e-12);
+                    let mut alpha = (self.params.viscosity as f64).abs() / rho;
+                    if self.thermal {
+                        alpha = alpha.max(crate::solver::model::ALLMACH_K_OVER_CP / rho);
+                    }
+                    if alpha.is_finite() && alpha > 1.0e-14 {
+                        let diffusion_dt =
+                            0.25 * self.params.target_cfl * self.min_cell_size * self.min_cell_size
+                                / alpha;
+                        stable_dt = Some(stable_dt.map_or(diffusion_dt, |dt| dt.min(diffusion_dt)));
+                    }
                 }
-            };
-            // NB the all-Mach Turkel pseudo-sound-speed β = k·max(U_in, uref_min)
-            // deliberately does NOT enter here. The pressure row is solved
-            // IMPLICITLY (coupled block), so its pseudo-acoustic Courant number need
-            // not be ≤ 1 — and resolving it is actively harmful. Write the ratio of
-            // the acoustic mass term to the pressure Laplacian on a uniform grid:
-            //
-            //   R = (psi_precond·V/dt) / (Σ_f ρ·d_p·A/d) = h²/(4·α_u·β²·dt²)
-            //     = 1/(4·α_u·CFL_β²),        CFL_β = β·dt/h
-            //
-            // R is a function of CFL_β ALONE. Pinning CFL_β ≈ target_cfl pins R ≈ 0.4:
-            // the acoustic mass term becomes comparable to the pressure Laplacian, the
-            // pressure stops being elliptic, and pressure information crawls ~1 cell
-            // per step. The channel then needs O((L/h)²) steps to establish a pressure
-            // field and drifts (mass creation, standing long-wave p/U oscillation,
-            // slow divergence). It also defeats `allmach_precond_uref_target`, whose
-            // whole purpose is to raise β so `psi_precond = 1/β²` is SMALL: a β-CFL
-            // shrinks dt in exact proportion, leaving R unchanged.
-            //
-            // At the convective dt the same psi_precond gives R ~ 1e-4 (elliptic
-            // pressure) and the preconditioner does its job — damping the acoustic
-            // transient without being resolved in time.
-            // Explicit RK4 integrates the real acoustic terms directly — there is
-            // no implicit pressure solve and no low-Mach preconditioning of the
-            // residual — so its acoustic CFL MUST use the TRUE sound speed. The
-            // `effective_sound_speed` reduction above is only valid for the
-            // implicit/coupled paths (whose pressure row is solved implicitly);
-            // reusing it here would size dt against a preconditioned c ~10^3–10^4x
-            // too small a wave speed and the explicit step would diverge.
-            let acoustic_speed = if self.params.time_scheme == crate::solver::TimeScheme::RK4 {
-                sound_speed
-            } else {
-                effective_sound_speed
-            };
-            let wave_speed = adv_speed + acoustic_speed;
-            let mut stable_dt = if self.min_cell_size > 1e-12
-                && wave_speed.is_finite()
-                && wave_speed > 1e-12
-            {
-                Some(self.params.target_cfl * self.min_cell_size / wave_speed)
-            } else {
-                None
-            };
-            // An explicit diffusion operator has the additional parabolic
-            // restriction dt=O(h^2/alpha).  The 0.25 coefficient stays inside
-            // classical RK4's negative-real-axis limit on a 2-D FV stencil and
-            // leaves margin for skew/non-orthogonal corrections.  Implicit
-            // schemes deliberately retain the historical wave-CFL-only policy.
-            if self.params.time_scheme == crate::solver::TimeScheme::RK4
-                && self.min_cell_size > 1e-12
-            {
-                let rho = (self.params.density as f64).abs().max(1.0e-12);
-                let mut alpha = (self.params.viscosity as f64).abs() / rho;
-                if self.thermal {
-                    alpha = alpha.max(crate::solver::model::ALLMACH_K_OVER_CP / rho);
+                if let Some(mut next_dt) = stable_dt {
+                    let current_dt = self.solver.dt() as f64;
+                    if next_dt > current_dt * 1.2 {
+                        next_dt = current_dt * 1.2;
+                    }
+                    next_dt = next_dt.clamp(1e-9, 100.0);
+                    self.solver.set_dt(next_dt as f32);
                 }
-                if alpha.is_finite() && alpha > 1.0e-14 {
-                    let diffusion_dt = 0.25 * self.params.target_cfl
-                        * self.min_cell_size
-                        * self.min_cell_size
-                        / alpha;
-                    stable_dt = Some(stable_dt.map_or(diffusion_dt, |dt| dt.min(diffusion_dt)));
-                }
-            }
-            if let Some(mut next_dt) = stable_dt {
-                let current_dt = self.solver.dt() as f64;
-                if next_dt > current_dt * 1.2 {
-                    next_dt = current_dt * 1.2;
-                }
-                next_dt = next_dt.clamp(1e-9, 100.0);
-                self.solver.set_dt(next_dt as f32);
             }
         } else {
             self.solver.set_dt(self.params.requested_dt);
@@ -750,6 +1494,27 @@ impl SolverDriver {
         } else {
             None
         };
+
+        if self.params.time_scheme == crate::solver::TimeScheme::RK4 && self.allmach {
+            let state = pollster::block_on(self.solver.read_state_f32());
+            let sample = sample_allmach_explicit_state(
+                &state,
+                &self.solver.model().state_layout,
+                &self.explicit_cell_metrics,
+                &self.explicit_mesh,
+                &self.params,
+                self.thermal,
+            );
+            if sample.invalid > 0 || !(sample.max_rate > 0.0) {
+                diverged = Some(DivergeReason::StepError(format!(
+                    "invalid all-Mach RK4 thermodynamic state ({} invalid cells)",
+                    sample.invalid
+                )));
+            } else {
+                self.prev_explicit_rate = Some(sample.max_rate);
+                self.prev_max_vel = sample.max_vel;
+            }
+        }
 
         let readback = if readback {
             let rb = self.read_back();
@@ -811,7 +1576,18 @@ impl SolverDriver {
             p_max = p_max.max(pv);
         }
 
-        let rho = if self.allmach {
+        let rho = if self.allmach && self.thermal {
+            // Thermal all-Mach recovers the ideal-gas density from the live
+            // (p,T) state on-device. Read it for telemetry only. Reconstructing
+            // the barotropic rho_ref+psi*p closure here used to overwrite that
+            // state and made the trajectory depend on GUI snapshot cadence.
+            let rho_vals =
+                pollster::block_on(self.solver.get_field_scalar("rho")).unwrap_or_default();
+            Some((
+                rho_vals.iter().cloned().fold(f64::INFINITY, f64::min),
+                rho_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+            ))
+        } else if self.allmach {
             // Barotropic density from the gauge pressure: `rho = rho_ref + psi*p`,
             // floored positive (a non-positive density would break the viscous /
             // flux terms). Refresh the per-cell `rho` the Rhie–Chow flux and the
@@ -824,7 +1600,10 @@ impl SolverDriver {
             // pressure undershoot below -P_REF (which would give rho <= 0 and blow up).
             // Mirrors the on-device `rho_floor` clamp used by the thermal recovery.
             let floor = psi * ALLMACH_ABS_PRESSURE_FLOOR;
-            let rho_vals: Vec<f64> = p.iter().map(|&pv| (rho_ref + psi * pv).max(floor)).collect();
+            let rho_vals: Vec<f64> = p
+                .iter()
+                .map(|&pv| (rho_ref + psi * pv).max(floor))
+                .collect();
             let lo = rho_vals.iter().cloned().fold(f64::INFINITY, f64::min);
             let hi = rho_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
             // `_current` (NOT set_field_scalar): write rho into the CURRENT buffer only,
@@ -835,24 +1614,20 @@ impl SolverDriver {
             // sampled at the current time (ddt(rho,U) uses U_old, never rho_old), so a
             // current-only update is exact and backend-consistent.
             let _ = self.solver.set_field_scalar_current("rho", &rho_vals);
-            // Refresh the preconditioned pseudo-compressibility from the live velocity
-            // (one-snapshot lag, same discipline + correctness argument as `rho`: a
-            // current-time coefficient never read from BDF history). Tracks the wake so
-            // the pseudo-Mach stays ~<=1 as the flow develops. THERMAL ONLY: skip this —
-            // the thermal model recovers `psi_precond` on-device from the LOCAL psi each
-            // Update (the driver seeds its `u_ref` = k*max(U_inlet, floor) so the floor
-            // applies there too), so a host write here (built from the constant reference
-            // psi) would clobber the local sound-speed preconditioner. The non-thermal
-            // barotropic model has no on-device recovery and still needs the host refresh
-            // — with the preconditioner floor applied.
-            if !self.thermal {
+            // Implicit barotropic stepping still refreshes this current-time
+            // coefficient from the sampled velocity.  Explicit RK instead recovers
+            // `psi_precond` inside every stage from U/u_ref/precond_mask; a host
+            // readback update would reintroduce snapshot-cadence dependence.
+            if !self.thermal && self.params.time_scheme != crate::solver::TimeScheme::RK4 {
                 let psi_precond = allmach_psi_precond(
                     &u,
                     psi,
                     self.params.inlet_velocity.abs() as f64,
                     allmach_precond_uref_target(self.params.allmach_precond_uref_min as f64),
                 );
-                let _ = self.solver.set_field_scalar_current("psi_precond", &psi_precond);
+                let _ = self
+                    .solver
+                    .set_field_scalar_current("psi_precond", &psi_precond);
             }
             Some((lo, hi))
         } else if self.compressible {
@@ -934,29 +1709,65 @@ impl SolverDriver {
         self.min_cell_size
     }
 
+    fn refresh_mesh_caches(&mut self, mesh: &Mesh) {
+        self.min_cell_size = mesh
+            .cell_vol
+            .iter()
+            .map(|&v| v.sqrt())
+            .fold(f64::INFINITY, f64::min);
+        self.explicit_cell_metrics = explicit_cell_metrics(mesh);
+        self.explicit_mesh = mesh.clone();
+
+        if self.allmach && self.params.time_scheme == crate::solver::TimeScheme::RK4 {
+            let u = pollster::block_on(self.solver.get_u());
+            let psi = (self.params.compressibility_psi as f64).max(0.0);
+            let chi_target = allmach_psi_precond(
+                &u,
+                psi,
+                self.params.inlet_velocity.abs() as f64,
+                allmach_precond_uref_target(self.params.allmach_precond_uref_min as f64),
+            );
+            let stabilization_times =
+                allmach_stabilization_times(&self.explicit_cell_metrics, &u, &chi_target, psi);
+            let _ = self
+                .solver
+                .set_field_scalar_current("dt_local", &stabilization_times);
+            let rc_scale = if self.params.time_scheme == crate::solver::TimeScheme::RK4 {
+                1.0
+            } else {
+                self.params.alpha_u as f64
+            };
+            let d_p: Vec<f64> = stabilization_times
+                .iter()
+                .map(|&tau| rc_scale * tau / (self.params.density as f64).abs().max(1.0e-12))
+                .collect();
+            let _ = self.solver.set_field_scalar_current("d_p", &d_p);
+            self.solver.set_inlet_ramp(
+                self.params.inlet_velocity,
+                explicit_allmach_inlet_ramp_time(&self.params, self.min_cell_size, true),
+            );
+        }
+        self.resample_explicit_rate();
+    }
+
     /// Refresh the solver's mesh-derived state after the mesh changed
     /// (passthrough to [`UnifiedSolver::refresh_mesh`]), then recompute the
-    /// driver's own mesh-derived cache: `min_cell_size`, the adaptive-dt
-    /// length scale (the only mesh-derived scalar the driver holds).
+    /// driver's mesh-derived adaptive-dt caches.
     pub fn refresh_mesh(
         &mut self,
         mesh: &Mesh,
         level: crate::solver::MeshRefreshLevel,
     ) -> Result<(), String> {
         self.solver.refresh_mesh(mesh, level)?;
-        // Level-agnostic: both Geometry and Topology may change cell volumes.
-        self.min_cell_size = mesh
-            .cell_vol
-            .iter()
-            .map(|&v| v.sqrt())
-            .fold(f64::INFINITY, f64::min);
+        // Level-agnostic: geometry and topology can both change spectral rates.
+        self.refresh_mesh_caches(mesh);
         Ok(())
     }
 
     /// Capture the solver's stepping state (passthrough to
-    /// [`UnifiedSolver::snapshot`]). The driver's own mesh-derived cache
-    /// (`min_cell_size`) is a pure function of the mesh, not solver state, so it
-    /// is recomputed by `refresh_mesh` on the rebuild rather than snapshotted.
+    /// [`UnifiedSolver::snapshot`]). The driver's mesh-derived length/spectral
+    /// caches are pure functions of the mesh, so `refresh_mesh` recomputes them
+    /// rather than including them in the solver-state snapshot.
     pub fn snapshot(&self) -> crate::solver::SolverStateSnapshot {
         self.solver.snapshot()
     }
@@ -968,8 +1779,8 @@ impl SolverDriver {
 
     /// ALE step entry (passthrough to [`UnifiedSolver::begin_ale_step`]:
     /// rotate volume history → upload new geometry → upload closed mesh
-    /// fluxes), then recompute the driver's mesh-derived `min_cell_size`
-    /// (the adaptive-dt length scale). Call once per step, before `step()`.
+    /// fluxes), then recompute the driver's mesh-derived adaptive-dt caches.
+    /// Call once per step, before `step()`.
     ///
     /// **dt handshake**: the mesh fluxes are closed against ONE dt (the `dt`
     /// argument of `swept_mesh_fluxes_closed`), and the SCL only holds if the
@@ -989,18 +1800,14 @@ impl SolverDriver {
             );
         }
         self.solver.begin_ale_step(mesh, mesh_fluxes)?;
-        self.min_cell_size = mesh
-            .cell_vol
-            .iter()
-            .map(|&v| v.sqrt())
-            .fold(f64::INFINITY, f64::min);
+        self.refresh_mesh_caches(mesh);
         Ok(())
     }
 
     /// ALE step entry for a **topology-changing** move (passthrough to
     /// [`UnifiedSolver::begin_ale_step_topology`]): rotate the volume
     /// history → rebuild the topology-derived stack → upload the closed mesh
-    /// fluxes, then recompute the driver's `min_cell_size`. Use this instead of
+    /// fluxes, then recompute the driver's mesh-derived caches. Use this instead of
     /// [`Self::begin_ale_step`] when the move changed the face set / adjacency
     /// (a re-tessellation), not just vertex positions. Returns the
     /// [`MeshRefreshReport`] (`bc_overrides_reset` — re-apply any per-face BC
@@ -1023,11 +1830,7 @@ impl SolverDriver {
             );
         }
         let report = self.solver.begin_ale_step_topology(mesh, mesh_fluxes)?;
-        self.min_cell_size = mesh
-            .cell_vol
-            .iter()
-            .map(|&v| v.sqrt())
-            .fold(f64::INFINITY, f64::min);
+        self.refresh_mesh_caches(mesh);
         Ok(report)
     }
 

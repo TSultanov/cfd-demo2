@@ -75,9 +75,7 @@ pub fn lower_flux_scheme(
     reconstruction: Scheme,
 ) -> Result<FluxModuleKernelSpec, String> {
     match flux_scheme {
-        FluxSchemeSpec::CentralUpwind(decl) => {
-            derive_central_upwind(system, decl, reconstruction)
-        }
+        FluxSchemeSpec::CentralUpwind(decl) => derive_central_upwind(system, decl, reconstruction),
     }
 }
 
@@ -223,70 +221,82 @@ fn derive_central_upwind(
         Box::new(V::cell_to_face(FaceSide::Neighbor)),
     );
 
-    let reconstruct_limited_scalar =
-        |limiter_fn: &dyn Fn(S, S) -> S, side: FaceSide, phi_p: S, phi_n: S, grad_p: V, grad_n: V| -> S {
-            let gradf = S::Sub(Box::new(phi_n.clone()), Box::new(phi_p.clone()));
-            let grad = if side == FaceSide::Owner {
-                grad_p
-            } else {
-                grad_n
-            };
-            let gradcf = S::Dot(Box::new(d.clone()), Box::new(grad));
-            let limiter = limiter_fn(gradf.clone(), gradcf);
-            let delta = match side {
-                FaceSide::Owner => S::Mul(Box::new(limiter), Box::new(S::lambda_other())),
-                FaceSide::Neighbor => S::Mul(Box::new(limiter), Box::new(S::lambda())),
-            };
-            match side {
-                FaceSide::Owner => S::Add(
-                    Box::new(phi_p),
-                    Box::new(S::Mul(Box::new(delta), Box::new(gradf))),
-                ),
-                FaceSide::Neighbor => S::Sub(
-                    Box::new(phi_n),
-                    Box::new(S::Mul(Box::new(delta), Box::new(gradf))),
-                ),
-            }
+    let reconstruct_limited_scalar = |limiter_fn: &dyn Fn(S, S) -> S,
+                                      side: FaceSide,
+                                      phi_p: S,
+                                      phi_n: S,
+                                      grad_p: V,
+                                      grad_n: V|
+     -> S {
+        let gradf = S::Sub(Box::new(phi_n.clone()), Box::new(phi_p.clone()));
+        let grad = if side == FaceSide::Owner {
+            grad_p
+        } else {
+            grad_n
+        };
+        let gradcf = S::Dot(Box::new(d.clone()), Box::new(grad));
+        let limiter = limiter_fn(gradf.clone(), gradcf);
+        let delta = match side {
+            FaceSide::Owner => S::Mul(Box::new(limiter), Box::new(S::lambda_other())),
+            FaceSide::Neighbor => S::Mul(Box::new(limiter), Box::new(S::lambda())),
+        };
+        match side {
+            FaceSide::Owner => S::Add(
+                Box::new(phi_p),
+                Box::new(S::Mul(Box::new(delta), Box::new(gradf))),
+            ),
+            FaceSide::Neighbor => S::Sub(
+                Box::new(phi_n),
+                Box::new(S::Mul(Box::new(delta), Box::new(gradf))),
+            ),
+        }
+    };
+
+    let reconstruct_limited_vec2 = |limiter_fn: &dyn Fn(S, S) -> S,
+                                    side: FaceSide,
+                                    phi_p: V,
+                                    phi_n: V,
+                                    grad_px: V,
+                                    grad_py: V,
+                                    grad_nx: V,
+                                    grad_ny: V|
+     -> V {
+        let gradf_v = V::Sub(Box::new(phi_n.clone()), Box::new(phi_p.clone()));
+        let gradf = S::Dot(Box::new(gradf_v.clone()), Box::new(gradf_v.clone()));
+
+        let (gx, gy) = if side == FaceSide::Owner {
+            (grad_px, grad_py)
+        } else {
+            (grad_nx, grad_ny)
         };
 
-    let reconstruct_limited_vec2 =
-        |limiter_fn: &dyn Fn(S, S) -> S, side: FaceSide, phi_p: V, phi_n: V, grad_px: V, grad_py: V, grad_nx: V, grad_ny: V| -> V {
-            let gradf_v = V::Sub(Box::new(phi_n.clone()), Box::new(phi_p.clone()));
-            let gradf = S::Dot(Box::new(gradf_v.clone()), Box::new(gradf_v.clone()));
-
-            let (gx, gy) = if side == FaceSide::Owner {
-                (grad_px, grad_py)
-            } else {
-                (grad_nx, grad_ny)
-            };
-
-            // Match OpenFOAM's `vanLeerV` (NVDVTVDV) form:
-            //   gradcf = gradfV & (d & gradcP)
-            //
-            // With our stored per-component gradients:
-            //   gx = grad(phi_x) = [dphi_x/dx, dphi_x/dy]
-            //   gy = grad(phi_y) = [dphi_y/dx, dphi_y/dy]
-            // and d = [dx, dy], we interpret this as directional derivatives per component:
-            //   gradcf_x = d · gx
-            //   gradcf_y = d · gy
-            //   gradcf   = gradfV · [gradcf_x, gradcf_y]
-            let gradcf_x = S::Dot(Box::new(d.clone()), Box::new(gx.clone()));
-            let gradcf_y = S::Dot(Box::new(d.clone()), Box::new(gy.clone()));
-            let gradcf = S::Dot(
-                Box::new(gradf_v.clone()),
-                Box::new(V::vec2(gradcf_x, gradcf_y)),
-            );
-            let limiter = limiter_fn(gradf, gradcf);
-            let delta = match side {
-                FaceSide::Owner => S::Mul(Box::new(limiter), Box::new(S::lambda_other())),
-                FaceSide::Neighbor => S::Mul(Box::new(limiter), Box::new(S::lambda())),
-            };
-            let corr = V::MulScalar(Box::new(gradf_v), Box::new(delta));
-            match side {
-                FaceSide::Owner => V::Add(Box::new(phi_p), Box::new(corr)),
-                FaceSide::Neighbor => V::Sub(Box::new(phi_n), Box::new(corr)),
-            }
+        // Match OpenFOAM's `vanLeerV` (NVDVTVDV) form:
+        //   gradcf = gradfV & (d & gradcP)
+        //
+        // With our stored per-component gradients:
+        //   gx = grad(phi_x) = [dphi_x/dx, dphi_x/dy]
+        //   gy = grad(phi_y) = [dphi_y/dx, dphi_y/dy]
+        // and d = [dx, dy], we interpret this as directional derivatives per component:
+        //   gradcf_x = d · gx
+        //   gradcf_y = d · gy
+        //   gradcf   = gradfV · [gradcf_x, gradcf_y]
+        let gradcf_x = S::Dot(Box::new(d.clone()), Box::new(gx.clone()));
+        let gradcf_y = S::Dot(Box::new(d.clone()), Box::new(gy.clone()));
+        let gradcf = S::Dot(
+            Box::new(gradf_v.clone()),
+            Box::new(V::vec2(gradcf_x, gradcf_y)),
+        );
+        let limiter = limiter_fn(gradf, gradcf);
+        let delta = match side {
+            FaceSide::Owner => S::Mul(Box::new(limiter), Box::new(S::lambda_other())),
+            FaceSide::Neighbor => S::Mul(Box::new(limiter), Box::new(S::lambda())),
         };
+        let corr = V::MulScalar(Box::new(gradf_v), Box::new(delta));
+        match side {
+            FaceSide::Owner => V::Add(Box::new(phi_p), Box::new(corr)),
+            FaceSide::Neighbor => V::Sub(Box::new(phi_n), Box::new(corr)),
+        }
+    };
 
     let rho = |side: FaceSide| match reconstruction {
         Scheme::SecondOrderUpwindVanLeer => reconstruct_limited_scalar(
@@ -786,7 +796,10 @@ fn derive_central_upwind(
             )),
             Box::new(denom),
         );
-        V::MulScalar(Box::new(V::state_vec2(side, grad_t_name.clone())), Box::new(factor))
+        V::MulScalar(
+            Box::new(V::state_vec2(side, grad_t_name.clone())),
+            Box::new(factor),
+        )
     };
     let c_face_raw = |side: FaceSide| match reconstruction {
         Scheme::SecondOrderUpwindVanLeer => reconstruct_limited_scalar(
@@ -1081,7 +1094,7 @@ mod tests {
     fn contains_sign_guard_for_states(expr: &S, a: &str, b: &str) -> bool {
         fn contains_state(expr: &S, name: &str) -> bool {
             match expr {
-                S::State { name: n, .. } => n == name,
+                S::State { name: n, .. } | S::CellState { name: n, .. } => n == name,
                 S::Add(x, y)
                 | S::Sub(x, y)
                 | S::Mul(x, y)
@@ -1095,6 +1108,7 @@ mod tests {
                 | S::Builtin(_)
                 | S::Constant { .. }
                 | S::LowMachParam(_)
+                | S::BoundaryDirichlet { .. }
                 | S::MeshFlux
                 | S::Primitive { .. } => false,
             }
@@ -1124,6 +1138,8 @@ mod tests {
                 | S::Constant { .. }
                 | S::LowMachParam(_)
                 | S::State { .. }
+                | S::CellState { .. }
+                | S::BoundaryDirichlet { .. }
                 | S::MeshFlux
                 | S::Primitive { .. } => {}
             }

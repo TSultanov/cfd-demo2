@@ -18,11 +18,12 @@ mod moving_mesh_driver;
 mod outcome;
 mod params;
 
+#[cfg(feature = "ui")]
+pub(crate) use driver::{explicit_allmach_inlet_ramp_time, explicit_pressure_gradients};
 pub use driver::{DriverBuild, SolverDriver};
 pub use moving_mesh_driver::{
-    BoundaryMotionSpec, MeshMotionSpec, MovingMeshDriver, MovingMeshStats, OscAxis,
-    RegenBackend, ResizeTiming, ADAPT_BUDGET_MAX_FACTOR, DEFAULT_MESH_CFL,
-    OSC_AMPLITUDE_CELL_FRACTION,
+    BoundaryMotionSpec, MeshMotionSpec, MovingMeshDriver, MovingMeshStats, OscAxis, RegenBackend,
+    ResizeTiming, ADAPT_BUDGET_MAX_FACTOR, DEFAULT_MESH_CFL, OSC_AMPLITUDE_CELL_FRACTION,
 };
 pub use outcome::{DivergeReason, FieldStats, Readback, RunResult, StepOutcome};
 pub use params::RuntimeParams;

@@ -119,7 +119,11 @@ fn assemble_eps_w(
     let threads = cpu.threads();
     let (mat, rhs) = cpu.debug_assemble();
     let (row_offsets, col_indices, diag_indices, s) = cpu.debug_topology();
-    let offsets: Vec<usize> = cpu.unknown_state_offsets().iter().map(|&o| o as usize).collect();
+    let offsets: Vec<usize> = cpu
+        .unknown_state_offsets()
+        .iter()
+        .map(|&o| o as usize)
+        .collect();
     let mut eps = vec![0.0f64; n];
     let mut w = vec![0.0f64; 2 * n];
     // Per-cell CSR read: each `eps[c]` / `w[c*2..]` depends only on cell `c`'s

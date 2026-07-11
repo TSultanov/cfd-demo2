@@ -175,10 +175,12 @@ impl SolverFieldAliasesExt for GpuUnifiedSolver {
 /// # Outer-loop execution model
 ///
 /// The coupled stepping path executes a SIMPLE-like pressure-velocity outer loop.
-/// By default the outer loop runs in **one-submission batched mode**: all outer
-/// iterations are encoded into a single GPU command buffer and submitted as one
-/// queue submission.  This eliminates per-iteration host-GPU synchronisation
-/// overhead and typically reduces total queue submissions by 50-75%.
+/// By default the outer loop runs in **GPU-batched mode**: the complete outer
+/// schedule is encoded without per-iteration host decisions.  FGMRES is split
+/// into bounded restart-chunk command buffers to stay within Metal/backend
+/// command-buffer limits, so this mode removes host convergence round-trips but
+/// does not promise one literal queue submission or fewer submissions than the
+/// independently fused host-driven path.
 ///
 /// When adaptive convergence is enabled (the default), the batched submission uses
 /// GPU-side indirect dispatch gating so that converged iterations become zero-cost
@@ -192,7 +194,7 @@ impl SolverFieldAliasesExt for GpuUnifiedSolver {
 /// | Outer tolerance | [`set_outer_tolerance`] | model-defined | Relative correction-norm threshold for adaptive early stop |
 /// | Outer tolerance (abs) | [`set_outer_tolerance_abs`] | model-defined | Absolute correction-norm threshold |
 /// | Fixed-iteration mode | [`set_outer_fixed_iterations_mode`] | `false` | When `true`, run all configured iterations without adaptive break |
-/// | Batched mode | [`set_outer_batched_mode`] | `true` | When `true`, use one-submission batched outer loop |
+/// | Batched mode | [`set_outer_batched_mode`] | `true` | When `true`, encode the outer schedule without per-iteration host decisions |
 ///
 /// [`set_outer_iters`]: SolverRuntimeParamsExt::set_outer_iters
 /// [`set_outer_tolerance`]: SolverRuntimeParamsExt::set_outer_tolerance
@@ -222,12 +224,11 @@ pub trait SolverRuntimeParamsExt {
     /// convergence between iterations.  This is useful for deterministic benchmarking
     /// where consistent iteration counts are required across runs.
     fn set_outer_fixed_iterations_mode(&mut self, enabled: bool) -> Result<(), String>;
-    /// Enable or disable the one-submission batched outer loop.
+    /// Enable or disable the GPU-batched outer loop.
     ///
-    /// When `true` (the default), all outer corrector iterations are encoded into a
-    /// single GPU command buffer submission.  This is the standard coupled stepping
-    /// mode and provides significantly fewer queue submissions than the per-iteration
-    /// host-driven loop.
+    /// When `true` (the default), all outer corrector iterations are scheduled
+    /// without per-iteration host decisions.  Linear solves are submitted in
+    /// bounded restart chunks to avoid backend command-buffer limits.
     ///
     /// When adaptive convergence is active, converged iterations become zero-cost
     /// indirect dispatches (GPU-side gating), avoiding any host round-trips.
@@ -390,7 +391,12 @@ impl SolverInletVelocityExt for GpuUnifiedSolver {
     fn set_inlet_velocity(&mut self, velocity: f32) -> Result<(), String> {
         let value = [velocity, 0.0f32];
         self.set_boundary_vec2(GpuBoundaryType::Inlet, FIELD_U_UPPER, value)
-            .or_else(|_| self.set_boundary_vec2(GpuBoundaryType::Inlet, FIELD_U_LOWER, value))
+            .or_else(|_| self.set_boundary_vec2(GpuBoundaryType::Inlet, FIELD_U_LOWER, value))?;
+        // Expression-valued stage-time inlet closures read an immutable target
+        // from the uniform rather than recursively multiplying the BC table
+        // value they refresh. Models without that closure simply ignore it.
+        let _ = self.set_named_param("inlet_velocity", PlanParamValue::F32(velocity));
+        Ok(())
     }
 }
 

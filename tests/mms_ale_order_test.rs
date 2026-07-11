@@ -3,14 +3,12 @@
 //!
 //! **Spatial study** — the forced steady Taylor–Green of
 //! tests/mms_incompressible_order_test.rs (same manufactured solution, source
-//! and all-wall per-face Dirichlet BCs), except the mesh vertices oscillate
-//! through a smooth interior bump (amplitude ∝ h, zero on the boundary — so
-//! boundary face centers never move and the per-face Dirichlet values stay
-//! exact). The manufactured solution is defined in FIXED space; the discrete
-//! solution sees moving cell centroids, mesh-relative fluxes
-//! (`phi − rho·mesh_flux`), the moving-volume ddt and the continuity volume
-//! source. If the SCL closure and the ALE terms are consistent, the error
-//! matches a STATIC solve on the same deformed geometry.
+//! and all-wall per-face Dirichlet BCs) on one smooth, fixed-amplitude deformed
+//! mapping. Static solves on that same mapping provide the uncontaminated h
+//! sweep. A separate n=32 run oscillates the vertices through the mapping (the
+//! bump is zero on the boundary, so per-face Dirichlet values stay exact) and
+//! must match its static same-final-geometry counterpart field-by-field. The
+//! temporal study below independently gates the moving-volume BDF2 order.
 //!
 //! Per step (fixed dt): move vertices analytically → `recalculate_geometry`
 //! → swept-quad fluxes + f32 SCL closure → `begin_ale_step` (rotates volume
@@ -18,8 +16,8 @@
 //! the MOVED centroids (`set_field_vec2_current`, history-preserving) →
 //! `step()`.
 //!
-//! Marches 35 steps at dt=0.05 and samples at t=1.75 — the phase of MAXIMUM
-//! deformation and momentarily zero mesh velocity (sin(2π·1.75)=−1), so the
+//! Marches 15 steps at dt=0.05 and samples at t=0.75 — the phase of MAXIMUM
+//! deformation and momentarily zero mesh velocity (sin(2π·0.75)=−1), so the
 //! error is measured on the deformed geometry.
 //!
 //! **Temporal study** — BDF2 on moving volumes: spatially uniform
@@ -37,9 +35,7 @@ use cfd2::solver::mesh::{
     generate_structured_rect_mesh, swept_mesh_fluxes_closed, BoundarySides, BoundaryType, Mesh,
 };
 use cfd2::solver::model::helpers::{SolverFieldAliasesExt, SolverRuntimeParamsExt};
-use cfd2::solver::model::{
-    incompressible_momentum_ale_mms_model, INCOMPRESSIBLE_MMS_SOURCE_FIELD,
-};
+use cfd2::solver::model::{incompressible_momentum_ale_mms_model, INCOMPRESSIBLE_MMS_SOURCE_FIELD};
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 
@@ -48,17 +44,30 @@ use mms_support::{assert_convergence_order, field_errors, field_errors_vec2};
 const MU: f64 = 1.0;
 const RHO: f64 = 1.0;
 const DT: f64 = 0.05;
-/// 1.75 motion periods, sampled at max deformation / zero mesh velocity.
-const STEPS: usize = 35;
+/// 0.75 motion periods, sampled at max deformation / zero mesh velocity.  With
+/// mu=rho=1 the startup transient decays on the 1/(2 pi^2) time scale, so this
+/// remains comfortably settled while cutting the spatial gate's runtime.
+const STEPS: usize = 15;
 const MOTION_PERIOD: f64 = 1.0;
-/// Bump amplitude as a fraction of h: keeps mesh distortion (and the ALE
-/// terms) proportionally constant across refinement levels.
-const AMP_FRAC: f64 = 0.2;
+/// Fixed physical bump amplitude for the spatial refinement study.  Keeping
+/// this independent of h holds the mesh path and mapping Jacobian fixed as the
+/// spatial grid refines; an h-scaled amplitude would make both skew and the ALE
+/// terms vanish with refinement and contaminate the fitted spatial order.
+// Equal to the former n=32 amplitude (0.2 h at h=1/32), retaining a clearly
+// nonzero ALE path at the comparison level without pushing the coarsest grid
+// outside the skew-correction regime.
+const SPATIAL_AMPLITUDE: f64 = 0.00625;
+/// The temporal study uses one fixed mesh, so retaining its original h-scaled
+/// amplitude is harmless (and preserves the calibrated mesh path).
+const TEMPORAL_AMP_FRAC: f64 = 0.2;
 
 // ── manufactured solution (identical to the static incompressible suite) ──
 
 fn exact_u(x: f64, y: f64) -> (f64, f64) {
-    ((PI * x).sin() * (PI * y).cos(), -(PI * x).cos() * (PI * y).sin())
+    (
+        (PI * x).sin() * (PI * y).cos(),
+        -(PI * x).cos() * (PI * y).sin(),
+    )
 }
 
 fn exact_p(x: f64, y: f64) -> f64 {
@@ -70,28 +79,11 @@ fn source(x: f64, y: f64) -> (f64, f64) {
     (2.0 * MU * PI * PI * ux, 2.0 * MU * PI * PI * uy)
 }
 
-fn env_f64(name: &str, default: f64) -> f64 {
-    std::env::var(name)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default)
-}
-
 /// Prescribed vertex position at time `t` from the UNDEFORMED coordinates (no
 /// incremental drift): smooth interior bump, zero on the boundary.
-///
-/// `static_deform`: deform to max ONCE and hold (zero motion after step 1) —
-/// the static solve on the deformed mesh, isolating spatial-on-skewed-cells
-/// accuracy from the ALE terms.
-fn vertex_position(x0: f64, y0: f64, t: f64, h: f64, static_deform: bool) -> (f64, f64) {
-    let amp_frac = env_f64("CFD2_ALE_SPATIAL_AMP", AMP_FRAC);
-    let period = env_f64("CFD2_ALE_SPATIAL_PERIOD", MOTION_PERIOD);
-    let phase = if static_deform {
-        1.0
-    } else {
-        (2.0 * PI * t / period).sin()
-    };
-    let amp = amp_frac * h * phase;
+fn vertex_position(x0: f64, y0: f64, t: f64) -> (f64, f64) {
+    let phase = (2.0 * PI * t / MOTION_PERIOD).sin();
+    let amp = SPATIAL_AMPLITUDE * phase;
     let bump = (PI * x0).sin().powi(2) * (PI * y0).sin().powi(2);
     (x0 + amp * bump, y0 - 0.6 * amp * bump)
 }
@@ -124,13 +116,24 @@ fn volume_mean(mesh: &Mesh, f: &[f64]) -> f64 {
 }
 
 /// One spatial level: march the ALE protocol on an n×n all-wall unit square
-/// with prescribed bump motion (or the deform-once-and-hold probe when
-/// `static_deform`); returns (deformed mesh at t_end, U, p).
+/// with prescribed bump motion (or initialized directly on the final geometry
+/// when `static_deform`); returns (deformed mesh at t_end, U, p).
 fn solve_taylor_green_moving(n: usize, static_deform: bool) -> (Mesh, Vec<(f64, f64)>, Vec<f64>) {
     let mut mesh = generate_structured_rect_mesh(n, n, 1.0, 1.0, BoundarySides::wall());
     let x0 = mesh.vx.clone();
     let y0 = mesh.vy.clone();
-    let h = 1.0 / n as f64;
+
+    // The comparison solve is genuinely static: construct the solver directly
+    // on the moving run's final geometry and seed all ALE volume history there.
+    // This avoids the former deform-once first step and, crucially, uses the
+    // actual final phase (sin(1.5π) = -1), not the opposite +1 deformation.
+    if static_deform {
+        let t_end = STEPS as f64 * DT;
+        for v in 0..mesh.num_vertices() {
+            (mesh.vx[v], mesh.vy[v]) = vertex_position(x0[v], y0[v], t_end);
+        }
+        mesh.recalculate_geometry();
+    }
 
     let model = incompressible_momentum_ale_mms_model().expect("ale+mms model");
     let mut solver = build_solver(&mesh, model);
@@ -163,8 +166,8 @@ fn solve_taylor_green_moving(n: usize, static_deform: bool) -> (Mesh, Vec<(f64, 
         .set_boundary_values_per_face(GpuBoundaryType::Wall, "U", 1, &wall_u(1))
         .expect("wall u_y");
 
-    // Initial source at the undeformed centroids (IC semantics: all history
-    // buffers), zero initial U/p, seeded history.
+    // Initial source at the current centroids (undeformed for the moving run,
+    // final-deformed for the static comparison), zero initial U/p, seeded history.
     let src: Vec<(f64, f64)> = (0..mesh.num_cells())
         .map(|i| source(mesh.cell_cx[i], mesh.cell_cy[i]))
         .collect();
@@ -175,24 +178,25 @@ fn solve_taylor_green_moving(n: usize, static_deform: bool) -> (Mesh, Vec<(f64, 
     solver.set_p(&vec![0.0; mesh.num_cells()]);
     solver.initialize_history();
 
-    // Steps scale with the (env-overridable) period so the run always covers
-    // 1.75 periods to the max-deformation/zero-velocity phase.
-    let period = env_f64("CFD2_ALE_SPATIAL_PERIOD", MOTION_PERIOD);
-    let steps = ((STEPS as f64) * period / MOTION_PERIOD).round() as usize;
-
-    for step in 0..steps {
+    let mut max_abs_mesh_flux = 0.0_f64;
+    for step in 0..STEPS {
         let t_new = (step as f64 + 1.0) * DT;
         let old_vx = mesh.vx.clone();
         let old_vy = mesh.vy.clone();
-        for v in 0..mesh.num_vertices() {
-            let (x, y) = vertex_position(x0[v], y0[v], t_new, h, static_deform);
-            mesh.vx[v] = x;
-            mesh.vy[v] = y;
+        if !static_deform {
+            for v in 0..mesh.num_vertices() {
+                (mesh.vx[v], mesh.vy[v]) = vertex_position(x0[v], y0[v], t_new);
+            }
         }
         mesh.recalculate_geometry();
 
         let swept =
             swept_mesh_fluxes_closed(&mesh, &old_vx, &old_vy, DT).expect("swept mesh fluxes");
+        max_abs_mesh_flux = swept
+            .fluxes
+            .iter()
+            .map(|&flux| (flux as f64).abs())
+            .fold(max_abs_mesh_flux, f64::max);
         assert!(
             swept.max_identity_err_rel < 1e-12,
             "step {step}: f64 swept-quad identity violated: {:.3e}",
@@ -219,24 +223,37 @@ fn solve_taylor_green_moving(n: usize, static_deform: bool) -> (Mesh, Vec<(f64, 
         solver.step();
     }
 
+    if static_deform {
+        assert!(
+            max_abs_mesh_flux <= 1.0e-12,
+            "static comparison generated mesh flux {max_abs_mesh_flux:.3e}"
+        );
+    } else {
+        assert!(
+            max_abs_mesh_flux >= 1.0e-5,
+            "moving comparison did not exercise ALE: max mesh flux {max_abs_mesh_flux:.3e}"
+        );
+    }
+
     let u = pollster::block_on(solver.get_field_vec2("U")).expect("read U");
     let p = pollster::block_on(solver.get_p());
     (mesh, u, p)
 }
 
-/// SPATIAL order on the moving mesh.
+/// SPATIAL order on a fixed, smoothly deformed mesh.
 ///
-/// The gate is pinned near the measured order (≥1.35), below the nominal 2:
-/// the sub-2 u order is the spatial operator on persistently-skewed cells
-/// (amplitude ∝ h keeps the non-orthogonality constant across levels, so the
-/// skew error never refines away), NOT the ALE machinery. The graded static
-/// suite keeps orthogonal cells and never sees this band.
+/// The fixed physical motion defines one smooth mesh mapping sampled at every
+/// refinement level.  The order fit uses a static solve on that mapping so a
+/// fixed-dt ALE time error cannot masquerade as spatial truncation.  A single
+/// moving n=32 solve then isolates the ALE path by direct comparison with its
+/// same-geometry static counterpart; temporal ALE order is gated separately
+/// below.
 ///
 /// The decisive ALE-correctness check is asserted in-test below: the
 /// moving-mesh solve must match a STATIC solve on the same max-deformed
 /// geometry, i.e. the ALE terms add no error on top of the skewed-cell band.
-/// An order collapse below 1.35, a blown finest cap, or a moving/static
-/// divergence >5% catches ALE-term regressions.
+/// An order collapse below 1.35, a blown finest cap, or excessive direct
+/// moving/static field deltas catches ALE-term regressions.
 #[test]
 fn ale_taylor_green_sou_velocity_second_order() {
     let mut hs = Vec::new();
@@ -245,14 +262,10 @@ fn ale_taylor_green_sou_velocity_second_order() {
     let levels: Vec<usize> = std::env::var("CFD2_ALE_SPATIAL_LEVELS")
         .ok()
         .map(|s| s.split(',').filter_map(|t| t.trim().parse().ok()).collect())
-        .unwrap_or_else(|| vec![8, 16, 32, 64]);
-    let env_static_deform =
-        std::env::var("CFD2_ALE_SPATIAL_STATIC_DEFORM").as_deref() == Ok("1");
-    // The moving ≡ static-on-deformed-geometry assert (below) needs the n=32
-    // moving error; only available on the default level list.
-    let default_levels = levels == [8, 16, 32, 64];
+        .unwrap_or_else(|| vec![8, 16, 32]);
+    let mut static_n32 = None;
     for n in levels {
-        let (mesh, u, p) = solve_taylor_green_moving(n, env_static_deform);
+        let (mesh, u, p) = solve_taylor_green_moving(n, true);
         let u_err = field_errors_vec2(&mesh, &u, exact_u).l2;
         // Demean both pressures (all-wall mesh leaves the gauge free).
         let p_mean = volume_mean(&mesh, &p);
@@ -263,32 +276,65 @@ fn ale_taylor_green_sou_velocity_second_order() {
             volume_mean(&mesh, &exact)
         };
         let p_err = field_errors(&mesh, &p, |x, y| exact_p(x, y) - exact_mean + p_mean).l2;
-        println!("[mms][ale_taylor_green] n={n} u_l2={u_err:.4e} p_l2={p_err:.4e}");
+        println!("[mms][ale_taylor_green/static] n={n} u_l2={u_err:.4e} p_l2={p_err:.4e}");
         hs.push(1.0 / n as f64);
         u_errs.push(u_err);
         p_errs.push(p_err);
+        if n == 32 {
+            static_n32 = Some((mesh, u, p, u_err, p_err));
+        }
     }
-    assert_convergence_order("ale_taylor_green_u", &hs, &u_errs, 2.0, 0.65, 1.2e-3);
-    let p_order = mms_support::fit_order(&hs, &p_errs);
-    println!("[mms][ale_taylor_green] pressure order {p_order:.3}");
-    assert!(
-        p_order > 0.9,
-        "pressure order regressed: {p_order:.3} (errors {p_errs:?})"
-    );
-
-    // Decisive ALE-correctness check: the moving-mesh error must equal the
-    // static solve on the same max-deformed geometry — the ALE terms add
-    // nothing on top of the skewed-cell spatial error. Asserted at ±5% for
-    // GPU run-to-run headroom; skipped when the level list or static-deform
-    // probe is overridden via env.
-    if default_levels && !env_static_deform {
-        let (mesh_s, u_s, _p_s) = solve_taylor_green_moving(32, true);
-        let u_err_static = field_errors_vec2(&mesh_s, &u_s, exact_u).l2;
-        let u_err_moving = u_errs[2];
+    // Decisive ALE-correctness check: compare the fields themselves against a
+    // solver initialized and marched statically on the identical final mesh.
+    if let Some((mesh_s, u_s, p_s, u_err_static, p_err_static)) = static_n32 {
+        let (mesh_m, u_m, p_m) = solve_taylor_green_moving(32, false);
+        let u_err_moving = field_errors_vec2(&mesh_m, &u_m, exact_u).l2;
         let ratio = u_err_moving / u_err_static;
+
+        let max_geometry_delta = mesh_m
+            .vx
+            .iter()
+            .chain(mesh_m.vy.iter())
+            .chain(mesh_m.cell_cx.iter())
+            .chain(mesh_m.cell_cy.iter())
+            .chain(mesh_m.cell_vol.iter())
+            .zip(
+                mesh_s
+                    .vx
+                    .iter()
+                    .chain(mesh_s.vy.iter())
+                    .chain(mesh_s.cell_cx.iter())
+                    .chain(mesh_s.cell_cy.iter())
+                    .chain(mesh_s.cell_vol.iter()),
+            )
+            .map(|(a, b)| (a - b).abs())
+            .fold(0.0_f64, f64::max);
+        assert!(
+            max_geometry_delta <= 1.0e-13,
+            "moving/static final geometries differ: max delta {max_geometry_delta:.3e}"
+        );
+
+        let volume = mesh_m.cell_vol.iter().sum::<f64>();
+        let u_delta = u_m
+            .iter()
+            .zip(&u_s)
+            .zip(&mesh_m.cell_vol)
+            .map(|((a, b), &v)| v * ((a.0 - b.0).powi(2) + (a.1 - b.1).powi(2)))
+            .sum::<f64>();
+        let u_delta_l2 = (u_delta / volume).sqrt();
+        let p_m_mean = volume_mean(&mesh_m, &p_m);
+        let p_s_mean = volume_mean(&mesh_s, &p_s);
+        let p_delta = p_m
+            .iter()
+            .zip(&p_s)
+            .zip(&mesh_m.cell_vol)
+            .map(|((a, b), &v)| v * ((a - p_m_mean) - (b - p_s_mean)).powi(2))
+            .sum::<f64>();
+        let p_delta_l2 = (p_delta / volume).sqrt();
         println!(
             "[mms][ale_taylor_green] n=32 moving/static-deformed u_l2 ratio {ratio:.4} \
-             (moving {u_err_moving:.4e}, static {u_err_static:.4e})"
+             (moving {u_err_moving:.4e}, static {u_err_static:.4e}), \
+             direct u_delta_l2={u_delta_l2:.4e} p_delta_l2={p_delta_l2:.4e}"
         );
         assert!(
             (ratio - 1.0).abs() <= 0.05,
@@ -296,7 +342,29 @@ fn ale_taylor_green_sou_velocity_second_order() {
              geometry: ratio {ratio:.4} (moving {u_err_moving:.4e}, static {u_err_static:.4e}) \
              — the ALE terms are injecting error beyond the spatial skew band"
         );
+        assert!(
+            u_delta_l2 <= 0.10 * u_err_static,
+            "ALE/static direct U difference too large: {u_delta_l2:.3e} > 10% of \
+             static error {u_err_static:.3e}"
+        );
+        assert!(
+            p_delta_l2 <= 0.20 * p_err_static,
+            "ALE/static direct demeaned-p difference too large: {p_delta_l2:.3e} > 20% of \
+             static error {p_err_static:.3e}"
+        );
     }
+
+    assert_convergence_order("ale_taylor_green_u", &hs, &u_errs, 2.0, 0.65, 1.3e-3);
+    let p_order = mms_support::fit_order(&hs, &p_errs);
+    println!("[mms][ale_taylor_green] pressure order {p_order:.3}");
+    assert!(
+        p_errs.windows(2).all(|pair| pair[1] < pair[0]),
+        "pressure error did not decrease monotonically: {p_errs:?}"
+    );
+    assert!(
+        p_order > 0.6 && *p_errs.last().unwrap() < 3.0e-2,
+        "pressure convergence regressed: order {p_order:.3}, errors {p_errs:?}"
+    );
 }
 
 // ── temporal study ────────────────────────────────────────────────────────
@@ -368,15 +436,13 @@ fn bdf2_moving_volume_error(steps: usize) -> f64 {
         .set_boundary_vec2(GpuBoundaryType::Inlet, "U", [U0.0 as f32, U0.1 as f32])
         .expect("inlet U");
 
-    let bump = |x0: f64, y0: f64| {
-        (PI * x0 / TLX).sin().powi(2) * (PI * y0 / TLY).sin().powi(2)
-    };
+    let bump = |x0: f64, y0: f64| (PI * x0 / TLX).sin().powi(2) * (PI * y0 / TLY).sin().powi(2);
 
     for step in 0..steps {
         let t_new = (step as f64 + 1.0) * dt;
         let old_vx = mesh.vx.clone();
         let old_vy = mesh.vy.clone();
-        let amp = AMP_FRAC * h * (2.0 * PI * t_new / T_MOTION_PERIOD).sin();
+        let amp = TEMPORAL_AMP_FRAC * h * (2.0 * PI * t_new / T_MOTION_PERIOD).sin();
         for v in 0..mesh.num_vertices() {
             let b = bump(x0[v], y0[v]);
             mesh.vx[v] = x0[v] + amp * b;

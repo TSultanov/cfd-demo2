@@ -160,10 +160,12 @@ fn source_u(t: f64) -> (f64, f64) {
     let (dx, dy) = dudt(t);
     (r * dx, r * dy)
 }
-/// Continuity: `ddt(psi_precond, p)` [acoustic, BDF2] + `ddt(rho_dT, T)` [thermal expansion,
-/// cross] => `S_p = psi_precond*dp/dt + rho_dT*dT/dt`, with psi_precond = PSI.
+/// Raw pressure row: `ddt(psi_precond, p)` [acoustic, BDF2] +
+/// `ddt(rho_dT, T)` [thermal expansion, cross]. The raw storage includes the
+/// temperature-row Schur contribution so elimination leaves target `PSI`.
 fn source_p(t: f64) -> f64 {
-    PSI * dpdt(t) + exact_rho_dt(t) * dtdt(t)
+    let psi_precond = PSI + (GAMMA - 1.0) * PSI * T_REF / exact_t(t);
+    psi_precond * dpdt(t) + exact_rho_dt(t) * dtdt(t)
 }
 /// Energy: `ddt(rho, T)` [BDF2] + T1 `ddt(inv_cp, p)` [cross] with
 /// `inv_cp = -(gamma-1)*T_ref*psi_ref` => `S_T = rho*dT/dt - (gamma-1)*T_ref*PSI*dp/dt`.
@@ -227,7 +229,10 @@ fn solve_moving(steps: usize) -> (f64, f64, f64, f64) {
     for (name, v) in [
         ("psi_ref", PSI),
         ("psi", PSI),
-        ("psi_precond", PSI),
+        (
+            "psi_precond",
+            PSI + (GAMMA - 1.0) * PSI * T_REF / exact_t(0.0),
+        ),
         ("t_ref", T_REF),
         ("rho_t_ref", RHO_T_REF),
         ("rho_floor", PSI * 1.0e-5),

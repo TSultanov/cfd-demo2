@@ -26,6 +26,8 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
+    inlet_velocity: f32,
+    inlet_ramp_time: f32,
     eos_gamma: f32,
     eos_gm1: f32,
     eos_r: f32,
@@ -180,6 +182,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var bounded_sum_phi_3: f32 = 0.0;
     for (var k = 0u; k < 4u; k++) {
         let owner = idx;
+        let center_frame = center;
         let axis_is_x = k >= 1u && k <= 2u;
         let sign_f = select(-1.0, 1.0, k >= 2u);
         let normal = Vector2(select(0.0, sign_f, axis_is_x), select(sign_f, 0.0, axis_is_x));
@@ -197,15 +200,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let other_center = Vector2(center.x + mult * normal.x, center.y + mult * normal.y);
         let face_idx = idx * 4u + k;
         let boundary_type = face_boundary[face_idx];
-        let dx = other_center.x - center.x;
-        let dy = other_center.y - center.y;
+        let dx = other_center.x - center_frame.x;
+        let dy = other_center.y - center_frame.y;
         let dist_proj = abs(dx * normal.x + dy * normal.y);
         let dist_euc = sqrt(dx * dx + dy * dy);
         var dist: f32 = max(dist_euc, 0.000001);
         if (dist_proj > 0.000001) {
             dist = dist_proj;
         }
-        let lam_d_own = abs((f_center.x - center.x) * normal.x + (f_center.y - center.y) * normal.y);
+        let lam_d_own = abs((f_center.x - center_frame.x) * normal.x + (f_center.y - center_frame.y) * normal.y);
         let lam_d_neigh = abs((other_center.x - f_center.x) * normal.x + (other_center.y - f_center.y) * normal.y);
         let lam_total = lam_d_own + lam_d_neigh;
         var lambda_f: f32 = 0.5;

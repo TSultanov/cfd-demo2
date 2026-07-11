@@ -233,6 +233,18 @@ impl GpuUnifiedSolver {
         Self::build_cpu_backend(mesh, model, config, None, None, cpu_config_from_env())
     }
 
+    /// Forced CPU construction with an explicit engine configuration. This is
+    /// the environment-free seam used by GUI backend matrix tests and tools.
+    #[cfg(feature = "cpu")]
+    pub fn new_forced_cpu_with_config(
+        mesh: &Mesh,
+        model: ModelSpec,
+        config: SolverConfig,
+        cpu_config: crate::solver::cpu::CpuBackendConfig,
+    ) -> Result<Self, String> {
+        Self::build_cpu_backend(mesh, model, config, None, None, cpu_config)
+    }
+
     #[cfg(feature = "cpu")]
     fn build_cpu_backend(
         mesh: &Mesh,
@@ -741,6 +753,17 @@ impl GpuUnifiedSolver {
 
     pub fn set_dt(&mut self, dt: f32) {
         let _ = self.set_named_param("dt", PlanParamValue::F32(dt));
+    }
+
+    /// Configure the immutable target and duration consumed by stage-time
+    /// expression-valued inlet boundary conditions. A zero duration disables
+    /// the soft start.
+    pub fn set_inlet_ramp(&mut self, velocity: f32, duration: f32) {
+        let _ = self.set_named_param("inlet_velocity", PlanParamValue::F32(velocity));
+        let _ = self.set_named_param(
+            "inlet_ramp_time",
+            PlanParamValue::F32(duration.max(0.0)),
+        );
     }
 
     pub fn set_advection_scheme(&mut self, scheme: Scheme) {
@@ -1458,6 +1481,8 @@ fn cpu_set_param(c: &mut crate::solver::cpu::CpuSolver, name: &str, value: PlanP
         ("dtau", PlanParamValue::F32(v)) => c.set_dtau(v),
         ("viscosity", PlanParamValue::F32(v)) => c.set_viscosity(v),
         ("density", PlanParamValue::F32(v)) => c.set_density(v),
+        ("inlet_velocity", PlanParamValue::F32(v)) => c.set_inlet_velocity_target(v),
+        ("inlet_ramp_time", PlanParamValue::F32(v)) => c.set_inlet_ramp_time(v),
         ("alpha_u", PlanParamValue::F32(v)) => c.set_alpha_u(v),
         ("alpha_p", PlanParamValue::F32(v)) => c.set_alpha_p(v),
         ("outer_tol", PlanParamValue::F32(v)) => c.set_outer_tolerance(v as f64),

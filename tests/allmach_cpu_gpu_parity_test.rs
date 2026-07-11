@@ -116,7 +116,10 @@ fn allmach_thermal_cpu_gpu_parity() {
         // The pressure is a gauge / Lagrange-multiplier field — each backend's iterative
         // solve settles to its own additive gauge — so compare it demeaned.
         let (oc, og) = if demean {
-            (c.iter().sum::<f64>() / c.len() as f64, g.iter().sum::<f64>() / g.len() as f64)
+            (
+                c.iter().sum::<f64>() / c.len() as f64,
+                g.iter().sum::<f64>() / g.len() as f64,
+            )
         } else {
             (0.0, 0.0)
         };
@@ -136,7 +139,9 @@ fn allmach_thermal_cpu_gpu_parity() {
 
     let u_cpu = pollster::block_on(cpu.get_field_vec2("U")).expect("U cpu");
     let u_gpu = pollster::block_on(gpu.get_field_vec2("U")).expect("U gpu");
-    let u_scale = u_cpu.iter().fold(1e-6f64, |a, (x, y)| a.max(x.abs()).max(y.abs()));
+    let u_scale = u_cpu
+        .iter()
+        .fold(1e-6f64, |a, (x, y)| a.max(x.abs()).max(y.abs()));
     let u_diff = u_cpu
         .iter()
         .zip(u_gpu.iter())
@@ -145,11 +150,31 @@ fn allmach_thermal_cpu_gpu_parity() {
 
     let t_diff = field_diff(&read(&cpu, "T"), &read(&gpu, "T"), false);
     let rho_diff = field_diff(&read(&cpu, "rho"), &read(&gpu, "rho"), false);
-    let p_diff = field_diff(&read(&cpu, "p"), &read(&gpu, "p"), true); // demeaned gauge
+    let p_cpu = read(&cpu, "p");
+    let p_gpu = read(&gpu, "p");
+    let p_diff = field_diff(&p_cpu, &p_gpu, true);
+    let p_cpu_mean = p_cpu.iter().sum::<f64>() / p_cpu.len() as f64;
+    let p_gpu_mean = p_gpu.iter().sum::<f64>() / p_gpu.len() as f64;
+    let p_shape_l2 = (p_cpu
+        .iter()
+        .map(|value| (value - p_cpu_mean).powi(2))
+        .sum::<f64>()
+        / p_cpu.len() as f64)
+        .sqrt()
+        .max(1.0e-6);
+    let p_diff_l2 = (p_cpu
+        .iter()
+        .zip(&p_gpu)
+        .map(|(a, b)| ((a - p_cpu_mean) - (b - p_gpu_mean)).powi(2))
+        .sum::<f64>()
+        / p_cpu.len() as f64)
+        .sqrt()
+        / p_shape_l2;
 
     println!(
         "[allmach-parity] {STEPS} steps, relative CPU/GPU diff:  U={u_diff:.3e}  T={t_diff:.3e}  \
-         rho={rho_diff:.3e}  p(demeaned)={p_diff:.3e}"
+         rho={rho_diff:.3e}  p_max(demeaned)={p_diff:.3e}  p_l2={p_diff_l2:.3e} \
+         p_shape_l2={p_shape_l2:.3e}"
     );
 
     // Physical fields (gauge-independent) must agree to the f32-vs-f64 envelope: a few
@@ -160,12 +185,15 @@ fn allmach_thermal_cpu_gpu_parity() {
         "CPU/GPU allmach_thermal physical fields diverged: U={u_diff:.3e} T={t_diff:.3e} rho={rho_diff:.3e}"
     );
     // The gauge pressure is far more sensitive — it is a tiny perturbation field
-    // (~O(rho*U^2)) AND a Lagrange multiplier, so f32-vs-f64 noise is a large fraction
-    // of its small scale (here ~8e-2 relative = ~1e-4 absolute) even though the physical
-    // fields agree to ~1e-5. A loose sanity bound catches a gross divergence (blow-up /
-    // NaN / wrong structure) without failing on the expected f32 pressure noise.
+    // AND a Lagrange multiplier. With the normalized-WLS Rhie--Chow reconstruction,
+    // the CPU/GPU shape difference measures ~0.26 in relative L2 but only ~3e-6
+    // absolute because the pressure-shape RMS is ~1.2e-5. Gate both relative shape
+    // and absolute size: this rejects a wrong/blown-up pressure field without treating
+    // a few f32/iterative-solve ulps as a physical-backend divergence.
     assert!(
-        p_diff < 2.0e-1,
-        "CPU/GPU allmach_thermal pressure (demeaned) grossly diverged: {p_diff:.3e}"
+        p_diff < 3.0e-1 && p_diff_l2 < 3.5e-1 && p_diff_l2 * p_shape_l2 < 1.0e-5,
+        "CPU/GPU allmach_thermal pressure (demeaned) grossly diverged: \
+         max={p_diff:.3e} l2={p_diff_l2:.3e} absolute_l2={:.3e}",
+        p_diff_l2 * p_shape_l2,
     );
 }

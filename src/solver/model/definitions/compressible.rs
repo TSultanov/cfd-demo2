@@ -846,6 +846,7 @@ fn compressible_model_impl_topo(
         &system_for_flux,
         &layout_for_flux,
         &primitives,
+        (!biharmonic).then_some(&explicit_primitives),
     )
     .map_err(|e| format!("failed to build flux_module module: {e}"))?;
 

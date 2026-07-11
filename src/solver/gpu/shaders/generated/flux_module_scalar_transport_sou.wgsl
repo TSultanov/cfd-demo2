@@ -19,6 +19,8 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
+    inlet_velocity: f32,
+    inlet_ramp_time: f32,
     eos_gamma: f32,
     eos_gm1: f32,
     eos_r: f32,
@@ -94,7 +96,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let lambda_other = 1.0 - lambda;
     let d_vec: vec2<f32> = c_neigh_vec - c_owner_vec;
     let dist_proj = abs(dot(d_vec, normal_vec));
-    let dist = max(dist_proj, 0.000001);
+    let dist_euc = sqrt(d_vec.x * d_vec.x + d_vec.y * d_vec.y);
+    var dist: f32 = max(dist_euc, 0.000001);
+    if (dist_proj > 0.000001) {
+        dist = dist_proj;
+    }
     let s_own_U_adv_x = state[owner * 4u + 1u];
     let s_own_U_adv_y = state[owner * 4u + 2u];
     let s_neigh_U_adv_x = select(state[neigh_idx * 4u + 1u], state[owner * 4u + 1u], is_boundary);

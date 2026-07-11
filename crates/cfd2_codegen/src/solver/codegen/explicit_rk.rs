@@ -80,6 +80,73 @@ fn safe_pivot(expr: Expr) -> Expr {
     dsl::select(expr.clone(), floor, dsl::abs(expr).lt(eps))
 }
 
+/// Enforce the structured all-Mach immersed solid as an algebraic velocity
+/// constraint at every RK abscissa. This removes the artificial `-1e5 U`
+/// Brinkman stiffness from the explicit stability spectrum while preserving
+/// its intended limit (U=0 in solid cells). Fluid cells are byte-identical.
+fn append_ibm_velocity_projection(body: &mut Vec<Stmt>, slots: &ResolvedStateSlotsSpec) {
+    let Some(penalty) = slots.slots.iter().find(|slot| slot.name == "ibm_penalty_U") else {
+        return;
+    };
+    let Some(velocity) = slots.slots.iter().find(|slot| slot.name == "U") else {
+        return;
+    };
+    if velocity.kind.component_count() < 2 {
+        return;
+    }
+
+    let penalty_value = state_component_slot(slots.stride, "state", "idx", penalty, 0);
+    let solid = penalty_value.lt(0.0);
+    for component in 0..2 {
+        let value = state_component_slot(slots.stride, "state", "idx", velocity, component);
+        body.push(dsl::assign_expr(
+            value.clone(),
+            dsl::select(value, 0.0, solid.clone()),
+        ));
+    }
+}
+
+/// Generate the stage-local algebraic closure used immediately before an
+/// explicit residual evaluation. `primitives` is the same topologically
+/// ordered closure applied at the end of every RK stage; running it here as
+/// well makes stage 1 correct after host seeding/parameter edits and lets
+/// gradient-dependent closures observe the gradient of the current stage.
+pub fn generate_primitive_recovery_kernel_program(
+    id: &str,
+    system: &DiscreteSystem,
+    slots: &ResolvedStateSlotsSpec,
+    primitives: &[(u32, Expr)],
+    eos_params: &[ParamSpec],
+) -> Result<KernelProgram, String> {
+    let items = stage_items(system.topology(), eos_params);
+    let bindings = kernel_bindings_from_items(&items)?;
+    let idx = Expr::ident("idx");
+    let mut body = Vec::<Stmt>::with_capacity(primitives.len());
+
+    for (offset, expr) in primitives {
+        let value = resolve_field_refs(expr, slots, idx.clone(), "state");
+        body.push(dsl::assign_expr(
+            dsl::array_access_linear("state", idx.clone(), slots.stride, *offset),
+            value,
+        ));
+    }
+    append_ibm_velocity_projection(&mut body, slots);
+
+    let bounds = match system.topology() {
+        TopologyMode::Structured2D => "idx >= grid.nx * grid.ny".to_string(),
+        TopologyMode::Unstructured => "idx >= arrayLength(&cell_vols)".to_string(),
+    };
+    let launch = LaunchSemantics::new(
+        [WORKGROUP_SIZE, 1, 1],
+        "global_id.y * constants.stride_x + global_id.x",
+        Some(bounds),
+    );
+    let mut program = KernelProgram::new(id, DispatchDomain::Cells, launch, bindings);
+    program.body = body;
+    program.eos_params = eos_params.to_vec();
+    Ok(program)
+}
+
 /// Generate one classical RK4 stage.  `primitives` must already be ordered so
 /// a derived field may depend on an earlier derived field.
 pub fn generate_rk4_stage_kernel_program(
@@ -99,9 +166,10 @@ pub fn generate_rk4_stage_kernel_program(
     let mut algebraic_rows = HashSet::<u32>::new();
     for equation in &system.equations {
         let row_base = offsets[equation.target.name()];
-        let has_own_ddt = equation.ops.iter().any(|op| {
-            op.kind == DiscreteOpKind::TimeDerivative && op.field == equation.target
-        });
+        let has_own_ddt = equation
+            .ops
+            .iter()
+            .any(|op| op.kind == DiscreteOpKind::TimeDerivative && op.field == equation.target);
         if !has_own_ddt {
             for component in 0..equation.target.kind().component_count() as u32 {
                 algebraic_rows.insert(row_base + component);
@@ -133,8 +201,7 @@ pub fn generate_rk4_stage_kernel_program(
         let rate = if algebraic_rows.contains(&row) {
             0.0.into()
         } else {
-            dsl::array_access_linear("rhs", idx.clone(), stride, row)
-                / dsl::max("vol", 1.0e-30)
+            dsl::array_access_linear("rhs", idx.clone(), stride, row) / dsl::max("vol", 1.0e-30)
         };
         body.push(dsl::var_typed_expr(&rate_name(row), Type::F32, Some(rate)));
         // A recoverable algebraic row is not time-integrated. Giving it a
@@ -276,6 +343,7 @@ pub fn generate_rk4_stage_kernel_program(
             value,
         ));
     }
+    append_ibm_velocity_projection(&mut body, slots);
 
     let bounds = match system.topology() {
         TopologyMode::Structured2D => "idx >= grid.nx * grid.ny".to_string(),

@@ -196,6 +196,21 @@ pub enum FaceScalarExpr {
         side: FaceSide,
         name: String,
     },
+    /// Read a scalar directly from the side's cell slot without applying the
+    /// boundary-condition table. Compact Dirichlet differences need the raw
+    /// owner value and the prescribed neighbour/patch value separately.
+    CellState {
+        side: FaceSide,
+        name: String,
+    },
+    /// 1.0 when this face is a boundary whose runtime condition for `name`
+    /// is Dirichlet, otherwise 0.0.  Rhie--Chow needs the pressure BC kind
+    /// (rather than the mesh patch label) to choose the boundary projection:
+    /// prescribed values use the owner-to-face line, while prescribed normal
+    /// gradients use the compact Neumann contribution directly.
+    BoundaryDirichlet {
+        name: String,
+    },
     Primitive {
         side: FaceSide,
         name: String,
@@ -251,6 +266,17 @@ impl FaceScalarExpr {
             side,
             name: name.into(),
         }
+    }
+
+    pub fn cell_state(side: FaceSide, name: impl Into<String>) -> Self {
+        FaceScalarExpr::CellState {
+            side,
+            name: name.into(),
+        }
+    }
+
+    pub fn boundary_dirichlet(name: impl Into<String>) -> Self {
+        FaceScalarExpr::BoundaryDirichlet { name: name.into() }
     }
 
     pub fn constant(name: impl Into<String>) -> Self {

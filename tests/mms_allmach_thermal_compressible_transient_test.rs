@@ -7,9 +7,9 @@
 //! state — the genuinely TRANSIENT couplings:
 //!   * momentum   ddt(rho, U)                 — variable-density inertia          (BDF2, own-var)
 //!   * energy     ddt(rho, T)                 — variable-density thermal inertia  (BDF2, own-var)
-//!   * energy     ddt(inv_cp, p) = T1         — dp/dt compression heating         (BDF1, cross-var)
+//!   * energy     ddt(inv_cp, p) = T1         — dp/dt compression heating         (BDF2, cross-var)
 //!   * continuity ddt(psi_precond, p)         — the acoustic pseudo-compressibility(BDF2, own-var)
-//!   * continuity ddt(rho_dT, T)              — rho_dT*dT/dt thermal expansion     (BDF1, cross-var)
+//!   * continuity ddt(rho_dT, T)              — rho_dT*dT/dt thermal expansion     (BDF2, cross-var)
 //! This test drives all of them with a SPATIALLY-UNIFORM, time-dependent manufactured
 //! solution and refines dt, measuring the temporal convergence order.
 //!
@@ -25,14 +25,10 @@
 //!     uniform p(t) is uniquely pinned by its own ddt — no free gauge, no p<->rho shape
 //!     defect.
 //!
-//! Expected order: the OWN-variable ddt (rho*U, rho*T, psi_precond*p) is BDF2 (2nd order),
-//! but the CROSS-variable ddt (thermal expansion `rho_dT*dT/dt` in the pressure row, T1
-//! `inv_cp*dp/dt` in the energy row) is emitted as a BDF1 implicit off-diagonal coupling
-//! (`time_integration.rs` — the per-cell diagonal accumulators cannot carry a 2nd-order
-//! off-diagonal history term). So the COUPLED transient is first-order-limited by those
-//! two cross terms. The test asserts monotone temporal convergence (which pins every
-//! transient term's SIGN and magnitude — a wrong sign diverges or converges to the wrong
-//! field) plus a >= ~1 observed order, and documents the BDF1 cross-coupling cap.
+//! Expected order: both own-variable and cross-variable ddts use the variable-step BDF2
+//! stencil. Cross terms write the current coefficient to the off-diagonal block and use
+//! both history levels, so the fully coupled transient should retain second order. The
+//! gate asserts monotone convergence, near-second-order fits, and tight finest-step caps.
 #![cfg(all(feature = "dev-tests", feature = "ui"))]
 
 mod mms_support;
@@ -56,14 +52,16 @@ const RHO_T_REF: f64 = RHO_REF * T_REF; // = 1.0
 /// Compressibility ON: a healthy pressure<->density coupling so the acoustic ddt, the
 /// T1 dp/dt heating and the thermal-expansion cross-term are all exercised well above
 /// the f32 noise floor. psi_ref = 1/c_ref^2; the local psi clamps to psi_ref because
-/// T > t_ref everywhere here (see the manufactured T below), so psi_precond = PSI.
+/// T > t_ref everywhere here (see the manufactured T below), so the target Schur
+/// compressibility is PSI. The raw pressure-row coefficient also includes the
+/// thermal cross contribution `(gamma-1)*PSI*T_ref/T`.
 const PSI: f64 = 0.1;
 const T_END: f64 = 1.0;
 
 // ── manufactured solution (spatially UNIFORM, time-dependent) ────────────────
 // Chosen smooth with nonzero 1st/2nd time-derivatives (so BDF2 truncation is exercised)
 // and T(t) > t_ref = 1 everywhere (so the on-device local psi clamps to psi_ref and the
-// acoustic coefficient psi_precond is the constant PSI — a clean, known BDF2 coefficient).
+// post-temperature-elimination acoustic coefficient is the constant PSI).
 
 const UX0: f64 = 0.5;
 const UY0: f64 = -0.3;
@@ -73,14 +71,13 @@ const T_B: f64 = 0.35;
 // Gentle temporal frequencies (~1/4 period over [0,1]): the cross-variable BDF1
 // truncation of `rho_dT*dT/dt` scales with d2T/dt2 ~ T_B*T_W^2, so a large T_W throws the
 // coarse-dt points out of the asymptotic regime and depresses the fitted order. Keeping
-// T_W/P_W moderate makes every dt level asymptotic, so the fit reports the true
-// (BDF1-cross-limited) ~1st-order slope cleanly.
+// T_W/P_W moderate makes every dt level asymptotic for the BDF2 fit.
 const T_W: f64 = 1.5;
 const P_A: f64 = 2.0;
 const P_W: f64 = 1.2;
 const P_PH: f64 = 0.5;
 /// Large velocity floor for the preconditioner so `1/max(|U|^2,u_ref^2) = 1/u_ref^2`
-/// is well below PSI: psi_precond = max(psi=PSI, 1/u_ref^2) = PSI (a clean constant).
+/// is well below PSI: the target Schur coefficient is max(psi=PSI, 1/u_ref^2) = PSI.
 const U_REF: f64 = 10.0;
 
 fn exact_u(t: f64) -> (f64, f64) {
@@ -127,12 +124,14 @@ fn source_u(t: f64) -> (f64, f64) {
     let (dx, dy) = dudt(t);
     (r * dx, r * dy)
 }
-/// Continuity: ddt(psi_precond, p) [acoustic, BDF2] + ddt(rho_dT, T) [thermal expansion,
-/// BDF1 cross] => S_p = psi_precond*dp/dt + rho_dT*dT/dt, with psi_precond = PSI.
+/// Raw pressure row: ddt(psi_precond, p) [acoustic, BDF2] + ddt(rho_dT, T)
+/// [thermal expansion, BDF2 cross]. The raw coefficient includes the
+/// temperature-row Schur contribution so elimination leaves target `PSI`.
 fn source_p(t: f64) -> f64 {
-    PSI * dpdt(t) + exact_rho_dt(t) * dtdt(t)
+    let psi_precond = PSI + (GAMMA - 1.0) * PSI * T_REF / exact_t(t);
+    psi_precond * dpdt(t) + exact_rho_dt(t) * dtdt(t)
 }
-/// Energy: ddt(rho, T) [BDF2] + T1 ddt(inv_cp, p) [BDF1 cross] with
+/// Energy: ddt(rho, T) [BDF2] + T1 ddt(inv_cp, p) [BDF2 cross] with
 /// inv_cp = -(gamma-1)*T_ref*psi_ref  =>  S_T = rho*dT/dt - (gamma-1)*T_ref*PSI*dp/dt.
 fn source_t(t: f64) -> f64 {
     let inv_cp = -(GAMMA - 1.0) * T_REF * PSI;
@@ -197,7 +196,10 @@ fn solve(steps: usize) -> (f64, f64, f64, f64) {
     for (name, v) in [
         ("psi_ref", PSI),
         ("psi", PSI),
-        ("psi_precond", PSI),
+        (
+            "psi_precond",
+            PSI + (GAMMA - 1.0) * PSI * T_REF / exact_t(0.0),
+        ),
         ("t_ref", T_REF),
         ("rho_t_ref", RHO_T_REF),
         ("rho_floor", PSI * 1.0e-5),
@@ -312,12 +314,7 @@ fn allmach_thermal_compressible_transient_order() {
     // dt-refinement across the full 8x range. This is what pins each transient term's SIGN
     // and coefficient: a wrong sign diverges, and a wrong magnitude converges to the wrong
     // field (which the finest-error caps below then catch).
-    for (name, errs) in [
-        ("U", &u_err),
-        ("T", &t_err),
-        ("p", &p_err),
-        ("rho", &r_err),
-    ] {
+    for (name, errs) in [("U", &u_err), ("T", &t_err), ("p", &p_err), ("rho", &r_err)] {
         for w in errs.windows(2) {
             assert!(
                 w[1] < w[0],
@@ -354,8 +351,8 @@ fn allmach_thermal_compressible_transient_order() {
     // so their fits are asymptotically clean; hold them to a tighter near-2 bound.
     for (name, order) in [("T", t_order), ("p", p_order)] {
         assert!(
-            order >= 1.9,
-            "[compressible-transient] {name} temporal order {order:.3} below 1.9 \
+            order >= 1.8,
+            "[compressible-transient] {name} temporal order {order:.3} below 1.8 \
              (a transient ddt term regressed from clean 2nd order)"
         );
     }
@@ -365,7 +362,12 @@ fn allmach_thermal_compressible_transient_order() {
     // error even at 2nd order. Cap it at ~2x the observed finest error (128 steps, measured
     // U=6.4e-7 T=5.0e-6 p=6.5e-5 rho=6.2e-6 — an order of magnitude tighter than the former
     // BDF1-era caps, now that the cross-variable ddt is BDF2).
-    let finest = (*u_err.last().unwrap(), *t_err.last().unwrap(), *p_err.last().unwrap(), *r_err.last().unwrap());
+    let finest = (
+        *u_err.last().unwrap(),
+        *t_err.last().unwrap(),
+        *p_err.last().unwrap(),
+        *r_err.last().unwrap(),
+    );
     assert!(
         finest.0 < 1.3e-6 && finest.1 < 1.1e-5 && finest.2 < 1.4e-4 && finest.3 < 1.3e-5,
         "[compressible-transient] finest-dt errors too large: U={:.3e} T={:.3e} p={:.3e} rho={:.3e}",

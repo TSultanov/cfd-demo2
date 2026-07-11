@@ -4,9 +4,9 @@ use crate::solver::gpu::structured::{
 };
 use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_cvt_mesh, generate_delaunay_mesh,
-    generate_structured_nozzle_mesh, generate_structured_rect_mesh,
-    generate_structured_symmetric_nozzle_mesh, generate_voronoi_mesh, BackwardsStep, BoundarySides,
-    BoundaryType, ChannelWithObstacle, LloydConfig, Mesh, Nozzle,
+    generate_structured_rect_mesh, generate_structured_symmetric_nozzle_mesh,
+    generate_voronoi_mesh, BackwardsStep, BoundarySides, BoundaryType, ChannelWithObstacle,
+    LloydConfig, Mesh, Nozzle,
 };
 use crate::solver::model::{
     allmach_pressure_ale_model, allmach_pressure_model, allmach_thermal_ale_model,
@@ -61,7 +61,7 @@ impl Default for MeshMode {
     }
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(PartialEq, Clone, Copy, Debug)]
 enum GeometryType {
     BackwardsStep,
     ChannelObstacle,
@@ -512,6 +512,27 @@ impl SolverMode {
                 s.set_alpha_u(params.alpha_u);
                 s.set_alpha_p(params.alpha_p);
                 s.set_time_scheme(params.time_scheme);
+                if s.model_id() == "allmach_thermal_structured" {
+                    let grid = s.grid();
+                    refresh_structured_allmach_runtime_fields(s, params, grid.dx, grid.dy);
+                    setup_structured_bcs(
+                        s,
+                        "allmach_thermal_structured",
+                        params.inlet_velocity as f64,
+                        4,
+                        params,
+                    );
+                }
+                if s.model_id() == "compressible_structured" {
+                    let stride = s.state_layout().stride() as usize;
+                    setup_structured_bcs(
+                        s,
+                        "compressible_structured",
+                        params.inlet_velocity as f64,
+                        stride,
+                        params,
+                    );
+                }
             }
             SolverMode::StructuredCpu(s) => {
                 if !params.adaptive_dt {
@@ -524,6 +545,32 @@ impl SolverMode {
                 s.solver.set_alpha_u(params.alpha_u);
                 s.solver.set_alpha_p(params.alpha_p);
                 s.solver.set_time_scheme(params.time_scheme);
+                if s.solver.model_id() == "allmach_thermal_structured" {
+                    let grid = s.solver.grid();
+                    refresh_structured_allmach_runtime_fields(
+                        &mut s.solver,
+                        params,
+                        grid.dx,
+                        grid.dy,
+                    );
+                    setup_structured_bcs(
+                        &mut s.solver,
+                        "allmach_thermal_structured",
+                        params.inlet_velocity as f64,
+                        4,
+                        params,
+                    );
+                }
+                if s.solver.model_id() == "compressible_structured" {
+                    let stride = s.solver.state_layout().stride() as usize;
+                    setup_structured_bcs(
+                        &mut s.solver,
+                        "compressible_structured",
+                        params.inlet_velocity as f64,
+                        stride,
+                        params,
+                    );
+                }
             }
             _ => self.driver_mut().apply_params(params),
         }
@@ -1169,7 +1216,10 @@ impl CFDApp {
         // (choking inlet speed + sub-critical outlet back-pressure) so selecting the
         // nozzle "just works" as a supersonic case. Every other case keeps a 0
         // back-pressure (standard outlet).
-        let is_allmach = self.model_id == "allmach_pressure" || self.model_id == "allmach_thermal";
+        let is_allmach = matches!(
+            self.model_id,
+            "allmach_pressure" | "allmach_thermal" | "allmach_thermal_structured"
+        );
         let d = if self.selected_geometry == GeometryType::Nozzle && is_allmach {
             crate::ui::model_defaults::ALLMACH_THERMAL_NOZZLE
         } else {
@@ -2644,10 +2694,16 @@ impl CFDApp {
             cpu.set_outer_auto_converge(request.params.outer_auto_converge);
             cpu.set_alpha_u(request.params.alpha_u);
             cpu.set_alpha_p(request.params.alpha_p);
-            seed_structured_state(&mut cpu, request.model_id, &request.params);
+            seed_structured_state(
+                &mut cpu,
+                request.model_id,
+                &request.params,
+                lx / nx as f64,
+                ly / ny as f64,
+            );
             seed_structured_freestream(&mut cpu, request.model_id, u_in, &request.params);
             seed_structured_ibm(&mut cpu, request.selected_geometry, lx, ly);
-            setup_structured_bcs(&mut cpu, request.model_id, u_in, s);
+            setup_structured_bcs(&mut cpu, request.model_id, u_in, s, &request.params);
             let ports = UiPortSet::from_layout(cpu.state_layout());
             let cached_u = ports
                 .u_offset
@@ -2683,7 +2739,13 @@ impl CFDApp {
             solver.set_outer_auto_converge(request.params.outer_auto_converge);
             solver.set_alpha_u(request.params.alpha_u);
             solver.set_alpha_p(request.params.alpha_p);
-            seed_structured_state(&mut solver, request.model_id, &request.params);
+            seed_structured_state(
+                &mut solver,
+                request.model_id,
+                &request.params,
+                lx / nx as f64,
+                ly / ny as f64,
+            );
             // Uniform-freestream momentum IC (compressible: rho_u = rho*u_in) so the
             // channel starts from a moving state — the stable configuration; a rest
             // IC on the fine grid can stall/diverge the density-based model.
@@ -2691,7 +2753,7 @@ impl CFDApp {
             // Immersed obstacle from the selected geometry (Brinkman mask; all three
             // structured models now declare an `ibm_penalty_U` field).
             seed_structured_ibm(&mut solver, request.selected_geometry, lx, ly);
-            setup_structured_bcs(&mut solver, request.model_id, u_in, s);
+            setup_structured_bcs(&mut solver, request.model_id, u_in, s, &request.params);
             let ports = UiPortSet::from_layout(solver.state_layout());
             let cached_u = ports
                 .u_offset
@@ -3505,7 +3567,9 @@ impl eframe::App for CFDApp {
                             // mode the mesh type is fixed (dense Cartesian) and the models
                             // are the *_structured set, so those unstructured-only side
                             // effects are skipped — the obstacle is a Brinkman mask instead.
-                            if !structured {
+                            if structured && self.selected_geometry == GeometryType::Nozzle {
+                                self.model_id = "allmach_thermal_structured";
+                            } else if !structured {
                                 if self.selected_geometry == GeometryType::Nozzle {
                                     if self.model_id != "allmach_pressure"
                                         && self.model_id != "allmach_thermal"
@@ -3997,9 +4061,10 @@ impl eframe::App for CFDApp {
                         // All-Mach compressibility: ψ = 1/c² is the REAL value from the
                         // fluid's EOS (sound speed) — no exaggeration. Read-only physical
                         // readout of the regime (ψ, sound speed, inlet Mach).
-                        if self.model_id == "allmach_pressure"
-                            || self.model_id == "allmach_thermal"
-                        {
+                        if matches!(
+                            self.model_id,
+                            "allmach_pressure" | "allmach_thermal" | "allmach_thermal_structured"
+                        ) {
                             let c_phys = self.current_fluid.sound_speed();
                             let mach_real = if c_phys > 0.0 {
                                 self.inlet_velocity.abs() as f64 / c_phys
@@ -4046,8 +4111,12 @@ impl eframe::App for CFDApp {
                         // floor (≈ −0.05) stays inside the gauge-EOS envelope (below it
                         // the outlet density crosses zero and the solve diverges).
                         if self.selected_geometry == GeometryType::Nozzle
-                            && (self.model_id == "allmach_pressure"
-                                || self.model_id == "allmach_thermal")
+                            && matches!(
+                                self.model_id,
+                                "allmach_pressure"
+                                    | "allmach_thermal"
+                                    | "allmach_thermal_structured"
+                            )
                         {
                             // Driving-mode toggle. Flipping it changes the Inlet/Outlet
                             // boundary KINDS (baked at build via `apply_pressure_inlet_nozzle_bcs`),
@@ -4142,7 +4211,21 @@ impl eframe::App for CFDApp {
                             .map(|(vx, vy)| (vx * vx + vy * vy).sqrt())
                             .fold(0.0_f64, f64::max);
                         let adv_speed = max_vel.max(self.inlet_velocity.abs() as f64);
-                        let sound_speed = if self.model_caps.supports_eos_tuning {
+                        let allmach_rk4 = self.time_scheme == GpuTimeScheme::RK4
+                            && matches!(
+                                self.model_id,
+                                "allmach_pressure"
+                                    | "allmach_thermal"
+                                    | "allmach_thermal_structured"
+                            );
+                        let sound_speed = if allmach_rk4 {
+                            let psi = self.current_fluid.compressibility().max(1.0e-30);
+                            let u_ref = 2.0
+                                * (self.inlet_velocity.abs() as f64)
+                                    .max(self.allmach_precond_uref_min as f64);
+                            let chi = psi.max(1.0 / u_ref.max(1.0e-15).powi(2));
+                            1.0 / chi.sqrt()
+                        } else if self.model_caps.supports_eos_tuning {
                             self.current_fluid.sound_speed()
                         } else {
                             0.0
@@ -5164,10 +5247,20 @@ trait StructuredSteppable {
     fn st_step(&mut self);
     fn st_dt(&self) -> f64;
     fn st_set_dt(&mut self, dt: f64);
+    fn st_set_fluid(&mut self, density: f64, viscosity: f64);
+    fn st_set_alpha_u(&mut self, alpha_u: f32);
+    fn st_set_alpha_p(&mut self, alpha_p: f32);
+    fn st_set_inlet_ramp(&mut self, velocity: f32, duration: f32);
     /// Min Cartesian spacing `min(dx, dy)` — the structured analogue of the
     /// driver's mesh-derived `min_cell_size` used by adaptive CFL.
     fn st_min_cell_size(&self) -> f64;
+    /// Square-root cell area, matching the generic driver's `sqrt(cell_vol)`
+    /// inlet-ramp metric on an equivalent Cartesian mesh.
+    fn st_inlet_ramp_cell_size(&self) -> f64;
+    fn st_grid(&self) -> StructuredGrid;
+    fn st_geometry_rates(&self) -> (f64, f64);
     fn st_layout(&self) -> &crate::solver::model::backend::state_layout::StateLayout;
+    fn st_packed_state(&self) -> Vec<f32>;
     fn st_get_u(&self, off: usize) -> Vec<(f64, f64)>;
     fn st_get_scalar(&self, off: usize) -> Vec<f64>;
     /// Convergence telemetry from the most recent `st_step` — plumbed into the
@@ -5184,8 +5277,33 @@ impl StructuredSteppable for StructuredGpuSolver {
     fn st_set_dt(&mut self, dt: f64) {
         self.set_dt(dt)
     }
+    fn st_set_fluid(&mut self, density: f64, viscosity: f64) {
+        self.set_fluid(density, viscosity)
+    }
+    fn st_set_alpha_u(&mut self, alpha_u: f32) {
+        self.set_alpha_u(alpha_u)
+    }
+    fn st_set_alpha_p(&mut self, alpha_p: f32) {
+        self.set_alpha_p(alpha_p)
+    }
+    fn st_set_inlet_ramp(&mut self, velocity: f32, duration: f32) {
+        self.set_inlet_ramp(velocity, duration)
+    }
     fn st_min_cell_size(&self) -> f64 {
         self.grid().dx.min(self.grid().dy)
+    }
+    fn st_inlet_ramp_cell_size(&self) -> f64 {
+        (self.grid().dx * self.grid().dy).sqrt()
+    }
+    fn st_grid(&self) -> StructuredGrid {
+        self.grid()
+    }
+    fn st_geometry_rates(&self) -> (f64, f64) {
+        let grid = self.grid();
+        (
+            1.0 / grid.dx + 1.0 / grid.dy,
+            2.0 / (grid.dx * grid.dx) + 2.0 / (grid.dy * grid.dy),
+        )
     }
     fn st_layout(&self) -> &crate::solver::model::backend::state_layout::StateLayout {
         self.state_layout()
@@ -5195,6 +5313,9 @@ impl StructuredSteppable for StructuredGpuSolver {
     }
     fn st_get_scalar(&self, off: usize) -> Vec<f64> {
         self.get_scalar(off)
+    }
+    fn st_packed_state(&self) -> Vec<f32> {
+        self.packed_state_f32()
     }
     fn st_stats(&self) -> crate::solver::banded_schur::StructuredStepStats {
         self.last_stats()
@@ -5210,8 +5331,33 @@ impl StructuredSteppable for StructuredModelSolver {
     fn st_set_dt(&mut self, dt: f64) {
         self.set_dt(dt)
     }
+    fn st_set_fluid(&mut self, density: f64, viscosity: f64) {
+        self.set_fluid(density, viscosity)
+    }
+    fn st_set_alpha_u(&mut self, alpha_u: f32) {
+        self.set_alpha_u(alpha_u)
+    }
+    fn st_set_alpha_p(&mut self, alpha_p: f32) {
+        self.set_alpha_p(alpha_p)
+    }
+    fn st_set_inlet_ramp(&mut self, velocity: f32, duration: f32) {
+        self.set_inlet_ramp(velocity, duration)
+    }
     fn st_min_cell_size(&self) -> f64 {
         self.grid().dx.min(self.grid().dy)
+    }
+    fn st_inlet_ramp_cell_size(&self) -> f64 {
+        (self.grid().dx * self.grid().dy).sqrt()
+    }
+    fn st_grid(&self) -> StructuredGrid {
+        self.grid()
+    }
+    fn st_geometry_rates(&self) -> (f64, f64) {
+        let grid = self.grid();
+        (
+            1.0 / grid.dx + 1.0 / grid.dy,
+            2.0 / (grid.dx * grid.dx) + 2.0 / (grid.dy * grid.dy),
+        )
     }
     fn st_layout(&self) -> &crate::solver::model::backend::state_layout::StateLayout {
         self.state_layout()
@@ -5222,19 +5368,279 @@ impl StructuredSteppable for StructuredModelSolver {
     fn st_get_scalar(&self, off: usize) -> Vec<f64> {
         self.get_scalar(off)
     }
+    fn st_packed_state(&self) -> Vec<f32> {
+        self.packed_state_f32()
+    }
     fn st_stats(&self) -> crate::solver::banded_schur::StructuredStepStats {
         self.last_stats()
     }
 }
 
-/// Magnitude of the structured GUI's Brinkman momentum sink. Keep this shared
-/// by the seeding and explicit-stability paths: RK4 integrates the sink rather
-/// than placing it on an implicit diagonal.
+/// Magnitude of the structured GUI's Brinkman momentum sink. All-Mach RK4
+/// enforces the solid velocity algebraically after each stage; the density-based
+/// explicit path still uses this value for its reaction-rate bound.
 const STRUCTURED_IBM_PENALTY_RATE: f64 = 1.0e5;
 
 /// Conservative extent of classical RK4's stability interval on the negative
 /// real axis (the exact endpoint is about 2.785).
 const RK4_NEGATIVE_REAL_SAFETY: f64 = 2.5;
+
+const STRUCTURED_EXPLICIT_RK_SAFETY: f64 = 0.8;
+
+#[derive(Clone, Copy, Default)]
+struct StructuredExplicitSample {
+    max_rate: f64,
+    max_vel: f64,
+    invalid: usize,
+    rho_min: f64,
+    rho_max: f64,
+}
+
+fn structured_rhie_chow_turnover_rate(
+    grid: StructuredGrid,
+    pressure: &[f64],
+    density: &[f64],
+    d_p: &[f64],
+    penalty: &[f64],
+    pressure_inlet: bool,
+    inlet_pressure: f64,
+    outlet_pressure: f64,
+) -> f64 {
+    let cells = grid.num_cells();
+    if pressure.len() != cells || density.len() != cells || d_p.len() != cells {
+        return f64::INFINITY;
+    }
+    let p_at = |i: usize, j: usize| pressure[j * grid.nx + i];
+    let mut gradient = vec![(0.0, 0.0); cells];
+    for j in 0..grid.ny {
+        for i in 0..grid.nx {
+            let cell = j * grid.nx + i;
+            let p_w = if i > 0 {
+                0.5 * (pressure[cell] + p_at(i - 1, j))
+            } else if pressure_inlet {
+                inlet_pressure
+            } else {
+                pressure[cell]
+            };
+            let p_e = if i + 1 < grid.nx {
+                0.5 * (pressure[cell] + p_at(i + 1, j))
+            } else if pressure_inlet {
+                pressure[cell]
+            } else {
+                outlet_pressure
+            };
+            let p_s = if j > 0 {
+                0.5 * (pressure[cell] + p_at(i, j - 1))
+            } else {
+                pressure[cell]
+            };
+            let p_n = if j + 1 < grid.ny {
+                0.5 * (pressure[cell] + p_at(i, j + 1))
+            } else {
+                pressure[cell]
+            };
+            gradient[cell] = ((p_e - p_w) / grid.dx, (p_n - p_s) / grid.dy);
+        }
+    }
+
+    let ibm = !penalty.is_empty();
+    let mut row_sum = vec![0.0; cells];
+    let mut add_face = |a: usize, b: Option<usize>, flux: f64| {
+        let magnitude = flux.abs();
+        row_sum[a] += magnitude;
+        if let Some(b) = b {
+            row_sum[b] += magnitude;
+        }
+    };
+    for j in 0..grid.ny {
+        for i in 0..grid.nx {
+            let cell = j * grid.nx + i;
+            if i + 1 < grid.nx {
+                let other = cell + 1;
+                let seal = if ibm {
+                    1.0 - (penalty[cell] + penalty[other]).min(1.0)
+                } else {
+                    1.0
+                };
+                let (kappa, qx) = if ibm {
+                    let kappa = 0.5 * (density[cell] + density[other]) * d_p[cell].min(d_p[other]);
+                    (kappa, kappa * 0.5 * (gradient[cell].0 + gradient[other].0))
+                } else {
+                    let ka = density[cell] * d_p[cell];
+                    let kb = density[other] * d_p[other];
+                    (
+                        0.5 * (ka + kb),
+                        0.5 * (ka * gradient[cell].0 + kb * gradient[other].0),
+                    )
+                };
+                let compact = kappa * (pressure[other] - pressure[cell]) / grid.dx;
+                add_face(cell, Some(other), seal * grid.dy * (qx - compact));
+            }
+            if j + 1 < grid.ny {
+                let other = cell + grid.nx;
+                let seal = if ibm {
+                    1.0 - (penalty[cell] + penalty[other]).min(1.0)
+                } else {
+                    1.0
+                };
+                let (kappa, qy) = if ibm {
+                    let kappa = 0.5 * (density[cell] + density[other]) * d_p[cell].min(d_p[other]);
+                    (kappa, kappa * 0.5 * (gradient[cell].1 + gradient[other].1))
+                } else {
+                    let ka = density[cell] * d_p[cell];
+                    let kb = density[other] * d_p[other];
+                    (
+                        0.5 * (ka + kb),
+                        0.5 * (ka * gradient[cell].1 + kb * gradient[other].1),
+                    )
+                };
+                let compact = kappa * (pressure[other] - pressure[cell]) / grid.dy;
+                add_face(cell, Some(other), seal * grid.dx * (qy - compact));
+            }
+
+            // The only pressure-Dirichlet outer boundary is left for the
+            // pressure-inlet nozzle and right for the ordinary velocity inlet.
+            // Zero-Neumann boundaries have identically zero corrected RC flux.
+            let boundary = if pressure_inlet && i == 0 {
+                Some((-gradient[cell].0, inlet_pressure, grid.dy, 0.5 * grid.dx))
+            } else if !pressure_inlet && i + 1 == grid.nx {
+                Some((gradient[cell].0, outlet_pressure, grid.dy, 0.5 * grid.dx))
+            } else {
+                None
+            };
+            if let Some((normal_gradient, boundary_p, area, distance)) = boundary {
+                let kappa = density[cell] * d_p[cell];
+                let compact = kappa * (boundary_p - pressure[cell]) / distance;
+                let seal = if ibm {
+                    1.0 - (2.0 * penalty[cell]).min(1.0)
+                } else {
+                    1.0
+                };
+                add_face(
+                    cell,
+                    None,
+                    seal * area * (kappa * normal_gradient - compact),
+                );
+            }
+        }
+    }
+
+    let volume = grid.dx * grid.dy;
+    row_sum
+        .iter()
+        .enumerate()
+        .map(|(cell, &sum)| sum / (density[cell] * volume))
+        .fold(0.0, f64::max)
+}
+
+fn structured_allmach_explicit_sample(
+    s: &impl StructuredSteppable,
+    params: &RuntimeParams,
+) -> StructuredExplicitSample {
+    let state = s.st_packed_state();
+    let layout = s.st_layout();
+    let stride = layout.stride() as usize;
+    let off = |name: &str| layout.offset_for(name).map(|value| value as usize);
+    let (Some(u), Some(p), Some(t), Some(t_ref), Some(dt_local)) =
+        (off("U"), off("p"), off("T"), off("t_ref"), off("dt_local"))
+    else {
+        return StructuredExplicitSample {
+            invalid: 1,
+            rho_min: f64::INFINITY,
+            rho_max: f64::NEG_INFINITY,
+            ..Default::default()
+        };
+    };
+    let ibm_penalty = off("ibm_penalty_U");
+    let (g_h, g_d) = s.st_geometry_rates();
+    let psi0 = (params.compressibility_psi as f64).max(0.0);
+    let u_ref = 2.0
+        * (params.inlet_velocity.abs() as f64).max(params.allmach_precond_uref_min.max(0.0) as f64);
+    let mut sample = StructuredExplicitSample {
+        rho_min: f64::INFINITY,
+        rho_max: f64::NEG_INFINITY,
+        ..Default::default()
+    };
+    let grid = s.st_grid();
+    let mut pressure = vec![0.0; grid.num_cells()];
+    let mut density_cells = vec![0.0; grid.num_cells()];
+    let mut dp_cells = vec![0.0; grid.num_cells()];
+    let mut penalty_cells = ibm_penalty.map(|_| vec![0.0; grid.num_cells()]);
+    for (cell, row) in state.chunks_exact(stride).enumerate() {
+        if row.iter().any(|value| !value.is_finite()) {
+            sample.invalid += 1;
+            continue;
+        }
+        let speed = (row[u] as f64).hypot(row[u + 1] as f64);
+        let temperature = row[t] as f64;
+        if !(temperature > 0.0) {
+            sample.invalid += 1;
+            continue;
+        }
+        let reference_t = row[t_ref] as f64;
+        let rho_numer = params.density as f64 * reference_t
+            + crate::solver::model::ALLMACH_GAMMA * psi0 * reference_t * row[p] as f64;
+        let rho_raw = rho_numer / temperature;
+        let density_floor = psi0 * 1.0e-5;
+        let density = rho_raw.max(density_floor);
+        pressure[cell] = row[p] as f64;
+        density_cells[cell] = density;
+        let rho_dt = -rho_numer / (temperature * temperature);
+        let psi_local = (psi0 * reference_t / temperature).max(psi0);
+        let beta2 = (speed * speed).max(u_ref * u_ref).max(1.0e-12);
+        let mass_pp = if psi0 > 0.0 {
+            (crate::solver::model::ALLMACH_GAMMA - 1.0) * psi0 * reference_t / temperature
+                + psi_local.max(1.0 / beta2)
+        } else {
+            0.0
+        };
+        let inv_cp = (crate::solver::model::ALLMACH_GAMMA - 1.0) * psi0 * reference_t;
+        let chi = mass_pp + rho_dt * inv_cp / density.max(1.0e-30);
+        let chi_floor = mass_pp.abs().max(1.0e-30) * 1.0e-6;
+        if !(density > 0.0
+            && mass_pp > 0.0
+            && chi.is_finite()
+            && chi > chi_floor
+            && rho_raw > density_floor * (1.0 + 1.0e-6))
+        {
+            sample.invalid += 1;
+            continue;
+        }
+        sample.max_vel = sample.max_vel.max(speed);
+        sample.rho_min = sample.rho_min.min(density);
+        sample.rho_max = sample.rho_max.max(density);
+        let sound = 1.0 / chi.sqrt();
+        let nu_long = 4.0 * (params.viscosity as f64).abs() / (3.0 * density);
+        let alpha_t = crate::solver::model::ALLMACH_K_OVER_CP * mass_pp / (density * chi);
+        let dp0 = (row[dt_local] as f64).max(0.0) / density;
+        let penalty = ibm_penalty.map_or(0.0, |field| (row[field] as f64).abs());
+        let d_p = dp0 / (1.0 + penalty * dp0);
+        dp_cells[cell] = d_p;
+        if let Some(values) = &mut penalty_cells {
+            values[cell] = penalty;
+        }
+        let alpha_p = density * d_p.abs() / chi;
+        let rate = g_h * (speed + sound) + 2.0 * g_d * nu_long.max(alpha_t).max(alpha_p);
+        if rate.is_finite() {
+            sample.max_rate = sample.max_rate.max(rate);
+        } else {
+            sample.invalid += 1;
+        }
+    }
+    if sample.invalid == 0 {
+        sample.max_rate += structured_rhie_chow_turnover_rate(
+            grid,
+            &pressure,
+            &density_cells,
+            &dp_cells,
+            penalty_cells.as_deref().unwrap_or(&[]),
+            params.pressure_inlet,
+            params.inlet_pressure as f64,
+            params.outlet_back_pressure as f64,
+        );
+    }
+    sample
+}
 
 /// Pin `dt` for one structured step — the same CFL policy as
 /// [`crate::sim::SolverDriver::step`].
@@ -5244,8 +5650,27 @@ fn structured_pin_dt(
     prev_max_vel: f64,
     supports_sound_speed: bool,
     model_id: &str,
-) {
+) -> Result<(), String> {
     if params.adaptive_dt {
+        if params.time_scheme == GpuTimeScheme::RK4 && model_id == "allmach_thermal_structured" {
+            let sample = structured_allmach_explicit_sample(s, params);
+            if sample.invalid > 0 || !sample.max_rate.is_finite() || !(sample.max_rate > 0.0) {
+                return Err(format!(
+                    "invalid structured all-Mach RK4 pre-step state ({} invalid cells)",
+                    sample.invalid
+                ));
+            }
+            let mut next_dt = STRUCTURED_EXPLICIT_RK_SAFETY * params.target_cfl.clamp(1.0e-6, 1.0)
+                / sample.max_rate;
+            let current_dt = s.st_dt();
+            if next_dt > current_dt * 1.2 {
+                next_dt = current_dt * 1.2;
+            }
+            if next_dt.is_finite() && next_dt > 0.0 {
+                s.st_set_dt(next_dt.min(100.0));
+            }
+            return Ok(());
+        }
         let sound_speed = if supports_sound_speed {
             params.eos.sound_speed(params.density as f64)
         } else {
@@ -5267,12 +5692,9 @@ fn structured_pin_dt(
         // target_cfl only makes the acoustic mass term `psi_precond·V/dt` comparable
         // to the pressure Laplacian (R = 1/(4·α_u·CFL_β²)), which de-ellipticises the
         // pressure and stalls/destabilises the flow.
-        // Explicit RK4 integrates the real acoustics directly (no implicit
-        // pressure solve, no low-Mach preconditioning of the residual), so its
-        // acoustic CFL MUST use the TRUE sound speed. The `effective_sound_speed`
-        // reduction is valid only for the implicit/coupled paths; reusing it under
-        // RK4 sizes dt against a preconditioned wave speed ~10^3–10^4x too small
-        // and the explicit compressible step diverges.
+        // Density-based RK4 integrates physical acoustics directly, so its
+        // acoustic CFL uses the true sound speed. Pressure-based all-Mach RK4
+        // returned above after using its local p/T mass-block spectral rate.
         let acoustic_speed = if params.time_scheme == GpuTimeScheme::RK4 {
             sound_speed
         } else {
@@ -5320,6 +5742,7 @@ fn structured_pin_dt(
     } else {
         s.st_set_dt(params.requested_dt.max(1.0e-9) as f64);
     }
+    Ok(())
 }
 
 /// Whether this structured model carries a thermodynamic EOS that contributes
@@ -5329,25 +5752,51 @@ fn structured_supports_sound_speed(model_id: &str) -> bool {
 }
 
 fn structured_step(
-    s: &mut impl StructuredSteppable,
+    s: &mut (impl StructuredSteppable + StructuredSeed),
     params: &RuntimeParams,
     prev_max_vel: &mut f64,
     model_id: &str,
     readback: bool,
 ) -> StepOutcome {
-    structured_pin_dt(
+    if let Err(error) = structured_pin_dt(
         s,
         params,
         *prev_max_vel,
         structured_supports_sound_speed(model_id),
         model_id,
-    );
+    ) {
+        return StepOutcome {
+            dt: s.st_dt() as f32,
+            step_time_ms: 0.0,
+            linear_stats: Vec::new(),
+            outer_iters: None,
+            outer_residual_u: None,
+            outer_residual_p: None,
+            diverged: Some(DivergeReason::StepError(error)),
+            should_stop: false,
+            readback: None,
+        };
+    }
+
+    if model_id == "allmach_thermal_structured" {
+        let ramp_time =
+            crate::sim::explicit_allmach_inlet_ramp_time(params, s.st_inlet_ramp_cell_size(), true);
+        s.st_set_inlet_ramp(params.inlet_velocity, ramp_time);
+    }
 
     let t0 = std::time::Instant::now();
     s.st_step();
     let step_time_ms = t0.elapsed().as_secs_f32() * 1000.0;
     let dt = s.st_dt() as f32;
     let cstats = s.st_stats();
+    let explicit_allmach_sample = (params.time_scheme == GpuTimeScheme::RK4
+        && model_id == "allmach_thermal_structured")
+        .then(|| structured_allmach_explicit_sample(s, params));
+    if let Some(sample) = explicit_allmach_sample {
+        if sample.invalid == 0 {
+            *prev_max_vel = sample.max_vel;
+        }
+    }
 
     let ports = UiPortSet::from_layout(s.st_layout());
     // When adaptive CFL is on, refresh `prev_max_vel` EVERY step (not only the
@@ -5379,8 +5828,8 @@ fn structured_step(
             }
         }
         if params.adaptive_dt {
-        *prev_max_vel = max_vel;
-    }
+            *prev_max_vel = max_vel;
+        }
     }
 
     let step_nonfinite_p = if explicit_rk4 && !readback {
@@ -5433,7 +5882,7 @@ fn structured_step(
             p_max: if p_finite { p_max } else { 0.0 },
             p_finite,
             nonfinite_p,
-            rho: None,
+            rho: explicit_allmach_sample.map(|sample| (sample.rho_min, sample.rho_max)),
         };
         Some(Readback { u, p, stats })
     } else {
@@ -5445,10 +5894,18 @@ fn structured_step(
         .map_or((step_nonfinite_u, step_nonfinite_p), |rb| {
             (rb.stats.nonfinite_u, rb.stats.nonfinite_p)
         });
-    let diverged = (nonfinite_u > 0 || nonfinite_p > 0).then_some(DivergeReason::NonFinite {
+    let mut diverged = (nonfinite_u > 0 || nonfinite_p > 0).then_some(DivergeReason::NonFinite {
         u: nonfinite_u,
         p: nonfinite_p,
     });
+    if let Some(sample) = explicit_allmach_sample {
+        if sample.invalid > 0 || !(sample.max_rate > 0.0) {
+            diverged = Some(DivergeReason::StepError(format!(
+                "invalid structured all-Mach RK4 thermodynamic state ({} invalid cells)",
+                sample.invalid
+            )));
+        }
+    }
 
     // Convergence telemetry for the GUI readout. The banded solve is a direct
     // f64 GMRES per outer, so we report the LAST outer's linear residual as a
@@ -5561,7 +6018,59 @@ impl StructuredSeed for StructuredModelSolver {
     }
 }
 
-fn seed_structured_state(s: &mut impl StructuredSeed, model_id: &str, params: &RuntimeParams) {
+/// Refresh configuration fields that are algebraic inputs to the structured
+/// all-Mach closure without resetting solved p/T/U. This is safe for live GUI
+/// edits and makes the next pre-step spectral sample use the new fluid,
+/// compressibility, inlet, and preconditioner settings.
+fn refresh_structured_allmach_runtime_fields(
+    s: &mut impl StructuredSeed,
+    params: &RuntimeParams,
+    dx: f64,
+    dy: f64,
+) {
+    let psi = (params.compressibility_psi as f64).max(0.0);
+    let rho_ref = params.density as f64;
+    let t_ref = 1.0_f64;
+    let u_ref = 2.0
+        * (params.inlet_velocity.abs() as f64).max(params.allmach_precond_uref_min.max(0.0) as f64);
+    let psi_precond = if psi > 0.0 && u_ref > 0.0 {
+        (crate::solver::model::ALLMACH_GAMMA - 1.0) * psi + psi.max(1.0 / (u_ref * u_ref))
+    } else {
+        psi
+    };
+    let chi = (psi_precond - (crate::solver::model::ALLMACH_GAMMA - 1.0) * psi)
+        .max(psi_precond.abs().max(1.0e-30) * 1.0e-6);
+    let g_h = 1.0 / dx.max(1.0e-30) + 1.0 / dy.max(1.0e-30);
+    let stabilization_time = 1.0 / (g_h * (1.0 / chi.sqrt()));
+    let rc_scale = if params.time_scheme == GpuTimeScheme::RK4 {
+        1.0
+    } else {
+        params.alpha_u as f64
+    };
+    let d_p = rc_scale * stabilization_time / rho_ref.abs().max(1.0e-12);
+
+    s.sc_set_named("rho_t_ref", move |_, _| rho_ref * t_ref);
+    s.sc_set_named("t_ref", move |_, _| t_ref);
+    s.sc_set_named("rho_floor", move |_, _| psi * 1.0e-5);
+    s.sc_set_named("psi_ref", move |_, _| psi);
+    s.sc_set_named(
+        "precond_mask",
+        move |_, _| if psi > 0.0 { 1.0 } else { 0.0 },
+    );
+    s.sc_set_named("u_ref", move |_, _| u_ref);
+    s.sc_set_named("psi", move |_, _| psi);
+    s.sc_set_named("psi_precond", move |_, _| psi_precond);
+    s.sc_set_named("dt_local", move |_, _| stabilization_time);
+    s.sc_set_named("d_p", move |_, _| d_p);
+}
+
+fn seed_structured_state(
+    s: &mut impl StructuredSeed,
+    model_id: &str,
+    params: &RuntimeParams,
+    dx: f64,
+    dy: f64,
+) {
     match model_id {
         "allmach_thermal_structured" => {
             // Match SolverDriver all-Mach seeds: real fluid compressibility
@@ -5589,13 +6098,27 @@ fn seed_structured_state(s: &mut impl StructuredSeed, model_id: &str, params: &R
             // psi_precond host seed; on-device recovery refreshes it from u_ref.
             let u_ref = 2.0
                 * (params.inlet_velocity.abs() as f64)
-                    .max(params.allmach_precond_uref_min.max(0.2) as f64);
+                    .max(params.allmach_precond_uref_min.max(0.0) as f64);
             let psi_precond = if u_ref > 0.0 {
-                psi.max(1.0 / (u_ref * u_ref))
+                (crate::solver::model::ALLMACH_GAMMA - 1.0) * psi + psi.max(1.0 / (u_ref * u_ref))
             } else {
                 psi
             };
             s.sc_set_named("psi_precond", move |_, _| psi_precond);
+            s.sc_set_named("rho_dT", move |_, _| -rho / t_ref);
+            s.sc_set_named("u_dot_grad_p", |_, _| 0.0);
+            let chi = (psi_precond - (crate::solver::model::ALLMACH_GAMMA - 1.0) * psi)
+                .max(psi_precond.abs().max(1.0e-30) * 1.0e-6);
+            let g_h = 1.0 / dx.max(1.0e-30) + 1.0 / dy.max(1.0e-30);
+            let stabilization_time = 1.0 / (g_h * (1.0 / chi.sqrt()));
+            s.sc_set_named("dt_local", move |_, _| stabilization_time);
+            let rc_scale = if params.time_scheme == GpuTimeScheme::RK4 {
+                1.0
+            } else {
+                params.alpha_u as f64
+            };
+            let d_p = rc_scale * stabilization_time / rho.abs().max(1.0e-12);
+            s.sc_set_named("d_p", move |_, _| d_p);
         }
         "compressible_structured" => {
             let rho = params.density as f64;
@@ -5640,7 +6163,8 @@ fn structured_geometry_is_solid(geom: GeometryType, x: f64, y: f64, lx: f64, ly:
 
 /// Rasterize the selected geometry into the momentum Brinkman penalty field
 /// `ibm_penalty_U` (large negative inside the solid; a `source_coeff(Sp,U)` sink
-/// pins U→0 there). No-op for models without the field (thermal / compressible).
+/// pins U→0 there, with an exact per-stage projection under all-Mach RK4).
+/// No-op for models without the field.
 fn seed_structured_ibm(s: &mut impl StructuredSeed, geom: GeometryType, lx: f64, ly: f64) {
     let Some(off) = s.sc_field_offset("ibm_penalty_U") else {
         return;
@@ -5669,6 +6193,12 @@ fn seed_structured_freestream(
         if s.sc_field_offset("rho_u").is_some() {
             s.sc_set_named("rho_u", move |_, _| rho * u_in);
         }
+        // Keep total energy consistent with the seeded momentum. The rest
+        // pressure is p=rho (R*T=1), hence p/(gamma-1)=2.5*rho.
+        if s.sc_field_offset("rho_e").is_some() {
+            let rho_e = rho * (2.5 + 0.5 * u_in * u_in);
+            s.sc_set_named("rho_e", move |_, _| rho_e);
+        }
     }
     if model_id == "allmach_thermal_structured" {
         // Low-Mach preconditioner CONFIG (mirrors the unstructured driver's all-Mach
@@ -5680,7 +6210,7 @@ fn seed_structured_freestream(
         let u_ref = 2.0
             * u_in
                 .abs()
-                .max(params.allmach_precond_uref_min.max(0.2) as f64);
+                .max(params.allmach_precond_uref_min.max(0.0) as f64);
         if s.sc_field_offset("u_ref").is_some() {
             s.sc_set_named("u_ref", move |_, _| u_ref);
         }
@@ -5704,9 +6234,16 @@ fn seed_structured_freestream(
 ///   conserved-Dirichlet inlet (`rho`, `rho*u_in`, `rho_e`), zero-gradient
 ///   outlet; the model's `bc_expr` closure keeps the dependent entries
 ///   thermodynamically consistent.
-fn setup_structured_bcs(s: &mut impl StructuredSeed, model_id: &str, u_in: f64, stride_s: usize) {
+fn setup_structured_bcs(
+    s: &mut impl StructuredSeed,
+    model_id: &str,
+    u_in: f64,
+    stride_s: usize,
+    params: &RuntimeParams,
+) {
     if model_id == "compressible_structured" {
-        let (rho0, e0) = (1.0f32, 2.5f32);
+        let rho0 = params.density.max(1.0e-6);
+        let e0 = rho0 * (2.5 + 0.5 * (u_in as f32) * (u_in as f32));
         s.sc_set_boundaries(move |edge, _x, _y| {
             let d = |v: f32| StructBc { kind: 1, value: v };
             let n = || StructBc {
@@ -5730,22 +6267,25 @@ fn setup_structured_bcs(s: &mut impl StructuredSeed, model_id: &str, u_in: f64, 
     } else {
         // Pressure-based channel. bc_kind 1=Dirichlet, 2=Neumann(zero-grad).
         // Components 0=Ux, 1=Uy, 2=p (+3=T).
+        let pressure_inlet = model_id == "allmach_thermal_structured" && params.pressure_inlet;
+        let inlet_pressure = params.inlet_pressure;
+        let outlet_back_pressure = params.outlet_back_pressure;
         s.sc_set_boundaries(move |edge, _x, _y| {
             let (btype, mut v): (u32, Vec<StructBc>) = match edge {
                 StructEdge::Left => (
                     1,
                     vec![
                         StructBc {
-                            kind: 1,
-                            value: u_in as f32,
+                            kind: if pressure_inlet { 2 } else { 1 },
+                            value: if pressure_inlet { 0.0 } else { u_in as f32 },
                         },
                         StructBc {
                             kind: 1,
                             value: 0.0,
                         },
                         StructBc {
-                            kind: 2,
-                            value: 0.0,
+                            kind: if pressure_inlet { 1 } else { 2 },
+                            value: if pressure_inlet { inlet_pressure } else { 0.0 },
                         },
                     ],
                 ),
@@ -5761,8 +6301,12 @@ fn setup_structured_bcs(s: &mut impl StructuredSeed, model_id: &str, u_in: f64, 
                             value: 0.0,
                         },
                         StructBc {
-                            kind: 1,
-                            value: 0.0,
+                            kind: if pressure_inlet { 2 } else { 1 },
+                            value: if pressure_inlet {
+                                0.0
+                            } else {
+                                outlet_back_pressure
+                            },
                         },
                     ],
                 ),
@@ -5800,6 +6344,705 @@ fn setup_structured_bcs(s: &mut impl StructuredSeed, model_id: &str, u_in: f64, 
             }
             (btype, v)
         });
+    }
+}
+
+#[cfg(test)]
+mod structured_boundary_tests {
+    use super::*;
+    use crate::solver::model::eos::EosSpec;
+    use crate::ui::model_defaults::gui_defaults_for;
+
+    #[test]
+    fn allmach_structured_outlet_uses_live_back_pressure() {
+        let model = crate::solver::model::allmach_thermal_structured_model().unwrap();
+        let grid = StructuredGrid::new(4, 3, 1.0, 1.0);
+        let mut solver = StructuredModelSolver::with_config(
+            grid,
+            &model,
+            1.0e-3,
+            1,
+            Scheme::Upwind,
+            GpuTimeScheme::RK4,
+        )
+        .unwrap();
+        let mut params = gui_defaults_for("allmach_thermal_structured").to_runtime_params(
+            1.0,
+            1.0e-3,
+            EosSpec::Constant,
+        );
+        params.pressure_inlet = false;
+        params.outlet_back_pressure = -0.03125;
+        setup_structured_bcs(
+            &mut solver,
+            "allmach_thermal_structured",
+            params.inlet_velocity as f64,
+            4,
+            &params,
+        );
+
+        let right_cell = 4 + 3;
+        assert_eq!(solver.bc_kind_at(right_cell, 2, 2), 1);
+        assert_eq!(
+            solver.bc_value_at(right_cell, 2, 2),
+            params.outlet_back_pressure as f64
+        );
+
+        params.pressure_inlet = true;
+        params.inlet_pressure = 0.125;
+        setup_structured_bcs(
+            &mut solver,
+            "allmach_thermal_structured",
+            params.inlet_velocity as f64,
+            4,
+            &params,
+        );
+        assert_eq!(solver.bc_kind_at(right_cell, 2, 2), 2);
+        let left_cell = 4;
+        assert_eq!(solver.bc_kind_at(left_cell, 1, 2), 1);
+        assert_eq!(
+            solver.bc_value_at(left_cell, 1, 2),
+            params.inlet_pressure as f64
+        );
+    }
+}
+
+/// Headless observations from the exact unstructured GUI mesh, initial-field,
+/// driver, adaptive-controller, and readback path.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy)]
+pub struct UnstructuredAllmachRk4Smoke {
+    pub cells: usize,
+    pub steps: usize,
+    pub final_time: f64,
+    pub min_dt: f64,
+    pub max_dt: f64,
+    pub max_vel: f64,
+    pub min_rho: f64,
+    pub max_rho: f64,
+    /// Volume-normalized energy in the actual conductance-weighted Rhie--Chow
+    /// pressure bracket, relative to the de-meaned pressure energy and RMS
+    /// cell conductance. This uses the solver's normalized WLS reconstruction,
+    /// complete `rho*d_p` interpolation, IBM seal, and distance fallback.
+    /// A smooth linear pressure field gives zero; a collocated checkerboard gives
+    /// an O(1/h) bracket and therefore a large value.
+    pub rhie_chow_bracket_fraction: f64,
+    /// RMS visibility of the reconstructed conductance-weighted pressure term
+    /// relative to the compact term. A true collocated checkerboard has an
+    /// O(1) compact jump but an almost invisible reconstructed contribution.
+    pub pressure_gradient_visibility: f64,
+    /// RMS disagreement between the actual reconstructed and compact flux
+    /// terms, normalized by compact-term energy.
+    pub pressure_jump_defect: f64,
+    /// Grid-Nyquist fractions of pressure on Cartesian-like meshes.  These are
+    /// diagnostic only (the bracket fraction above is topology-independent).
+    pub pressure_nyquist_x: f64,
+    pub pressure_nyquist_y: f64,
+    pub pressure_nyquist_xy: f64,
+    /// RMS of the column-mean streamwise velocity after removal of a
+    /// 17-column moving average, normalized by its RMS. This isolates the
+    /// multi-cell vertical wave train visible during low-Mach startup; unlike
+    /// the Nyquist metrics it is intentionally sensitive to wavelengths of
+    /// roughly 4--32 cells.
+    pub velocity_stripe_fraction: f64,
+}
+
+fn unstructured_rhie_chow_diagnostics(
+    mesh: &Mesh,
+    p: &[f64],
+    density: &[f64],
+    d_p: &[f64],
+    penalty: Option<&[f64]>,
+    params: &RuntimeParams,
+    nominal_h: f64,
+) -> (f64, f64, f64, f64, f64, f64) {
+    if p.len() != mesh.num_cells()
+        || density.len() != mesh.num_cells()
+        || d_p.len() != mesh.num_cells()
+    {
+        return (f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN, f64::NAN);
+    }
+    let penalty = penalty.filter(|values| values.len() == mesh.num_cells());
+
+    // Recompute grad(p) from the FINAL RK state. The stored grad_p belongs to
+    // the k4 input abscissa until the next residual preparation, so reading it
+    // immediately after a step would overstate the bracket defect.
+    let grad_p = crate::sim::explicit_pressure_gradients(mesh, p, params);
+
+    let total_volume = mesh.cell_vol.iter().sum::<f64>().max(1.0e-300);
+    let mean = p
+        .iter()
+        .zip(&mesh.cell_vol)
+        .map(|(&value, &volume)| value * volume)
+        .sum::<f64>()
+        / total_volume;
+    let pressure_energy = p
+        .iter()
+        .zip(&mesh.cell_vol)
+        .map(|(&value, &volume)| volume * (value - mean).powi(2))
+        .sum::<f64>();
+    let conductance_rms_sq = density
+        .iter()
+        .zip(d_p)
+        .zip(&mesh.cell_vol)
+        .map(|((&rho, &dp), &volume)| volume * (rho * dp).powi(2))
+        .sum::<f64>()
+        / total_volume;
+
+    let mut bracket_energy = 0.0;
+    let mut compact_jump_energy = 0.0;
+    let mut reconstructed_gradient_energy = 0.0;
+    let mut jump_defect_energy = 0.0;
+    for face in 0..mesh.num_faces() {
+        let Some(neighbor) = mesh.face_neighbor[face] else {
+            continue;
+        };
+        let owner = mesh.face_owner[face];
+        let wrap = mesh
+            .face_wrap_shift
+            .get(face)
+            .copied()
+            .unwrap_or([0.0, 0.0]);
+        let dx = mesh.cell_cx[neighbor] + wrap[0] - mesh.cell_cx[owner];
+        let dy = mesh.cell_cy[neighbor] + wrap[1] - mesh.cell_cy[owner];
+        let projected = (dx * mesh.face_nx[face] + dy * mesh.face_ny[face]).abs();
+        let normal_distance = if projected > 1.0e-6 {
+            projected
+        } else {
+            dx.hypot(dy).max(1.0e-6)
+        };
+        let d_owner = ((mesh.face_cx[face] - mesh.cell_cx[owner]) * mesh.face_nx[face]
+            + (mesh.face_cy[face] - mesh.cell_cy[owner]) * mesh.face_ny[face])
+            .abs();
+        let d_neighbor = ((mesh.cell_cx[neighbor] + wrap[0] - mesh.face_cx[face])
+            * mesh.face_nx[face]
+            + (mesh.cell_cy[neighbor] + wrap[1] - mesh.face_cy[face]) * mesh.face_ny[face])
+            .abs();
+        let lambda = if d_owner + d_neighbor > 1.0e-6 {
+            d_neighbor / (d_owner + d_neighbor)
+        } else {
+            0.5
+        };
+        let other = 1.0 - lambda;
+        let (reconstructed, compact) = if let Some(penalty) = penalty {
+            let seal = 1.0 - (penalty[owner].abs() + penalty[neighbor].abs()).min(1.0);
+            let kappa = (lambda * density[owner] + other * density[neighbor])
+                * d_p[owner].min(d_p[neighbor]);
+            let gx = lambda * grad_p[owner].0 + other * grad_p[neighbor].0;
+            let gy = lambda * grad_p[owner].1 + other * grad_p[neighbor].1;
+            (
+                seal * kappa * (gx * dx + gy * dy) / normal_distance,
+                seal * kappa * (p[neighbor] - p[owner]) / normal_distance,
+            )
+        } else {
+            let k_owner = density[owner] * d_p[owner];
+            let k_neighbor = density[neighbor] * d_p[neighbor];
+            let kappa = lambda * k_owner + other * k_neighbor;
+            let qx = lambda * k_owner * grad_p[owner].0 + other * k_neighbor * grad_p[neighbor].0;
+            let qy = lambda * k_owner * grad_p[owner].1 + other * k_neighbor * grad_p[neighbor].1;
+            (
+                (qx * dx + qy * dy) / normal_distance,
+                kappa * (p[neighbor] - p[owner]) / normal_distance,
+            )
+        };
+        let bracket = reconstructed - compact;
+        // In 2-D, A_f*d_f has volume units, so this is directly comparable
+        // with the cell-volume-weighted pressure energy above.
+        let weight = mesh.face_area[face] * normal_distance;
+        bracket_energy += weight * bracket * bracket;
+        compact_jump_energy += weight * compact * compact;
+        reconstructed_gradient_energy += weight * reconstructed * reconstructed;
+        jump_defect_energy += weight * bracket * bracket;
+    }
+    let h = nominal_h.abs().max(1.0e-14);
+    let bracket_fraction = h
+        * (bracket_energy / (conductance_rms_sq.max(1.0e-300) * pressure_energy.max(1.0e-300)))
+            .sqrt();
+    let (gradient_visibility, jump_defect) = if compact_jump_energy > 1.0e-300 {
+        (
+            (reconstructed_gradient_energy / compact_jump_energy).sqrt(),
+            (jump_defect_energy / compact_jump_energy).sqrt(),
+        )
+    } else {
+        (1.0, 0.0)
+    };
+    let rms = (pressure_energy / total_volume).sqrt();
+    let nyquist = |mode: u8| {
+        let projection = (0..mesh.num_cells())
+            .map(|cell| {
+                let i = (mesh.cell_cx[cell] / h - 0.5).round() as i64;
+                let j = (mesh.cell_cy[cell] / h - 0.5).round() as i64;
+                let parity = match mode {
+                    0 => i,
+                    1 => j,
+                    _ => i + j,
+                };
+                let sign = if parity & 1 == 0 { 1.0 } else { -1.0 };
+                mesh.cell_vol[cell] * (p[cell] - mean) * sign
+            })
+            .sum::<f64>()
+            / total_volume;
+        projection.abs() / rms.max(1.0e-300)
+    };
+
+    (
+        bracket_fraction,
+        gradient_visibility,
+        jump_defect,
+        nyquist(0),
+        nyquist(1),
+        nyquist(2),
+    )
+}
+
+fn unstructured_velocity_stripe_fraction(
+    mesh: &Mesh,
+    velocity: &[(f64, f64)],
+    nominal_h: f64,
+) -> f64 {
+    if velocity.len() != mesh.num_cells() {
+        return f64::NAN;
+    }
+    let h = nominal_h.abs().max(1.0e-14);
+    let min_i = mesh
+        .cell_cx
+        .iter()
+        .map(|&x| (x / h - 0.5).round() as i64)
+        .min()
+        .unwrap_or(0);
+    let max_i = mesh
+        .cell_cx
+        .iter()
+        .map(|&x| (x / h - 0.5).round() as i64)
+        .max()
+        .unwrap_or(min_i);
+    let n = (max_i - min_i + 1).max(0) as usize;
+    let mut sum = vec![0.0; n];
+    let mut weight = vec![0.0; n];
+    for cell in 0..mesh.num_cells() {
+        let i = ((mesh.cell_cx[cell] / h - 0.5).round() as i64 - min_i) as usize;
+        sum[i] += mesh.cell_vol[cell] * velocity[cell].0;
+        weight[i] += mesh.cell_vol[cell];
+    }
+    let columns: Vec<f64> = sum
+        .iter()
+        .zip(&weight)
+        .map(|(&value, &volume)| value / volume.max(1.0e-300))
+        .collect();
+    if columns.len() < 19 {
+        return 0.0;
+    }
+    let radius = 8usize;
+    let mut residual_energy = 0.0;
+    let mut samples = 0usize;
+    for i in radius..columns.len() - radius {
+        let smooth = columns[i - radius..=i + radius].iter().sum::<f64>() / (2 * radius + 1) as f64;
+        residual_energy += (columns[i] - smooth).powi(2);
+        samples += 1;
+    }
+    let amplitude = columns.iter().map(|value| value.abs()).fold(0.0, f64::max);
+    (residual_energy / samples.max(1) as f64).sqrt() / amplitude.max(1.0e-300)
+}
+
+/// Headless static-GUI hook. `geometry` is `backstep`, `obstacle`, or
+/// `nozzle`; `mesh_kind` is `cutcell`, `delaunay`, `voronoi`, `cvt`, or
+/// `fitted` (the last is nozzle-only).
+#[doc(hidden)]
+pub fn unstructured_allmach_rk4_smoke(
+    geometry: &str,
+    mesh_kind: &str,
+    gpu: bool,
+    cell_size: f64,
+    steps: usize,
+    params: RuntimeParams,
+) -> Result<UnstructuredAllmachRk4Smoke, String> {
+    unstructured_allmach_rk4_smoke_impl(geometry, mesh_kind, gpu, cell_size, steps, None, params)
+}
+
+/// Exact [`unstructured_allmach_rk4_smoke`] path, stopped at the first
+/// adaptive step ending at or beyond `target_time`. `max_steps` is a guard
+/// against a controller regression that otherwise makes a test march forever.
+#[doc(hidden)]
+pub fn unstructured_allmach_rk4_smoke_to_time(
+    geometry: &str,
+    mesh_kind: &str,
+    gpu: bool,
+    cell_size: f64,
+    target_time: f64,
+    max_steps: usize,
+    params: RuntimeParams,
+) -> Result<UnstructuredAllmachRk4Smoke, String> {
+    if !target_time.is_finite() || target_time <= 0.0 {
+        return Err(format!(
+            "unstructured all-Mach RK4 smoke target time must be finite and positive, got {target_time}"
+        ));
+    }
+    unstructured_allmach_rk4_smoke_impl(
+        geometry,
+        mesh_kind,
+        gpu,
+        cell_size,
+        max_steps,
+        Some(target_time),
+        params,
+    )
+}
+
+fn unstructured_allmach_rk4_smoke_impl(
+    geometry: &str,
+    mesh_kind: &str,
+    gpu: bool,
+    cell_size: f64,
+    max_steps: usize,
+    target_time: Option<f64>,
+    mut params: RuntimeParams,
+) -> Result<UnstructuredAllmachRk4Smoke, String> {
+    let geometry = match geometry {
+        "backstep" => GeometryType::BackwardsStep,
+        "obstacle" => GeometryType::ChannelObstacle,
+        "nozzle" => GeometryType::Nozzle,
+        other => return Err(format!("unknown GUI smoke geometry '{other}'")),
+    };
+    let mesh_kind = match mesh_kind {
+        "cutcell" => MeshType::CutCell,
+        "delaunay" => MeshType::Delaunay,
+        "voronoi" => MeshType::Voronoi,
+        "cvt" => MeshType::VoronoiCvt,
+        "fitted" if geometry == GeometryType::Nozzle => MeshType::Fitted,
+        "fitted" => return Err("the fitted mesh is nozzle-only".into()),
+        other => return Err(format!("unknown GUI smoke mesh '{other}'")),
+    };
+    params.time_scheme = GpuTimeScheme::RK4;
+    params.adaptive_dt = true;
+    if !(params.compressibility_psi > 0.0) {
+        return Err("unstructured all-Mach RK4 smoke requires positive compressibility".into());
+    }
+
+    let mut trace = Vec::new();
+    let mesh = CFDApp::build_mesh_with(geometry, mesh_kind, cell_size, cell_size, 1.2, &mut trace);
+    let initial_u =
+        CFDApp::build_initial_velocity_with(&mesh, geometry, cell_size, params.inlet_velocity);
+    let initial_p = vec![0.0; mesh.num_cells()];
+    let model = allmach_thermal_model()?;
+    let mut build = if gpu {
+        let context = pollster::block_on(crate::solver::gpu::context::GpuContext::new(None, None))?;
+        pollster::block_on(SolverDriver::build(
+            &mesh,
+            model,
+            &params,
+            &initial_u,
+            &initial_p,
+            Some(context.device),
+            Some(context.queue),
+        ))?
+    } else {
+        pollster::block_on(SolverDriver::build_forced_cpu_transpiled(
+            &mesh, model, &params, &initial_u, &initial_p,
+        ))?
+    };
+    build.driver.apply_params(&params);
+
+    let mut smoke = UnstructuredAllmachRk4Smoke {
+        cells: mesh.num_cells(),
+        steps: 0,
+        final_time: 0.0,
+        min_dt: f64::INFINITY,
+        max_dt: 0.0,
+        max_vel: 0.0,
+        min_rho: f64::INFINITY,
+        max_rho: f64::NEG_INFINITY,
+        rhie_chow_bracket_fraction: f64::NAN,
+        pressure_gradient_visibility: f64::NAN,
+        pressure_jump_defect: f64::NAN,
+        pressure_nyquist_x: f64::NAN,
+        pressure_nyquist_y: f64::NAN,
+        pressure_nyquist_xy: f64::NAN,
+        velocity_stripe_fraction: f64::NAN,
+    };
+    for step in 0..max_steps {
+        if target_time.is_some_and(|target| build.driver.solver().time() as f64 >= target) {
+            break;
+        }
+        let outcome = build.driver.step(true);
+        if let Some(reason) = outcome.diverged {
+            return Err(format!(
+                "unstructured {geometry:?}/{mesh_kind:?} RK4 step {step}: {reason:?}"
+            ));
+        }
+        smoke.steps += 1;
+        smoke.min_dt = smoke.min_dt.min(outcome.dt as f64);
+        smoke.max_dt = smoke.max_dt.max(outcome.dt as f64);
+        if let Some(readback) = outcome.readback {
+            smoke.max_vel = smoke.max_vel.max(readback.stats.max_vel);
+            if let Some((lo, hi)) = readback.stats.rho {
+                smoke.min_rho = smoke.min_rho.min(lo);
+                smoke.max_rho = smoke.max_rho.max(hi);
+            }
+        }
+    }
+    smoke.final_time = build.driver.solver().time() as f64;
+    if let Some(target) = target_time {
+        if smoke.final_time < target {
+            return Err(format!(
+                "unstructured {geometry:?}/{mesh_kind:?} RK4 reached t={:.6e}, below target t={target:.6e}, after {max_steps} steps",
+                smoke.final_time
+            ));
+        }
+    }
+    let p = pollster::block_on(build.driver.solver().get_field_scalar("p"))?;
+    let temperature = pollster::block_on(build.driver.solver().get_field_scalar("T"))?;
+    let dt_local = pollster::block_on(build.driver.solver().get_field_scalar("dt_local"))?;
+    let penalty = pollster::block_on(build.driver.solver().get_field_scalar("ibm_penalty_U")).ok();
+    let psi0 = (params.compressibility_psi as f64).max(0.0);
+    let t_ref = crate::solver::model::ALLMACH_T_REF;
+    let mut density = Vec::with_capacity(mesh.num_cells());
+    let mut d_p = Vec::with_capacity(mesh.num_cells());
+    for cell in 0..mesh.num_cells() {
+        let numerator = params.density as f64 * t_ref
+            + crate::solver::model::ALLMACH_GAMMA * psi0 * t_ref * p[cell];
+        let rho = (numerator / temperature[cell]).max(psi0 * 1.0e-5);
+        let dp0 = dt_local[cell].max(0.0) / rho.max(1.0e-30);
+        let cell_penalty = penalty.as_ref().map_or(0.0, |values| values[cell].abs());
+        density.push(rho);
+        d_p.push(dp0 / (1.0 + cell_penalty * dp0));
+    }
+    let velocity = pollster::block_on(build.driver.solver().get_field_vec2("U"))?;
+    let (bracket, gradient_visibility, jump_defect, nyquist_x, nyquist_y, nyquist_xy) =
+        unstructured_rhie_chow_diagnostics(
+            &mesh,
+            &p,
+            &density,
+            &d_p,
+            penalty.as_deref(),
+            &params,
+            cell_size,
+        );
+    smoke.rhie_chow_bracket_fraction = bracket;
+    smoke.pressure_gradient_visibility = gradient_visibility;
+    smoke.pressure_jump_defect = jump_defect;
+    smoke.pressure_nyquist_x = nyquist_x;
+    smoke.pressure_nyquist_y = nyquist_y;
+    smoke.pressure_nyquist_xy = nyquist_xy;
+    smoke.velocity_stripe_fraction =
+        unstructured_velocity_stripe_fraction(&mesh, &velocity, cell_size);
+    Ok(smoke)
+}
+
+/// Headless observations from the exact structured GUI seeding, boundary,
+/// adaptive-controller, and step path.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy)]
+pub struct StructuredAllmachRk4Smoke {
+    pub steps: usize,
+    pub min_dt: f64,
+    pub max_dt: f64,
+    pub max_vel: f64,
+    pub min_rho: f64,
+    pub max_rho: f64,
+}
+
+/// Headless test hook for the structured all-Mach GUI path. `geometry` is one
+/// of `backstep`, `obstacle`, or `nozzle`; `gpu=false` selects the transpiled
+/// CPU backend and `gpu=true` selects the structured GPU backend.
+#[doc(hidden)]
+pub fn structured_allmach_rk4_smoke(
+    geometry: &str,
+    gpu: bool,
+    nx: usize,
+    ny: usize,
+    steps: usize,
+    params: RuntimeParams,
+) -> Result<StructuredAllmachRk4Smoke, String> {
+    structured_allmach_rk4_smoke_impl(geometry, gpu, nx, ny, steps, params, None)
+}
+
+/// Same exact structured GUI path, with a live parameter update applied halfway
+/// through the run. Used to gate the worker's live fluid/CFL/BC refresh seam.
+#[doc(hidden)]
+pub fn structured_allmach_rk4_live_update_smoke(
+    geometry: &str,
+    gpu: bool,
+    nx: usize,
+    ny: usize,
+    steps: usize,
+    params: RuntimeParams,
+    updated: RuntimeParams,
+) -> Result<StructuredAllmachRk4Smoke, String> {
+    structured_allmach_rk4_smoke_impl(geometry, gpu, nx, ny, steps, params, Some(updated))
+}
+
+fn structured_allmach_rk4_smoke_impl(
+    geometry: &str,
+    gpu: bool,
+    nx: usize,
+    ny: usize,
+    steps: usize,
+    mut params: RuntimeParams,
+    mut live_update: Option<RuntimeParams>,
+) -> Result<StructuredAllmachRk4Smoke, String> {
+    let geometry = match geometry {
+        "backstep" => GeometryType::BackwardsStep,
+        "obstacle" => GeometryType::ChannelObstacle,
+        "nozzle" => GeometryType::Nozzle,
+        other => return Err(format!("unknown structured smoke geometry '{other}'")),
+    };
+    params.time_scheme = GpuTimeScheme::RK4;
+    params.adaptive_dt = true;
+    if let Some(updated) = &mut live_update {
+        updated.time_scheme = GpuTimeScheme::RK4;
+        updated.adaptive_dt = true;
+    }
+    if !(params.compressibility_psi > 0.0) {
+        return Err("structured all-Mach RK4 smoke requires positive compressibility".into());
+    }
+    let (lx, ly) = (3.0, 1.0);
+    let model = crate::solver::model::allmach_thermal_structured_model()?;
+    let unknowns = model.system.unknowns_per_cell() as usize;
+
+    fn drive(
+        solver: &mut (impl StructuredSteppable + StructuredSeed),
+        geometry: GeometryType,
+        nx: usize,
+        ny: usize,
+        lx: f64,
+        ly: f64,
+        unknowns: usize,
+        steps: usize,
+        params: &RuntimeParams,
+        live_update: Option<&RuntimeParams>,
+    ) -> Result<StructuredAllmachRk4Smoke, String> {
+        seed_structured_state(
+            solver,
+            "allmach_thermal_structured",
+            params,
+            lx / nx.max(1) as f64,
+            ly / ny.max(1) as f64,
+        );
+        seed_structured_freestream(
+            solver,
+            "allmach_thermal_structured",
+            params.inlet_velocity as f64,
+            params,
+        );
+        seed_structured_ibm(solver, geometry, lx, ly);
+        setup_structured_bcs(
+            solver,
+            "allmach_thermal_structured",
+            params.inlet_velocity as f64,
+            unknowns,
+            params,
+        );
+
+        let mut active_params = *params;
+        let mut prev_max_vel = 0.0;
+        let mut smoke = StructuredAllmachRk4Smoke {
+            steps: 0,
+            min_dt: f64::INFINITY,
+            max_dt: 0.0,
+            max_vel: 0.0,
+            min_rho: f64::INFINITY,
+            max_rho: f64::NEG_INFINITY,
+        };
+        for step in 0..steps {
+            if step == steps / 2 {
+                if let Some(updated) = live_update {
+                    active_params = *updated;
+                    solver
+                        .st_set_fluid(active_params.density as f64, active_params.viscosity as f64);
+                    solver.st_set_alpha_u(active_params.alpha_u);
+                    solver.st_set_alpha_p(active_params.alpha_p);
+                    refresh_structured_allmach_runtime_fields(
+                        solver,
+                        &active_params,
+                        lx / nx.max(1) as f64,
+                        ly / ny.max(1) as f64,
+                    );
+                    setup_structured_bcs(
+                        solver,
+                        "allmach_thermal_structured",
+                        active_params.inlet_velocity as f64,
+                        unknowns,
+                        &active_params,
+                    );
+                }
+            }
+            let outcome = structured_step(
+                solver,
+                &active_params,
+                &mut prev_max_vel,
+                "allmach_thermal_structured",
+                true,
+            );
+            if let Some(reason) = outcome.diverged {
+                return Err(format!(
+                    "structured {geometry:?} RK4 step {step}: {reason:?}"
+                ));
+            }
+            smoke.steps += 1;
+            smoke.min_dt = smoke.min_dt.min(outcome.dt as f64);
+            smoke.max_dt = smoke.max_dt.max(outcome.dt as f64);
+            if let Some(readback) = outcome.readback {
+                smoke.max_vel = smoke.max_vel.max(readback.stats.max_vel);
+                if let Some((lo, hi)) = readback.stats.rho {
+                    smoke.min_rho = smoke.min_rho.min(lo);
+                    smoke.max_rho = smoke.max_rho.max(hi);
+                }
+            }
+        }
+        Ok(smoke)
+    }
+
+    if gpu {
+        let context = pollster::block_on(crate::solver::gpu::context::GpuContext::new(None, None))?;
+        let mut solver = StructuredGpuSolver::with_config(
+            context,
+            StructuredGrid::new(nx, ny, lx, ly),
+            &model,
+            params.requested_dt.max(1.0e-12) as f64,
+            1,
+            params.advection_scheme,
+            GpuTimeScheme::RK4,
+        )?;
+        solver.set_fluid(params.density as f64, params.viscosity as f64);
+        solver.set_alpha_u(params.alpha_u);
+        solver.set_alpha_p(params.alpha_p);
+        drive(
+            &mut solver,
+            geometry,
+            nx,
+            ny,
+            lx,
+            ly,
+            unknowns,
+            steps,
+            &params,
+            live_update.as_ref(),
+        )
+    } else {
+        let mut solver = StructuredModelSolver::with_config(
+            StructuredGrid::new(nx, ny, lx, ly),
+            &model,
+            params.requested_dt.max(1.0e-12) as f64,
+            1,
+            params.advection_scheme,
+            GpuTimeScheme::RK4,
+        )?;
+        solver.set_engine(crate::solver::cpu::CpuEngine::Transpiled, 1);
+        solver.set_fluid(params.density as f64, params.viscosity as f64);
+        solver.set_alpha_u(params.alpha_u);
+        solver.set_alpha_p(params.alpha_p);
+        drive(
+            &mut solver,
+            geometry,
+            nx,
+            ny,
+            lx,
+            ly,
+            unknowns,
+            steps,
+            &params,
+            live_update.as_ref(),
+        )
     }
 }
 
@@ -5841,8 +7084,8 @@ fn solver_worker_main(
 
     let mut running = false;
     let mut step_idx: u64 = 0;
-    /// Adaptive-dt velocity scale for the structured path (mirrors
-    /// `SolverDriver::prev_max_vel`). Updated from structured field readbacks.
+    // Adaptive-dt velocity scale for the structured path (mirrors
+    // `SolverDriver::prev_max_vel`). Updated from structured field readbacks.
     let mut structured_prev_max_vel: f64 = 0.0;
     let mut last_stats_publish = std::time::Instant::now();
     let mut last_snapshot_publish = std::time::Instant::now();

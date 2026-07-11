@@ -19,6 +19,8 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
+    inlet_velocity: f32,
+    inlet_ramp_time: f32,
     eos_gamma: f32,
     eos_gm1: f32,
     eos_r: f32,
@@ -40,6 +42,7 @@ struct Constants {
 @group(0) @binding(11) var<storage, read> diagonal_indices: array<u32>;
 @group(0) @binding(12) var<storage, read> face_boundary: array<u32>;
 @group(0) @binding(13) var<storage, read> face_centers: array<Vector2>;
+@group(0) @binding(14) var<storage, read> face_wrap_shift: array<Vector2>;
 @group(1) @binding(0) var<storage, read_write> state: array<f32>;
 @group(1) @binding(1) var<storage, read> state_old: array<f32>;
 @group(1) @binding(2) var<storage, read> state_old_old: array<f32>;
@@ -93,47 +96,47 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     }
     let face_metric_scale = max(1.0, perimeter_sum * perimeter_sum / max(16.0 * vol, 0.000000000001));
     let dual_time_scale = global_dual_time_scale * face_metric_scale;
-    diag_0 += vol * state[idx * 12u + 11u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0);
-    rhs_0 += vol * state[idx * 12u + 11u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0) * state_old[idx * 12u + 0u];
+    diag_0 += vol * state[idx * 14u + 11u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0);
+    rhs_0 += vol * state[idx * 14u + 11u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0) * state_old[idx * 14u + 0u];
     if (constants.time_scheme == 1u) {
         let r = constants.dt / constants.dt_old;
-        let diag_bdf2 = vol * state[idx * 12u + 11u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0) * (r * 2.0 + 1.0) / (r + 1.0);
+        let diag_bdf2 = vol * state[idx * 14u + 11u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0) * (r * 2.0 + 1.0) / (r + 1.0);
         let factor_n = r + 1.0;
         let factor_nm1 = r * r / (r + 1.0);
-        diag_0 = diag_0 - vol * state[idx * 12u + 11u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0) + diag_bdf2;
-        rhs_0 = rhs_0 - vol * state[idx * 12u + 11u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0) * state_old[idx * 12u + 0u] + vol * state[idx * 12u + 11u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0) * (factor_n * state_old[idx * 12u + 0u] - factor_nm1 * state_old_old[idx * 12u + 0u]);
+        diag_0 = diag_0 - vol * state[idx * 14u + 11u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0) + diag_bdf2;
+        rhs_0 = rhs_0 - vol * state[idx * 14u + 11u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0) * state_old[idx * 14u + 0u] + vol * state[idx * 14u + 11u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0) * (factor_n * state_old[idx * 14u + 0u] - factor_nm1 * state_old_old[idx * 14u + 0u]);
     }
     if (constants.dtau > 0.0) {
-        diag_0 += state[idx * 12u + 11u] * dual_time_scale;
-        rhs_0 += state[idx * 12u + 11u] * dual_time_scale * state_iter[idx * 12u + 0u];
+        diag_0 += state[idx * 14u + 11u] * dual_time_scale;
+        rhs_0 += state[idx * 14u + 11u] * dual_time_scale * state_iter[idx * 14u + 0u];
     }
-    diag_1 += vol * state[idx * 12u + 11u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0);
-    rhs_1 += vol * state[idx * 12u + 11u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0) * state_old[idx * 12u + 1u];
+    diag_1 += vol * state[idx * 14u + 11u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0);
+    rhs_1 += vol * state[idx * 14u + 11u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0) * state_old[idx * 14u + 1u];
     if (constants.time_scheme == 1u) {
         let r = constants.dt / constants.dt_old;
-        let diag_bdf2 = vol * state[idx * 12u + 11u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0) * (r * 2.0 + 1.0) / (r + 1.0);
+        let diag_bdf2 = vol * state[idx * 14u + 11u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0) * (r * 2.0 + 1.0) / (r + 1.0);
         let factor_n = r + 1.0;
         let factor_nm1 = r * r / (r + 1.0);
-        diag_1 = diag_1 - vol * state[idx * 12u + 11u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0) + diag_bdf2;
-        rhs_1 = rhs_1 - vol * state[idx * 12u + 11u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0) * state_old[idx * 12u + 1u] + vol * state[idx * 12u + 11u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0) * (factor_n * state_old[idx * 12u + 1u] - factor_nm1 * state_old_old[idx * 12u + 1u]);
+        diag_1 = diag_1 - vol * state[idx * 14u + 11u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0) + diag_bdf2;
+        rhs_1 = rhs_1 - vol * state[idx * 14u + 11u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0) * state_old[idx * 14u + 1u] + vol * state[idx * 14u + 11u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0) * (factor_n * state_old[idx * 14u + 1u] - factor_nm1 * state_old_old[idx * 14u + 1u]);
     }
     if (constants.dtau > 0.0) {
-        diag_1 += state[idx * 12u + 11u] * dual_time_scale;
-        rhs_1 += state[idx * 12u + 11u] * dual_time_scale * state_iter[idx * 12u + 1u];
+        diag_1 += state[idx * 14u + 11u] * dual_time_scale;
+        rhs_1 += state[idx * 14u + 11u] * dual_time_scale * state_iter[idx * 14u + 1u];
     }
-    diag_2 += vol * state[idx * 12u + 9u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0);
-    rhs_2 += vol * state[idx * 12u + 9u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0) * state_old[idx * 12u + 2u];
+    diag_2 += vol * state[idx * 14u + 9u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0);
+    rhs_2 += vol * state[idx * 14u + 9u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0) * state_old[idx * 14u + 2u];
     if (constants.time_scheme == 1u) {
         let r = constants.dt / constants.dt_old;
-        let diag_bdf2 = vol * state[idx * 12u + 9u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0) * (r * 2.0 + 1.0) / (r + 1.0);
+        let diag_bdf2 = vol * state[idx * 14u + 9u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0) * (r * 2.0 + 1.0) / (r + 1.0);
         let factor_n = r + 1.0;
         let factor_nm1 = r * r / (r + 1.0);
-        diag_2 = diag_2 - vol * state[idx * 12u + 9u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0) + diag_bdf2;
-        rhs_2 = rhs_2 - vol * state[idx * 12u + 9u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0) * state_old[idx * 12u + 2u] + vol * state[idx * 12u + 9u] / select(constants.dt, state[idx * 12u + 10u], state[idx * 12u + 10u] > 0.0) * (factor_n * state_old[idx * 12u + 2u] - factor_nm1 * state_old_old[idx * 12u + 2u]);
+        diag_2 = diag_2 - vol * state[idx * 14u + 9u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0) + diag_bdf2;
+        rhs_2 = rhs_2 - vol * state[idx * 14u + 9u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0) * state_old[idx * 14u + 2u] + vol * state[idx * 14u + 9u] / select(constants.dt, state[idx * 14u + 10u], state[idx * 14u + 10u] > 0.0) * (factor_n * state_old[idx * 14u + 2u] - factor_nm1 * state_old_old[idx * 14u + 2u]);
     }
     if (constants.dtau > 0.0) {
-        diag_2 += state[idx * 12u + 9u] * dual_time_scale;
-        rhs_2 += state[idx * 12u + 9u] * dual_time_scale * state_iter[idx * 12u + 2u];
+        diag_2 += state[idx * 14u + 9u] * dual_time_scale;
+        rhs_2 += state[idx * 14u + 9u] * dual_time_scale * state_iter[idx * 14u + 2u];
     }
     var bounded_sum_phi_0: f32 = 0.0;
     var bounded_sum_phi_1: f32 = 0.0;
@@ -148,9 +151,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         var is_boundary: bool = false;
         var other_idx: u32 = idx;
         var other_center: Vector2;
+        let wrap_shift = face_wrap_shift[face_idx];
+        var center_frame: Vector2 = center;
         if (owner != idx) {
             normal.x = -normal.x;
             normal.y = -normal.y;
+            center_frame.x += wrap_shift.x;
+            center_frame.y += wrap_shift.y;
         }
         if (neighbor_raw != -1) {
             let neighbor = u32(neighbor_raw);
@@ -159,20 +166,24 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 other_idx = owner;
             }
             other_center = cell_centers[other_idx];
+            if (owner == idx) {
+                other_center.x += wrap_shift.x;
+                other_center.y += wrap_shift.y;
+            }
         } else {
             is_boundary = true;
             other_idx = idx;
             other_center = f_center;
         }
-        let dx = other_center.x - center.x;
-        let dy = other_center.y - center.y;
+        let dx = other_center.x - center_frame.x;
+        let dy = other_center.y - center_frame.y;
         let dist_proj = abs(dx * normal.x + dy * normal.y);
         let dist_euc = sqrt(dx * dx + dy * dy);
         var dist: f32 = max(dist_euc, 0.000001);
         if (dist_proj > 0.000001) {
             dist = dist_proj;
         }
-        let lam_d_own = abs((f_center.x - center.x) * normal.x + (f_center.y - center.y) * normal.y);
+        let lam_d_own = abs((f_center.x - center_frame.x) * normal.x + (f_center.y - center_frame.y) * normal.y);
         let lam_d_neigh = abs((other_center.x - f_center.x) * normal.x + (other_center.y - f_center.y) * normal.y);
         let lam_total = lam_d_own + lam_d_neigh;
         var lambda_f: f32 = 0.5;
@@ -188,7 +199,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else {
             if (boundary_type == 4u) {
                 diag_0 += diff_coeff_U;
-                rhs_0 += diff_coeff_U * (state[idx * 12u + 0u] - (state[idx * 12u + 0u] * normal.x + state[idx * 12u + 1u] * normal.y) * normal.x);
+                rhs_0 += diff_coeff_U * (state[idx * 14u + 0u] - (state[idx * 14u + 0u] * normal.x + state[idx * 14u + 1u] * normal.y) * normal.x);
             } else {
                 if (bc_kind[face_idx * 3u + 0u] == 1u) {
                     diag_0 += diff_coeff_U;
@@ -206,7 +217,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         } else {
             if (boundary_type == 4u) {
                 diag_1 += diff_coeff_U;
-                rhs_1 += diff_coeff_U * (state[idx * 12u + 1u] - (state[idx * 12u + 0u] * normal.x + state[idx * 12u + 1u] * normal.y) * normal.y);
+                rhs_1 += diff_coeff_U * (state[idx * 14u + 1u] - (state[idx * 14u + 0u] * normal.x + state[idx * 14u + 1u] * normal.y) * normal.y);
             } else {
                 if (bc_kind[face_idx * 3u + 1u] == 1u) {
                     diag_1 += diff_coeff_U;
@@ -218,8 +229,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        let dev2_U_U_gx = (vec2<f32>(grad_state[idx * 12u + 0u].x, grad_state[idx * 12u + 0u].y) + vec2<f32>(grad_state[other_idx * 12u + 0u].x, grad_state[other_idx * 12u + 0u].y)) * 0.5;
-        let dev2_U_U_gy = (vec2<f32>(grad_state[idx * 12u + 1u].x, grad_state[idx * 12u + 1u].y) + vec2<f32>(grad_state[other_idx * 12u + 1u].x, grad_state[other_idx * 12u + 1u].y)) * 0.5;
+        let dev2_U_U_gx = (vec2<f32>(grad_state[idx * 14u + 0u].x, grad_state[idx * 14u + 0u].y) + vec2<f32>(grad_state[other_idx * 14u + 0u].x, grad_state[other_idx * 14u + 0u].y)) * 0.5;
+        let dev2_U_U_gy = (vec2<f32>(grad_state[idx * 14u + 1u].x, grad_state[idx * 14u + 1u].y) + vec2<f32>(grad_state[other_idx * 14u + 1u].x, grad_state[other_idx * 14u + 1u].y)) * 0.5;
         let dev2_U_U_div = dev2_U_U_gx.x + dev2_U_U_gy.y;
         let dev2_U_U_mu = select(constants.viscosity, constants.viscosity * lambda_f + constants.viscosity * (1.0 - lambda_f), !is_boundary);
         rhs_0 += dev2_U_U_mu * area * (normal.x * dev2_U_U_gx.x + normal.y * dev2_U_U_gy.x - 0.6666667 * dev2_U_U_div * normal.x);
@@ -230,24 +241,24 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         bounded_sum_phi_0 += phi_0;
         if (!is_boundary) {
-            var rec_0_phi_ho = select(state[idx * 12u + 0u], state[other_idx * 12u + 0u], phi_0 < 0.0);
+            var rec_0_phi_ho = select(state[idx * 14u + 0u], state[other_idx * 14u + 0u], phi_0 < 0.0);
             if (constants.scheme == 1u) {
-                rec_0_phi_ho = select(state[other_idx * 12u + 0u] + dot(vec2<f32>(grad_state[other_idx * 12u + 0u].x, grad_state[other_idx * 12u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), state[idx * 12u + 0u] + dot(vec2<f32>(grad_state[idx * 12u + 0u].x, grad_state[idx * 12u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), phi_0 > 0.0);
+                rec_0_phi_ho = select(state[other_idx * 14u + 0u] + dot(vec2<f32>(grad_state[other_idx * 14u + 0u].x, grad_state[other_idx * 14u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), state[idx * 14u + 0u] + dot(vec2<f32>(grad_state[idx * 14u + 0u].x, grad_state[idx * 14u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), phi_0 > 0.0);
             } else {
                 if (constants.scheme == 2u) {
-                    rec_0_phi_ho = select(state[other_idx * 12u + 0u] + state[other_idx * 12u + 0u] * 0.625 + state[idx * 12u + 0u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 12u + 0u].x, grad_state[other_idx * 12u + 0u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 12u + 0u], state[idx * 12u + 0u] + state[idx * 12u + 0u] * 0.625 + state[other_idx * 12u + 0u] * 0.375 + dot(vec2<f32>(grad_state[idx * 12u + 0u].x, grad_state[idx * 12u + 0u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 12u + 0u], phi_0 > 0.0);
+                    rec_0_phi_ho = select(state[other_idx * 14u + 0u] + state[other_idx * 14u + 0u] * 0.625 + state[idx * 14u + 0u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 14u + 0u].x, grad_state[other_idx * 14u + 0u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 14u + 0u], state[idx * 14u + 0u] + state[idx * 14u + 0u] * 0.625 + state[other_idx * 14u + 0u] * 0.375 + dot(vec2<f32>(grad_state[idx * 14u + 0u].x, grad_state[idx * 14u + 0u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 14u + 0u], phi_0 > 0.0);
                 } else {
                     if (constants.scheme == 3u) {
-                        rec_0_phi_ho = select(state[other_idx * 12u + 0u] + min(max(dot(vec2<f32>(grad_state[other_idx * 12u + 0u].x, grad_state[other_idx * 12u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), min(state[idx * 12u + 0u] - state[other_idx * 12u + 0u], 0.0)), max(state[idx * 12u + 0u] - state[other_idx * 12u + 0u], 0.0)), state[idx * 12u + 0u] + min(max(dot(vec2<f32>(grad_state[idx * 12u + 0u].x, grad_state[idx * 12u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), min(state[other_idx * 12u + 0u] - state[idx * 12u + 0u], 0.0)), max(state[other_idx * 12u + 0u] - state[idx * 12u + 0u], 0.0)), phi_0 > 0.0);
+                        rec_0_phi_ho = select(state[other_idx * 14u + 0u] + min(max(dot(vec2<f32>(grad_state[other_idx * 14u + 0u].x, grad_state[other_idx * 14u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), min(state[idx * 14u + 0u] - state[other_idx * 14u + 0u], 0.0)), max(state[idx * 14u + 0u] - state[other_idx * 14u + 0u], 0.0)), state[idx * 14u + 0u] + min(max(dot(vec2<f32>(grad_state[idx * 14u + 0u].x, grad_state[idx * 14u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), min(state[other_idx * 14u + 0u] - state[idx * 14u + 0u], 0.0)), max(state[other_idx * 14u + 0u] - state[idx * 14u + 0u], 0.0)), phi_0 > 0.0);
                     } else {
                         if (constants.scheme == 4u) {
-                            rec_0_phi_ho = select(state[other_idx * 12u + 0u] + dot(vec2<f32>(grad_state[other_idx * 12u + 0u].x, grad_state[other_idx * 12u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)) * abs(state[idx * 12u + 0u] - state[other_idx * 12u + 0u]) / max(abs(state[idx * 12u + 0u] - state[other_idx * 12u + 0u]), abs(dot(vec2<f32>(grad_state[other_idx * 12u + 0u].x, grad_state[other_idx * 12u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))) + 0.00000001) * max((state[idx * 12u + 0u] - state[other_idx * 12u + 0u]) * dot(vec2<f32>(grad_state[other_idx * 12u + 0u].x, grad_state[other_idx * 12u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), 0.0) / max(abs((state[idx * 12u + 0u] - state[other_idx * 12u + 0u]) * dot(vec2<f32>(grad_state[other_idx * 12u + 0u].x, grad_state[other_idx * 12u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))), 0.00000001), state[idx * 12u + 0u] + dot(vec2<f32>(grad_state[idx * 12u + 0u].x, grad_state[idx * 12u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)) * abs(state[other_idx * 12u + 0u] - state[idx * 12u + 0u]) / max(abs(state[other_idx * 12u + 0u] - state[idx * 12u + 0u]), abs(dot(vec2<f32>(grad_state[idx * 12u + 0u].x, grad_state[idx * 12u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))) + 0.00000001) * max((state[other_idx * 12u + 0u] - state[idx * 12u + 0u]) * dot(vec2<f32>(grad_state[idx * 12u + 0u].x, grad_state[idx * 12u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), 0.0) / max(abs((state[other_idx * 12u + 0u] - state[idx * 12u + 0u]) * dot(vec2<f32>(grad_state[idx * 12u + 0u].x, grad_state[idx * 12u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))), 0.00000001), phi_0 > 0.0);
+                            rec_0_phi_ho = select(state[other_idx * 14u + 0u] + dot(vec2<f32>(grad_state[other_idx * 14u + 0u].x, grad_state[other_idx * 14u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)) * abs(state[idx * 14u + 0u] - state[other_idx * 14u + 0u]) / max(abs(state[idx * 14u + 0u] - state[other_idx * 14u + 0u]), abs(dot(vec2<f32>(grad_state[other_idx * 14u + 0u].x, grad_state[other_idx * 14u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))) + 0.00000001) * max((state[idx * 14u + 0u] - state[other_idx * 14u + 0u]) * dot(vec2<f32>(grad_state[other_idx * 14u + 0u].x, grad_state[other_idx * 14u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), 0.0) / max(abs((state[idx * 14u + 0u] - state[other_idx * 14u + 0u]) * dot(vec2<f32>(grad_state[other_idx * 14u + 0u].x, grad_state[other_idx * 14u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))), 0.00000001), state[idx * 14u + 0u] + dot(vec2<f32>(grad_state[idx * 14u + 0u].x, grad_state[idx * 14u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)) * abs(state[other_idx * 14u + 0u] - state[idx * 14u + 0u]) / max(abs(state[other_idx * 14u + 0u] - state[idx * 14u + 0u]), abs(dot(vec2<f32>(grad_state[idx * 14u + 0u].x, grad_state[idx * 14u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))) + 0.00000001) * max((state[other_idx * 14u + 0u] - state[idx * 14u + 0u]) * dot(vec2<f32>(grad_state[idx * 14u + 0u].x, grad_state[idx * 14u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), 0.0) / max(abs((state[other_idx * 14u + 0u] - state[idx * 14u + 0u]) * dot(vec2<f32>(grad_state[idx * 14u + 0u].x, grad_state[idx * 14u + 0u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))), 0.00000001), phi_0 > 0.0);
                         } else {
                             if (constants.scheme == 5u) {
-                                rec_0_phi_ho = select(state[other_idx * 12u + 0u] + min(max(state[other_idx * 12u + 0u] * 0.625 + state[idx * 12u + 0u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 12u + 0u].x, grad_state[other_idx * 12u + 0u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 12u + 0u], min(state[idx * 12u + 0u] - state[other_idx * 12u + 0u], 0.0)), max(state[idx * 12u + 0u] - state[other_idx * 12u + 0u], 0.0)), state[idx * 12u + 0u] + min(max(state[idx * 12u + 0u] * 0.625 + state[other_idx * 12u + 0u] * 0.375 + dot(vec2<f32>(grad_state[idx * 12u + 0u].x, grad_state[idx * 12u + 0u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 12u + 0u], min(state[other_idx * 12u + 0u] - state[idx * 12u + 0u], 0.0)), max(state[other_idx * 12u + 0u] - state[idx * 12u + 0u], 0.0)), phi_0 > 0.0);
+                                rec_0_phi_ho = select(state[other_idx * 14u + 0u] + min(max(state[other_idx * 14u + 0u] * 0.625 + state[idx * 14u + 0u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 14u + 0u].x, grad_state[other_idx * 14u + 0u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 14u + 0u], min(state[idx * 14u + 0u] - state[other_idx * 14u + 0u], 0.0)), max(state[idx * 14u + 0u] - state[other_idx * 14u + 0u], 0.0)), state[idx * 14u + 0u] + min(max(state[idx * 14u + 0u] * 0.625 + state[other_idx * 14u + 0u] * 0.375 + dot(vec2<f32>(grad_state[idx * 14u + 0u].x, grad_state[idx * 14u + 0u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 14u + 0u], min(state[other_idx * 14u + 0u] - state[idx * 14u + 0u], 0.0)), max(state[other_idx * 14u + 0u] - state[idx * 14u + 0u], 0.0)), phi_0 > 0.0);
                             } else {
                                 if (constants.scheme == 6u) {
-                                    rec_0_phi_ho = select(state[other_idx * 12u + 0u] + (state[other_idx * 12u + 0u] * 0.625 + state[idx * 12u + 0u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 12u + 0u].x, grad_state[other_idx * 12u + 0u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 12u + 0u]) * abs(state[idx * 12u + 0u] - state[other_idx * 12u + 0u]) / max(abs(state[idx * 12u + 0u] - state[other_idx * 12u + 0u]), abs(state[other_idx * 12u + 0u] * 0.625 + state[idx * 12u + 0u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 12u + 0u].x, grad_state[other_idx * 12u + 0u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 12u + 0u]) + 0.00000001) * max((state[idx * 12u + 0u] - state[other_idx * 12u + 0u]) * (state[other_idx * 12u + 0u] * 0.625 + state[idx * 12u + 0u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 12u + 0u].x, grad_state[other_idx * 12u + 0u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 12u + 0u]), 0.0) / max(abs((state[idx * 12u + 0u] - state[other_idx * 12u + 0u]) * (state[other_idx * 12u + 0u] * 0.625 + state[idx * 12u + 0u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 12u + 0u].x, grad_state[other_idx * 12u + 0u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 12u + 0u])), 0.00000001), state[idx * 12u + 0u] + (state[idx * 12u + 0u] * 0.625 + state[other_idx * 12u + 0u] * 0.375 + dot(vec2<f32>(grad_state[idx * 12u + 0u].x, grad_state[idx * 12u + 0u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 12u + 0u]) * abs(state[other_idx * 12u + 0u] - state[idx * 12u + 0u]) / max(abs(state[other_idx * 12u + 0u] - state[idx * 12u + 0u]), abs(state[idx * 12u + 0u] * 0.625 + state[other_idx * 12u + 0u] * 0.375 + dot(vec2<f32>(grad_state[idx * 12u + 0u].x, grad_state[idx * 12u + 0u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 12u + 0u]) + 0.00000001) * max((state[other_idx * 12u + 0u] - state[idx * 12u + 0u]) * (state[idx * 12u + 0u] * 0.625 + state[other_idx * 12u + 0u] * 0.375 + dot(vec2<f32>(grad_state[idx * 12u + 0u].x, grad_state[idx * 12u + 0u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 12u + 0u]), 0.0) / max(abs((state[other_idx * 12u + 0u] - state[idx * 12u + 0u]) * (state[idx * 12u + 0u] * 0.625 + state[other_idx * 12u + 0u] * 0.375 + dot(vec2<f32>(grad_state[idx * 12u + 0u].x, grad_state[idx * 12u + 0u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 12u + 0u])), 0.00000001), phi_0 > 0.0);
+                                    rec_0_phi_ho = select(state[other_idx * 14u + 0u] + (state[other_idx * 14u + 0u] * 0.625 + state[idx * 14u + 0u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 14u + 0u].x, grad_state[other_idx * 14u + 0u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 14u + 0u]) * abs(state[idx * 14u + 0u] - state[other_idx * 14u + 0u]) / max(abs(state[idx * 14u + 0u] - state[other_idx * 14u + 0u]), abs(state[other_idx * 14u + 0u] * 0.625 + state[idx * 14u + 0u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 14u + 0u].x, grad_state[other_idx * 14u + 0u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 14u + 0u]) + 0.00000001) * max((state[idx * 14u + 0u] - state[other_idx * 14u + 0u]) * (state[other_idx * 14u + 0u] * 0.625 + state[idx * 14u + 0u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 14u + 0u].x, grad_state[other_idx * 14u + 0u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 14u + 0u]), 0.0) / max(abs((state[idx * 14u + 0u] - state[other_idx * 14u + 0u]) * (state[other_idx * 14u + 0u] * 0.625 + state[idx * 14u + 0u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 14u + 0u].x, grad_state[other_idx * 14u + 0u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 14u + 0u])), 0.00000001), state[idx * 14u + 0u] + (state[idx * 14u + 0u] * 0.625 + state[other_idx * 14u + 0u] * 0.375 + dot(vec2<f32>(grad_state[idx * 14u + 0u].x, grad_state[idx * 14u + 0u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 14u + 0u]) * abs(state[other_idx * 14u + 0u] - state[idx * 14u + 0u]) / max(abs(state[other_idx * 14u + 0u] - state[idx * 14u + 0u]), abs(state[idx * 14u + 0u] * 0.625 + state[other_idx * 14u + 0u] * 0.375 + dot(vec2<f32>(grad_state[idx * 14u + 0u].x, grad_state[idx * 14u + 0u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 14u + 0u]) + 0.00000001) * max((state[other_idx * 14u + 0u] - state[idx * 14u + 0u]) * (state[idx * 14u + 0u] * 0.625 + state[other_idx * 14u + 0u] * 0.375 + dot(vec2<f32>(grad_state[idx * 14u + 0u].x, grad_state[idx * 14u + 0u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 14u + 0u]), 0.0) / max(abs((state[other_idx * 14u + 0u] - state[idx * 14u + 0u]) * (state[idx * 14u + 0u] * 0.625 + state[other_idx * 14u + 0u] * 0.375 + dot(vec2<f32>(grad_state[idx * 14u + 0u].x, grad_state[idx * 14u + 0u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 14u + 0u])), 0.00000001), phi_0 > 0.0);
                                 }
                             }
                         }
@@ -256,7 +267,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
             diag_0 += max(phi_0, 0.0);
             matrix_values[start_row_0 + neighbor_rank * 3u + 0u] += min(phi_0, 0.0);
-            rhs_0 -= phi_0 * (rec_0_phi_ho - select(state[idx * 12u + 0u], state[other_idx * 12u + 0u], phi_0 < 0.0));
+            rhs_0 -= phi_0 * (rec_0_phi_ho - select(state[idx * 14u + 0u], state[other_idx * 14u + 0u], phi_0 < 0.0));
         } else {
             if (bc_kind[face_idx * 3u + 0u] == 1u) {
                 diag_0 += max(phi_0, 0.0);
@@ -271,24 +282,24 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         bounded_sum_phi_1 += phi_1;
         if (!is_boundary) {
-            var rec_1_phi_ho = select(state[idx * 12u + 1u], state[other_idx * 12u + 1u], phi_1 < 0.0);
+            var rec_1_phi_ho = select(state[idx * 14u + 1u], state[other_idx * 14u + 1u], phi_1 < 0.0);
             if (constants.scheme == 1u) {
-                rec_1_phi_ho = select(state[other_idx * 12u + 1u] + dot(vec2<f32>(grad_state[other_idx * 12u + 1u].x, grad_state[other_idx * 12u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), state[idx * 12u + 1u] + dot(vec2<f32>(grad_state[idx * 12u + 1u].x, grad_state[idx * 12u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), phi_1 > 0.0);
+                rec_1_phi_ho = select(state[other_idx * 14u + 1u] + dot(vec2<f32>(grad_state[other_idx * 14u + 1u].x, grad_state[other_idx * 14u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), state[idx * 14u + 1u] + dot(vec2<f32>(grad_state[idx * 14u + 1u].x, grad_state[idx * 14u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), phi_1 > 0.0);
             } else {
                 if (constants.scheme == 2u) {
-                    rec_1_phi_ho = select(state[other_idx * 12u + 1u] + state[other_idx * 12u + 1u] * 0.625 + state[idx * 12u + 1u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 12u + 1u].x, grad_state[other_idx * 12u + 1u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 12u + 1u], state[idx * 12u + 1u] + state[idx * 12u + 1u] * 0.625 + state[other_idx * 12u + 1u] * 0.375 + dot(vec2<f32>(grad_state[idx * 12u + 1u].x, grad_state[idx * 12u + 1u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 12u + 1u], phi_1 > 0.0);
+                    rec_1_phi_ho = select(state[other_idx * 14u + 1u] + state[other_idx * 14u + 1u] * 0.625 + state[idx * 14u + 1u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 14u + 1u].x, grad_state[other_idx * 14u + 1u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 14u + 1u], state[idx * 14u + 1u] + state[idx * 14u + 1u] * 0.625 + state[other_idx * 14u + 1u] * 0.375 + dot(vec2<f32>(grad_state[idx * 14u + 1u].x, grad_state[idx * 14u + 1u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 14u + 1u], phi_1 > 0.0);
                 } else {
                     if (constants.scheme == 3u) {
-                        rec_1_phi_ho = select(state[other_idx * 12u + 1u] + min(max(dot(vec2<f32>(grad_state[other_idx * 12u + 1u].x, grad_state[other_idx * 12u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), min(state[idx * 12u + 1u] - state[other_idx * 12u + 1u], 0.0)), max(state[idx * 12u + 1u] - state[other_idx * 12u + 1u], 0.0)), state[idx * 12u + 1u] + min(max(dot(vec2<f32>(grad_state[idx * 12u + 1u].x, grad_state[idx * 12u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), min(state[other_idx * 12u + 1u] - state[idx * 12u + 1u], 0.0)), max(state[other_idx * 12u + 1u] - state[idx * 12u + 1u], 0.0)), phi_1 > 0.0);
+                        rec_1_phi_ho = select(state[other_idx * 14u + 1u] + min(max(dot(vec2<f32>(grad_state[other_idx * 14u + 1u].x, grad_state[other_idx * 14u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), min(state[idx * 14u + 1u] - state[other_idx * 14u + 1u], 0.0)), max(state[idx * 14u + 1u] - state[other_idx * 14u + 1u], 0.0)), state[idx * 14u + 1u] + min(max(dot(vec2<f32>(grad_state[idx * 14u + 1u].x, grad_state[idx * 14u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), min(state[other_idx * 14u + 1u] - state[idx * 14u + 1u], 0.0)), max(state[other_idx * 14u + 1u] - state[idx * 14u + 1u], 0.0)), phi_1 > 0.0);
                     } else {
                         if (constants.scheme == 4u) {
-                            rec_1_phi_ho = select(state[other_idx * 12u + 1u] + dot(vec2<f32>(grad_state[other_idx * 12u + 1u].x, grad_state[other_idx * 12u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)) * abs(state[idx * 12u + 1u] - state[other_idx * 12u + 1u]) / max(abs(state[idx * 12u + 1u] - state[other_idx * 12u + 1u]), abs(dot(vec2<f32>(grad_state[other_idx * 12u + 1u].x, grad_state[other_idx * 12u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))) + 0.00000001) * max((state[idx * 12u + 1u] - state[other_idx * 12u + 1u]) * dot(vec2<f32>(grad_state[other_idx * 12u + 1u].x, grad_state[other_idx * 12u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), 0.0) / max(abs((state[idx * 12u + 1u] - state[other_idx * 12u + 1u]) * dot(vec2<f32>(grad_state[other_idx * 12u + 1u].x, grad_state[other_idx * 12u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))), 0.00000001), state[idx * 12u + 1u] + dot(vec2<f32>(grad_state[idx * 12u + 1u].x, grad_state[idx * 12u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)) * abs(state[other_idx * 12u + 1u] - state[idx * 12u + 1u]) / max(abs(state[other_idx * 12u + 1u] - state[idx * 12u + 1u]), abs(dot(vec2<f32>(grad_state[idx * 12u + 1u].x, grad_state[idx * 12u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))) + 0.00000001) * max((state[other_idx * 12u + 1u] - state[idx * 12u + 1u]) * dot(vec2<f32>(grad_state[idx * 12u + 1u].x, grad_state[idx * 12u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), 0.0) / max(abs((state[other_idx * 12u + 1u] - state[idx * 12u + 1u]) * dot(vec2<f32>(grad_state[idx * 12u + 1u].x, grad_state[idx * 12u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))), 0.00000001), phi_1 > 0.0);
+                            rec_1_phi_ho = select(state[other_idx * 14u + 1u] + dot(vec2<f32>(grad_state[other_idx * 14u + 1u].x, grad_state[other_idx * 14u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)) * abs(state[idx * 14u + 1u] - state[other_idx * 14u + 1u]) / max(abs(state[idx * 14u + 1u] - state[other_idx * 14u + 1u]), abs(dot(vec2<f32>(grad_state[other_idx * 14u + 1u].x, grad_state[other_idx * 14u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))) + 0.00000001) * max((state[idx * 14u + 1u] - state[other_idx * 14u + 1u]) * dot(vec2<f32>(grad_state[other_idx * 14u + 1u].x, grad_state[other_idx * 14u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y)), 0.0) / max(abs((state[idx * 14u + 1u] - state[other_idx * 14u + 1u]) * dot(vec2<f32>(grad_state[other_idx * 14u + 1u].x, grad_state[other_idx * 14u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(other_center.x, other_center.y))), 0.00000001), state[idx * 14u + 1u] + dot(vec2<f32>(grad_state[idx * 14u + 1u].x, grad_state[idx * 14u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)) * abs(state[other_idx * 14u + 1u] - state[idx * 14u + 1u]) / max(abs(state[other_idx * 14u + 1u] - state[idx * 14u + 1u]), abs(dot(vec2<f32>(grad_state[idx * 14u + 1u].x, grad_state[idx * 14u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))) + 0.00000001) * max((state[other_idx * 14u + 1u] - state[idx * 14u + 1u]) * dot(vec2<f32>(grad_state[idx * 14u + 1u].x, grad_state[idx * 14u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y)), 0.0) / max(abs((state[other_idx * 14u + 1u] - state[idx * 14u + 1u]) * dot(vec2<f32>(grad_state[idx * 14u + 1u].x, grad_state[idx * 14u + 1u].y), vec2<f32>(f_center.x, f_center.y) - vec2<f32>(center.x, center.y))), 0.00000001), phi_1 > 0.0);
                         } else {
                             if (constants.scheme == 5u) {
-                                rec_1_phi_ho = select(state[other_idx * 12u + 1u] + min(max(state[other_idx * 12u + 1u] * 0.625 + state[idx * 12u + 1u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 12u + 1u].x, grad_state[other_idx * 12u + 1u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 12u + 1u], min(state[idx * 12u + 1u] - state[other_idx * 12u + 1u], 0.0)), max(state[idx * 12u + 1u] - state[other_idx * 12u + 1u], 0.0)), state[idx * 12u + 1u] + min(max(state[idx * 12u + 1u] * 0.625 + state[other_idx * 12u + 1u] * 0.375 + dot(vec2<f32>(grad_state[idx * 12u + 1u].x, grad_state[idx * 12u + 1u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 12u + 1u], min(state[other_idx * 12u + 1u] - state[idx * 12u + 1u], 0.0)), max(state[other_idx * 12u + 1u] - state[idx * 12u + 1u], 0.0)), phi_1 > 0.0);
+                                rec_1_phi_ho = select(state[other_idx * 14u + 1u] + min(max(state[other_idx * 14u + 1u] * 0.625 + state[idx * 14u + 1u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 14u + 1u].x, grad_state[other_idx * 14u + 1u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 14u + 1u], min(state[idx * 14u + 1u] - state[other_idx * 14u + 1u], 0.0)), max(state[idx * 14u + 1u] - state[other_idx * 14u + 1u], 0.0)), state[idx * 14u + 1u] + min(max(state[idx * 14u + 1u] * 0.625 + state[other_idx * 14u + 1u] * 0.375 + dot(vec2<f32>(grad_state[idx * 14u + 1u].x, grad_state[idx * 14u + 1u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 14u + 1u], min(state[other_idx * 14u + 1u] - state[idx * 14u + 1u], 0.0)), max(state[other_idx * 14u + 1u] - state[idx * 14u + 1u], 0.0)), phi_1 > 0.0);
                             } else {
                                 if (constants.scheme == 6u) {
-                                    rec_1_phi_ho = select(state[other_idx * 12u + 1u] + (state[other_idx * 12u + 1u] * 0.625 + state[idx * 12u + 1u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 12u + 1u].x, grad_state[other_idx * 12u + 1u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 12u + 1u]) * abs(state[idx * 12u + 1u] - state[other_idx * 12u + 1u]) / max(abs(state[idx * 12u + 1u] - state[other_idx * 12u + 1u]), abs(state[other_idx * 12u + 1u] * 0.625 + state[idx * 12u + 1u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 12u + 1u].x, grad_state[other_idx * 12u + 1u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 12u + 1u]) + 0.00000001) * max((state[idx * 12u + 1u] - state[other_idx * 12u + 1u]) * (state[other_idx * 12u + 1u] * 0.625 + state[idx * 12u + 1u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 12u + 1u].x, grad_state[other_idx * 12u + 1u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 12u + 1u]), 0.0) / max(abs((state[idx * 12u + 1u] - state[other_idx * 12u + 1u]) * (state[other_idx * 12u + 1u] * 0.625 + state[idx * 12u + 1u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 12u + 1u].x, grad_state[other_idx * 12u + 1u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 12u + 1u])), 0.00000001), state[idx * 12u + 1u] + (state[idx * 12u + 1u] * 0.625 + state[other_idx * 12u + 1u] * 0.375 + dot(vec2<f32>(grad_state[idx * 12u + 1u].x, grad_state[idx * 12u + 1u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 12u + 1u]) * abs(state[other_idx * 12u + 1u] - state[idx * 12u + 1u]) / max(abs(state[other_idx * 12u + 1u] - state[idx * 12u + 1u]), abs(state[idx * 12u + 1u] * 0.625 + state[other_idx * 12u + 1u] * 0.375 + dot(vec2<f32>(grad_state[idx * 12u + 1u].x, grad_state[idx * 12u + 1u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 12u + 1u]) + 0.00000001) * max((state[other_idx * 12u + 1u] - state[idx * 12u + 1u]) * (state[idx * 12u + 1u] * 0.625 + state[other_idx * 12u + 1u] * 0.375 + dot(vec2<f32>(grad_state[idx * 12u + 1u].x, grad_state[idx * 12u + 1u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 12u + 1u]), 0.0) / max(abs((state[other_idx * 12u + 1u] - state[idx * 12u + 1u]) * (state[idx * 12u + 1u] * 0.625 + state[other_idx * 12u + 1u] * 0.375 + dot(vec2<f32>(grad_state[idx * 12u + 1u].x, grad_state[idx * 12u + 1u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 12u + 1u])), 0.00000001), phi_1 > 0.0);
+                                    rec_1_phi_ho = select(state[other_idx * 14u + 1u] + (state[other_idx * 14u + 1u] * 0.625 + state[idx * 14u + 1u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 14u + 1u].x, grad_state[other_idx * 14u + 1u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 14u + 1u]) * abs(state[idx * 14u + 1u] - state[other_idx * 14u + 1u]) / max(abs(state[idx * 14u + 1u] - state[other_idx * 14u + 1u]), abs(state[other_idx * 14u + 1u] * 0.625 + state[idx * 14u + 1u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 14u + 1u].x, grad_state[other_idx * 14u + 1u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 14u + 1u]) + 0.00000001) * max((state[idx * 14u + 1u] - state[other_idx * 14u + 1u]) * (state[other_idx * 14u + 1u] * 0.625 + state[idx * 14u + 1u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 14u + 1u].x, grad_state[other_idx * 14u + 1u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 14u + 1u]), 0.0) / max(abs((state[idx * 14u + 1u] - state[other_idx * 14u + 1u]) * (state[other_idx * 14u + 1u] * 0.625 + state[idx * 14u + 1u] * 0.375 + dot(vec2<f32>(grad_state[other_idx * 14u + 1u].x, grad_state[other_idx * 14u + 1u].y), vec2<f32>(center.x, center.y) - vec2<f32>(other_center.x, other_center.y)) * 0.125 - state[other_idx * 14u + 1u])), 0.00000001), state[idx * 14u + 1u] + (state[idx * 14u + 1u] * 0.625 + state[other_idx * 14u + 1u] * 0.375 + dot(vec2<f32>(grad_state[idx * 14u + 1u].x, grad_state[idx * 14u + 1u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 14u + 1u]) * abs(state[other_idx * 14u + 1u] - state[idx * 14u + 1u]) / max(abs(state[other_idx * 14u + 1u] - state[idx * 14u + 1u]), abs(state[idx * 14u + 1u] * 0.625 + state[other_idx * 14u + 1u] * 0.375 + dot(vec2<f32>(grad_state[idx * 14u + 1u].x, grad_state[idx * 14u + 1u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 14u + 1u]) + 0.00000001) * max((state[other_idx * 14u + 1u] - state[idx * 14u + 1u]) * (state[idx * 14u + 1u] * 0.625 + state[other_idx * 14u + 1u] * 0.375 + dot(vec2<f32>(grad_state[idx * 14u + 1u].x, grad_state[idx * 14u + 1u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 14u + 1u]), 0.0) / max(abs((state[other_idx * 14u + 1u] - state[idx * 14u + 1u]) * (state[idx * 14u + 1u] * 0.625 + state[other_idx * 14u + 1u] * 0.375 + dot(vec2<f32>(grad_state[idx * 14u + 1u].x, grad_state[idx * 14u + 1u].y), vec2<f32>(other_center.x, other_center.y) - vec2<f32>(center.x, center.y)) * 0.125 - state[idx * 14u + 1u])), 0.00000001), phi_1 > 0.0);
                                 }
                             }
                         }
@@ -297,7 +308,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
             diag_1 += max(phi_1, 0.0);
             matrix_values[start_row_1 + neighbor_rank * 3u + 1u] += min(phi_1, 0.0);
-            rhs_1 -= phi_1 * (rec_1_phi_ho - select(state[idx * 12u + 1u], state[other_idx * 12u + 1u], phi_1 < 0.0));
+            rhs_1 -= phi_1 * (rec_1_phi_ho - select(state[idx * 14u + 1u], state[other_idx * 14u + 1u], phi_1 < 0.0));
         } else {
             if (bc_kind[face_idx * 3u + 1u] == 1u) {
                 diag_1 += max(phi_1, 0.0);
@@ -307,16 +318,16 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
         }
         if (!is_boundary) {
-            rhs_0 -= 0.5 * area * normal.x * (state[idx * 12u + 2u] + state[other_idx * 12u + 2u]);
+            rhs_0 -= 0.5 * area * normal.x * (state[idx * 14u + 2u] + state[other_idx * 14u + 2u]);
         } else {
-            rhs_0 -= 0.5 * area * normal.x * select(select(state[idx * 12u + 2u], bc_value[face_idx * 3u + 2u], bc_kind[face_idx * 3u + 2u] == 1u), state[idx * 12u + 2u] + bc_value[face_idx * 3u + 2u] * dist, bc_kind[face_idx * 3u + 2u] == 2u) * 2.0;
+            rhs_0 -= 0.5 * area * normal.x * select(select(state[idx * 14u + 2u], bc_value[face_idx * 3u + 2u], bc_kind[face_idx * 3u + 2u] == 1u), state[idx * 14u + 2u] + bc_value[face_idx * 3u + 2u] * dist, bc_kind[face_idx * 3u + 2u] == 2u) * 2.0;
         }
         if (!is_boundary) {
-            rhs_1 -= 0.5 * area * normal.y * (state[idx * 12u + 2u] + state[other_idx * 12u + 2u]);
+            rhs_1 -= 0.5 * area * normal.y * (state[idx * 14u + 2u] + state[other_idx * 14u + 2u]);
         } else {
-            rhs_1 -= 0.5 * area * normal.y * select(select(state[idx * 12u + 2u], bc_value[face_idx * 3u + 2u], bc_kind[face_idx * 3u + 2u] == 1u), state[idx * 12u + 2u] + bc_value[face_idx * 3u + 2u] * dist, bc_kind[face_idx * 3u + 2u] == 2u) * 2.0;
+            rhs_1 -= 0.5 * area * normal.y * select(select(state[idx * 14u + 2u], bc_value[face_idx * 3u + 2u], bc_kind[face_idx * 3u + 2u] == 1u), state[idx * 14u + 2u] + bc_value[face_idx * 3u + 2u] * dist, bc_kind[face_idx * 3u + 2u] == 2u) * 2.0;
         }
-        let diff_coeff_p = select(state[idx * 12u + 11u] * state[idx * 12u + 3u], state[idx * 12u + 11u] * state[idx * 12u + 3u] * lambda_f + state[other_idx * 12u + 11u] * state[other_idx * 12u + 3u] * (1.0 - lambda_f), !is_boundary) * area / dist;
+        let diff_coeff_p = select(state[idx * 14u + 11u] * state[idx * 14u + 3u], state[idx * 14u + 11u] * state[idx * 14u + 3u] * lambda_f + state[other_idx * 14u + 11u] * state[other_idx * 14u + 3u] * (1.0 - lambda_f), !is_boundary) * area / dist;
         if (!is_boundary) {
             diag_2 += diff_coeff_p;
             matrix_values[start_row_2 + neighbor_rank * 3u + 2u] -= diff_coeff_p;
@@ -326,7 +337,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 rhs_2 += diff_coeff_p * bc_value[face_idx * 3u + 2u];
             } else {
                 if (bc_kind[face_idx * 3u + 2u] == 2u) {
-                    rhs_2 += select(state[idx * 12u + 11u] * state[idx * 12u + 3u], state[idx * 12u + 11u] * state[idx * 12u + 3u] * lambda_f + state[other_idx * 12u + 11u] * state[other_idx * 12u + 3u] * (1.0 - lambda_f), !is_boundary) * area * bc_value[face_idx * 3u + 2u];
+                    rhs_2 += select(state[idx * 14u + 11u] * state[idx * 14u + 3u], state[idx * 14u + 11u] * state[idx * 14u + 3u] * lambda_f + state[other_idx * 14u + 11u] * state[other_idx * 14u + 3u] * (1.0 - lambda_f), !is_boundary) * area * bc_value[face_idx * 3u + 2u];
                 }
             }
         }
@@ -335,14 +346,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             phi_2 -= phi_2 * 2.0;
         }
         rhs_2 -= phi_2;
-        var a_lin_2: f32 = phi_2 * state[idx * 12u + 8u] / max(state[idx * 12u + 11u], 0.000000000000000000000000000001);
+        var a_lin_2: f32 = phi_2 * state[idx * 14u + 8u] / max(state[idx * 14u + 11u], 0.000000000000000000000000000001);
         if (!is_boundary) {
             diag_2 += max(a_lin_2, 0.0);
             matrix_values[start_row_2 + neighbor_rank * 3u + 2u] += min(a_lin_2, 0.0);
-            rhs_2 += max(a_lin_2, 0.0) * state[idx * 12u + 2u] + min(a_lin_2, 0.0) * state[other_idx * 12u + 2u];
+            rhs_2 += max(a_lin_2, 0.0) * state[idx * 14u + 2u] + min(a_lin_2, 0.0) * state[other_idx * 14u + 2u];
         } else {
             diag_2 += max(a_lin_2, 0.0);
-            rhs_2 += max(a_lin_2, 0.0) * state[idx * 12u + 2u];
+            rhs_2 += max(a_lin_2, 0.0) * state[idx * 14u + 2u];
         }
     }
     diag_0 -= bounded_sum_phi_0;

@@ -19,6 +19,8 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
+    inlet_velocity: f32,
+    inlet_ramp_time: f32,
     eos_gamma: f32,
     eos_gm1: f32,
     eos_r: f32,
@@ -453,9 +455,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         var k1_is_boundary: bool = false;
         var k1_other_idx: u32 = idx;
         var k1_other_center: Vector2;
+        let k1_wrap_shift = face_wrap_shift[k1_face_idx];
+        var k1_center_frame: Vector2 = k1_center;
         if (k1_owner != idx) {
             k1_normal.x = -k1_normal.x;
             k1_normal.y = -k1_normal.y;
+            k1_center_frame.x += k1_wrap_shift.x;
+            k1_center_frame.y += k1_wrap_shift.y;
         }
         if (k1_neighbor_raw != -1) {
             let k1_neighbor = u32(k1_neighbor_raw);
@@ -464,20 +470,24 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 k1_other_idx = k1_owner;
             }
             k1_other_center = cell_centers[k1_other_idx];
+            if (k1_owner == idx) {
+                k1_other_center.x += k1_wrap_shift.x;
+                k1_other_center.y += k1_wrap_shift.y;
+            }
         } else {
             k1_is_boundary = true;
             k1_other_idx = idx;
             k1_other_center = k1_f_center;
         }
-        let k1_dx = k1_other_center.x - k1_center.x;
-        let k1_dy = k1_other_center.y - k1_center.y;
+        let k1_dx = k1_other_center.x - k1_center_frame.x;
+        let k1_dy = k1_other_center.y - k1_center_frame.y;
         let k1_dist_proj = abs(k1_dx * k1_normal.x + k1_dy * k1_normal.y);
         let k1_dist_euc = sqrt(k1_dx * k1_dx + k1_dy * k1_dy);
         var k1_dist: f32 = max(k1_dist_euc, 0.000001);
         if (k1_dist_proj > 0.000001) {
             k1_dist = k1_dist_proj;
         }
-        let k1_lam_d_own = abs((k1_f_center.x - k1_center.x) * k1_normal.x + (k1_f_center.y - k1_center.y) * k1_normal.y);
+        let k1_lam_d_own = abs((k1_f_center.x - k1_center_frame.x) * k1_normal.x + (k1_f_center.y - k1_center_frame.y) * k1_normal.y);
         let k1_lam_d_neigh = abs((k1_other_center.x - k1_f_center.x) * k1_normal.x + (k1_other_center.y - k1_f_center.y) * k1_normal.y);
         let k1_lam_total = k1_lam_d_own + k1_lam_d_neigh;
         var k1_lambda_f: f32 = 0.5;

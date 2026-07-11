@@ -19,6 +19,8 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
+    inlet_velocity: f32,
+    inlet_ramp_time: f32,
 }
 
 
@@ -34,6 +36,7 @@ struct Constants {
 @group(1) @binding(7) var<storage, read> cell_faces: array<u32>;
 @group(1) @binding(12) var<storage, read> face_boundary: array<u32>;
 @group(1) @binding(13) var<storage, read> face_centers: array<Vector2>;
+@group(1) @binding(14) var<storage, read> face_wrap_shift: array<Vector2>;
 @group(2) @binding(0) var<storage, read> bc_kind: array<u32>;
 @group(2) @binding(1) var<storage, read> bc_value: array<f32>;
 
@@ -44,7 +47,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let base = idx * 15u;
     // synthesized by fusion rule: rhie_chow:dp_update_store_grad_p_grad_p_update_correct_velocity_delta_v1
     // begin fused segment: dp_update_from_diag
-    let rho = max(constants.density, 0.000000000001);
+    let rho = max(state[base + 11u], 0.000000000001);
     let dt = max(constants.dt, 0.0);
     let d_p = constants.alpha_u * dt / rho;
     state[base + 3u] = d_p;
@@ -59,7 +62,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let k2_vol = cell_vols[idx];
     let k2_start = cell_face_offsets[idx];
     let k2_end = cell_face_offsets[idx + 1u];
-    var k2_grad_acc_p: vec2<f32> = vec2<f32>(0.0, 0.0);
+    var k2_ls_mxx: f32 = 0.0;
+    var k2_ls_mxy: f32 = 0.0;
+    var k2_ls_myy: f32 = 0.0;
+    var k2_ls_bx: f32 = 0.0;
+    var k2_ls_by: f32 = 0.0;
     for (var k2_k = k2_start; k2_k < k2_end; k2_k++) {
         let k2_face_idx = cell_faces[k2_k];
         let k2_owner = face_owner[k2_face_idx];
@@ -69,8 +76,13 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let k2_area = face_areas[k2_face_idx];
         let k2_face_center = face_centers[k2_face_idx];
         let k2_face_center_vec: vec2<f32> = vec2<f32>(k2_face_center.x, k2_face_center.y);
+        let k2_wrap_shift = face_wrap_shift[k2_face_idx];
+        var k2_cell_center_frame_vec: vec2<f32> = k2_cell_center_vec;
+        if (k2_owner != idx) {
+            k2_cell_center_frame_vec = k2_cell_center_frame_vec + vec2<f32>(k2_wrap_shift.x, k2_wrap_shift.y);
+        }
         var k2_normal_vec: vec2<f32> = vec2<f32>(face_normals[k2_face_idx].x, face_normals[k2_face_idx].y);
-        if (dot(k2_face_center_vec - k2_cell_center_vec, k2_normal_vec) < 0.0) {
+        if (dot(k2_face_center_vec - k2_cell_center_frame_vec, k2_normal_vec) < 0.0) {
             k2_normal_vec = -k2_normal_vec;
         }
         var k2_other_idx: u32 = idx;
@@ -83,19 +95,46 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             }
             let k2_other_center = cell_centers[k2_other_idx];
             k2_other_center_vec = vec2<f32>(k2_other_center.x, k2_other_center.y);
+            if (k2_owner == idx) {
+                k2_other_center_vec = k2_other_center_vec + vec2<f32>(k2_wrap_shift.x, k2_wrap_shift.y);
+            }
         }
-        let k2_d_own = abs(dot(k2_face_center_vec - k2_cell_center_vec, k2_normal_vec));
-        let k2_d_neigh = abs(dot(k2_other_center_vec - k2_face_center_vec, k2_normal_vec));
-        let k2_total_dist = k2_d_own + k2_d_neigh;
-        var k2_lambda: f32 = 0.5;
-        if (k2_total_dist > 0.000001) {
-            k2_lambda = k2_d_neigh / k2_total_dist;
-        }
-        let k2_lambda_other = 1.0 - k2_lambda;
-        let k2__unused_boundary_type = k2_boundary_type;
-        k2_grad_acc_p += k2_normal_vec * (state[base + 2u] * k2_lambda + select(state[k2_other_idx * 15u + 2u], select(select(state[base + 2u], bc_value[k2_face_idx * 3u + 2u], bc_kind[k2_face_idx * 3u + 2u] == 1u), state[base + 2u] + bc_value[k2_face_idx * 3u + 2u] * k2_d_own, bc_kind[k2_face_idx * 3u + 2u] == 2u), k2_is_boundary) * k2_lambda_other) * k2_area;
+        let k2_ls_dx_interior = k2_other_center_vec.x - k2_cell_center_frame_vec.x;
+        let k2_ls_dy_interior = k2_other_center_vec.y - k2_cell_center_frame_vec.y;
+        let k2_ls_dx_boundary = k2_face_center_vec.x - k2_cell_center_frame_vec.x;
+        let k2_ls_dy_boundary = k2_face_center_vec.y - k2_cell_center_frame_vec.y;
+        let k2_ls_dx = select(k2_ls_dx_interior, k2_ls_dx_boundary, k2_is_boundary);
+        let k2_ls_dy = select(k2_ls_dy_interior, k2_ls_dy_boundary, k2_is_boundary);
+        let k2_ls_dist = max(sqrt(k2_ls_dx * k2_ls_dx + k2_ls_dy * k2_ls_dy), 0.000000000001);
+        let k2_ls_normal_constraint = k2_is_boundary && !(bc_kind[k2_face_idx * 3u + 2u] == 1u);
+        let k2_ls_ux = select(k2_ls_dx / k2_ls_dist, k2_normal_vec.x, k2_ls_normal_constraint);
+        let k2_ls_uy = select(k2_ls_dy / k2_ls_dist, k2_normal_vec.y, k2_ls_normal_constraint);
+        let k2_ls_rhs_interior = (state[k2_other_idx * 15u + 2u] - state[base + 2u]) / k2_ls_dist;
+        let k2_ls_rhs_dirichlet = (bc_value[k2_face_idx * 3u + 2u] - state[base + 2u]) / k2_ls_dist;
+        let k2_ls_rhs_normal = select(0.0, bc_value[k2_face_idx * 3u + 2u], bc_kind[k2_face_idx * 3u + 2u] == 2u);
+        let k2_ls_rhs_boundary = select(k2_ls_rhs_normal, k2_ls_rhs_dirichlet, bc_kind[k2_face_idx * 3u + 2u] == 1u);
+        let k2_ls_rhs = select(k2_ls_rhs_interior, k2_ls_rhs_boundary, k2_is_boundary);
+        k2_ls_mxx += k2_ls_ux * k2_ls_ux;
+        k2_ls_mxy += k2_ls_ux * k2_ls_uy;
+        k2_ls_myy += k2_ls_uy * k2_ls_uy;
+        k2_ls_bx += k2_ls_ux * k2_ls_rhs;
+        k2_ls_by += k2_ls_uy * k2_ls_rhs;
     }
-    let k2_grad_out_p: vec2<f32> = k2_grad_acc_p / max(k2_vol, 0.000000000001);
+    let k2_ls_det = k2_ls_mxx * k2_ls_myy - k2_ls_mxy * k2_ls_mxy;
+    let k2_ls_trace = k2_ls_mxx + k2_ls_myy;
+    let k2_ls_det_floor = 0.00001 * max(k2_ls_trace * k2_ls_trace, 0.000000000001);
+    var k2_ls_gx: f32 = 0.0;
+    var k2_ls_gy: f32 = 0.0;
+    if (k2_ls_det > k2_ls_det_floor) {
+        k2_ls_gx = (k2_ls_myy * k2_ls_bx - k2_ls_mxy * k2_ls_by) / k2_ls_det;
+        k2_ls_gy = (k2_ls_mxx * k2_ls_by - k2_ls_mxy * k2_ls_bx) / k2_ls_det;
+    } else {
+        if (k2_ls_trace > 0.000000000001) {
+            k2_ls_gx = k2_ls_bx / k2_ls_trace;
+            k2_ls_gy = k2_ls_by / k2_ls_trace;
+        }
+    }
+    let k2_grad_out_p: vec2<f32> = vec2<f32>(k2_ls_gx, k2_ls_gy);
     state[base + 4u] = k2_grad_out_p.x;
     state[base + 5u] = k2_grad_out_p.y;
     // end fused segment: rhie_chow/grad_p_update

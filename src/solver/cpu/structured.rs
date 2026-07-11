@@ -78,8 +78,7 @@ impl StructuredCpuSolver {
             let p = program_map
                 .get(id)
                 .ok_or_else(|| format!("structured model missing kernel `{id}`"))?;
-            let mut stmts =
-                Vec::with_capacity(p.indexing.len() + p.preamble.len() + p.body.len());
+            let mut stmts = Vec::with_capacity(p.indexing.len() + p.preamble.len() + p.body.len());
             stmts.extend_from_slice(&p.indexing);
             stmts.extend_from_slice(&p.preamble);
             stmts.extend_from_slice(&p.body);
@@ -253,7 +252,9 @@ impl StructuredCpuSolver {
     pub fn scalar_field(&self) -> Vec<f64> {
         let n = self.grid.num_cells();
         let state = self.buffers.f32_vec("state");
-        (0..n).map(|p| state[p * self.state_stride] as f64).collect()
+        (0..n)
+            .map(|p| state[p * self.state_stride] as f64)
+            .collect()
     }
 
     /// Read the assembled banded operator (`N*5`, ranks `[S,W,diag,E,N]`).
@@ -281,6 +282,8 @@ impl StructuredCpuSolver {
             .with_constant("constants", "dtau", Value::F32(0.0))
             .with_constant("constants", "time_scheme", Value::U32(0)) // Euler
             .with_constant("constants", "stride_x", Value::U32(self.grid.nx as u32))
+            .with_constant("constants", "inlet_velocity", Value::F32(0.0))
+            .with_constant("constants", "inlet_ramp_time", Value::F32(0.0))
     }
 }
 
@@ -355,7 +358,11 @@ fn banded_cg(a: &[f32], b: &[f32], nx: usize, ny: usize, tol: f64, max_iter: usi
     let mut p_dir = z.clone();
     let mut rz: f64 = r.iter().zip(&z).map(|(&ri, &zi)| ri * zi).sum();
 
-    let bnorm: f64 = b.iter().map(|&bi| (bi as f64) * (bi as f64)).sum::<f64>().sqrt();
+    let bnorm: f64 = b
+        .iter()
+        .map(|&bi| (bi as f64) * (bi as f64))
+        .sum::<f64>()
+        .sqrt();
     let thresh = tol * bnorm.max(1e-30);
 
     for _ in 0..max_iter {
@@ -491,7 +498,14 @@ impl StructuredModelSolver {
         dt: f64,
         outer_iters: usize,
     ) -> Result<Self, String> {
-        Self::with_config(grid, model, dt, outer_iters, Scheme::Upwind, TimeScheme::Euler)
+        Self::with_config(
+            grid,
+            model,
+            dt,
+            outer_iters,
+            Scheme::Upwind,
+            TimeScheme::Euler,
+        )
     }
 
     /// Build a structured coupled solver with an explicit advection scheme and
@@ -690,7 +704,8 @@ impl StructuredModelSolver {
             (K::SchurAmg, Some(l)) => BandedPrecond::schur(l, true),
             _ => BandedPrecond::BlockJacobi,
         };
-        self.amg_active.store(false, std::sync::atomic::Ordering::Relaxed); // re-arm the adaptive latch on a precond change
+        self.amg_active
+            .store(false, std::sync::atomic::Ordering::Relaxed); // re-arm the adaptive latch on a precond change
         crate::solver::banded_schur::kind_of(&self.precond)
     }
 
@@ -706,13 +721,15 @@ impl StructuredModelSolver {
                 omega,
                 sweeps_cap,
                 pressure_amg: true,
-            } if !self.amg_active.load(std::sync::atomic::Ordering::Relaxed) => BandedPrecond::Schur {
-                u_idx: u_idx.clone(),
-                p: *p,
-                omega: *omega,
-                sweeps_cap: *sweeps_cap,
-                pressure_amg: false, // heavy-ball until the latch activates AMG
-            },
+            } if !self.amg_active.load(std::sync::atomic::Ordering::Relaxed) => {
+                BandedPrecond::Schur {
+                    u_idx: u_idx.clone(),
+                    p: *p,
+                    omega: *omega,
+                    sweeps_cap: *sweeps_cap,
+                    pressure_amg: false, // heavy-ball until the latch activates AMG
+                }
+            }
             other => other.clone(),
         }
     }
@@ -799,6 +816,12 @@ impl StructuredModelSolver {
             .with_constant("constants", "alpha_u", Value::F32(c.alpha_u))
             .with_constant("constants", "stride_x", Value::U32(c.stride_x))
             .with_constant("constants", "time_scheme", Value::U32(c.time_scheme))
+            .with_constant("constants", "inlet_velocity", Value::F32(c.inlet_velocity))
+            .with_constant(
+                "constants",
+                "inlet_ramp_time",
+                Value::F32(c.inlet_ramp_time),
+            )
             .with_constant("constants", "eos_gamma", Value::F32(c.eos_gamma))
             .with_constant("constants", "eos_gm1", Value::F32(c.eos_gm1))
             .with_constant("constants", "eos_r", Value::F32(c.eos_r))
@@ -807,10 +830,18 @@ impl StructuredModelSolver {
             .with_constant("constants", "eos_theta_ref", Value::F32(c.eos_theta_ref))
             .with_constant("constants", "buoyant_beta_g", Value::F32(c.buoyant_beta_g))
             .with_constant("constants", "buoyant_t0", Value::F32(c.buoyant_t0))
-            .with_constant("constants", "buoyant_k_over_cp", Value::F32(c.buoyant_k_over_cp))
+            .with_constant(
+                "constants",
+                "buoyant_k_over_cp",
+                Value::F32(c.buoyant_k_over_cp),
+            )
             .with_constant("low_mach_params", "model", Value::U32(0))
             .with_constant("low_mach_params", "theta_floor", Value::F32(0.0))
-            .with_constant("low_mach_params", "pressure_coupling_alpha", Value::F32(0.0))
+            .with_constant(
+                "low_mach_params",
+                "pressure_coupling_alpha",
+                Value::F32(0.0),
+            )
             .with_constant("low_mach_params", "eps4", Value::F32(0.0))
     }
 
@@ -902,7 +933,10 @@ impl StructuredModelSolver {
         let mut precond = self.effective_precond();
         let mut counting_stalls = matches!(
             &self.precond,
-            crate::solver::banded_schur::BandedPrecond::Schur { pressure_amg: true, .. }
+            crate::solver::banded_schur::BandedPrecond::Schur {
+                pressure_amg: true,
+                ..
+            }
         ) && !self.amg_active.load(std::sync::atomic::Ordering::Relaxed);
         // Outer-convergence telemetry for the GUI readout (mirrors the unstructured
         // "Coupled: N iters, U:.. P:.." / "Linear: .. res=.." lines). The banded
@@ -1068,7 +1102,10 @@ impl StructuredModelSolver {
                     "[outer] step {} outer {} lin={iters} res={res:.2e} scaled={:?}",
                     self.step_count,
                     outers_done,
-                    scaled.iter().map(|v| format!("{v:.3e}")).collect::<Vec<_>>()
+                    scaled
+                        .iter()
+                        .map(|v| format!("{v:.3e}"))
+                        .collect::<Vec<_>>()
                 );
             }
 
@@ -1145,6 +1182,13 @@ impl StructuredModelSolver {
         self.constants.alpha_p = alpha_p;
     }
 
+    /// Stage-time velocity-inlet soft-start inputs. A zero duration disables
+    /// the ramp and applies `velocity` immediately.
+    pub fn set_inlet_ramp(&mut self, velocity: f32, duration: f32) {
+        self.constants.inlet_velocity = velocity;
+        self.constants.inlet_ramp_time = duration.max(0.0);
+    }
+
     /// Set the implicit time-step size (GUI timestep slider / adaptive CFL).
     /// On the very first configuration (`step_count == 0`) also seeds `dt_old`
     /// so BDF2 starts with `r = dt/dt_old = 1` (unstructured TimeIntegrationModule).
@@ -1215,7 +1259,14 @@ impl StructuredModelSolver {
                 let low_mach: crate::solver::gpu::structs::GpuLowMachParams =
                     bytemuck::Zeroable::zeroed();
                 crate::solver::cpu::parallel::parallel_ranges(n, self.threads, |start, end| {
-                    f(&self.buffers, start as u32, end as u32, &self.constants, &grid, &low_mach);
+                    f(
+                        &self.buffers,
+                        start as u32,
+                        end as u32,
+                        &self.constants,
+                        &grid,
+                        &low_mach,
+                    );
                 });
                 return;
             }
@@ -1305,6 +1356,13 @@ impl StructuredModelSolver {
         bcv[(cell * 4 + dir) * self.s + unknown] as f64
     }
 
+    /// Read one `bc_kind` table entry; test-only companion to [`Self::bc_value_at`].
+    #[cfg(test)]
+    pub fn bc_kind_at(&self, cell: usize, dir: usize, unknown: usize) -> u32 {
+        let kinds = self.buffers.u32_vec("bc_kind");
+        kinds[(cell * 4 + dir) * self.s + unknown]
+    }
+
     /// Set the (uniform) fluid density and dynamic viscosity.
     pub fn set_fluid(&mut self, density: f64, viscosity: f64) {
         self.constants.density = density as f32;
@@ -1357,7 +1415,7 @@ mod tests {
         let vol = dx * dy;
         let cx = dy / dx; // E/W coefficient magnitude
         let cy = dx / dy; // N/S coefficient magnitude
-        // Interior cell (i=2, j=2).
+                          // Interior cell (i=2, j=2).
         let p = 2 * grid.nx + 2;
         let base = p * BAND_STRIDE;
         let diag = a[base + BAND_DIAG] as f64;
@@ -1599,7 +1657,7 @@ mod tests {
         let mut solver = StructuredModelSolver::new(grid, &model, 0.05, 3).unwrap();
         assert_eq!(solver.unknowns(), 3, "coupled Ux/Uy/p");
         solver.set_fluid(1.0, 0.01); // Re = U*L/nu = 1*1/0.01 = 100
-        // IC: rest.
+                                     // IC: rest.
         solver.set_state(0, |_, _| 0.0);
         solver.set_state(1, |_, _| 0.0);
         solver.set_state(2, |_, _| 0.0);
@@ -1609,11 +1667,23 @@ mod tests {
             let u_wall = if matches!(edge, Edge::Top) { 1.0 } else { 0.0 };
             // Top = MovingWall (5), other sides = Wall (3); velocity via bc_value.
             let btype = if matches!(edge, Edge::Top) { 5 } else { 3 };
-            (btype, vec![
-                BcComp { kind: 1, value: u_wall }, // Ux Dirichlet
-                BcComp { kind: 1, value: 0.0 },    // Uy Dirichlet 0
-                BcComp { kind: 2, value: 0.0 },    // p Neumann 0
-            ])
+            (
+                btype,
+                vec![
+                    BcComp {
+                        kind: 1,
+                        value: u_wall,
+                    }, // Ux Dirichlet
+                    BcComp {
+                        kind: 1,
+                        value: 0.0,
+                    }, // Uy Dirichlet 0
+                    BcComp {
+                        kind: 2,
+                        value: 0.0,
+                    }, // p Neumann 0
+                ],
+            )
         });
 
         for _ in 0..40 {
@@ -1628,12 +1698,12 @@ mod tests {
             assert!(a.is_finite() && b.is_finite(), "velocity diverged");
             umax = umax.max(a.hypot(b));
         }
-        assert!(umax > 0.05 && umax < 5.0, "unphysical lid-cavity speed {umax}");
+        assert!(
+            umax > 0.05 && umax < 5.0,
+            "unphysical lid-cavity speed {umax}"
+        );
         // The top rows (near the moving lid) must be dragged in +x.
-        let top_row_mean_ux: f64 = (0..nx)
-            .map(|i| ux[(ny - 1) * nx + i])
-            .sum::<f64>()
-            / nx as f64;
+        let top_row_mean_ux: f64 = (0..nx).map(|i| ux[(ny - 1) * nx + i]).sum::<f64>() / nx as f64;
         assert!(
             top_row_mean_ux > 0.1,
             "near-lid x-velocity did not develop ({top_row_mean_ux})"
@@ -1675,12 +1745,24 @@ mod tests {
             let u_wall = if matches!(edge, Edge::Top) { 1.0 } else { 0.0 };
             let btype = if matches!(edge, Edge::Top) { 5 } else { 3 };
             let mut v = vec![
-                BcComp { kind: 1, value: u_wall },
-                BcComp { kind: 1, value: 0.0 },
-                BcComp { kind: 2, value: 0.0 },
+                BcComp {
+                    kind: 1,
+                    value: u_wall,
+                },
+                BcComp {
+                    kind: 1,
+                    value: 0.0,
+                },
+                BcComp {
+                    kind: 2,
+                    value: 0.0,
+                },
             ];
             if s >= 4 {
-                v.push(BcComp { kind: 2, value: 0.0 }); // T Neumann 0
+                v.push(BcComp {
+                    kind: 2,
+                    value: 0.0,
+                }); // T Neumann 0
             }
             (btype, v)
         });
@@ -1696,10 +1778,16 @@ mod tests {
             assert!(a.is_finite() && ti.is_finite(), "all-Mach state diverged");
             umax = umax.max(a.abs());
         }
-        assert!(umax > 0.05 && umax < 5.0, "unphysical all-Mach lid speed {umax}");
+        assert!(
+            umax > 0.05 && umax < 5.0,
+            "unphysical all-Mach lid speed {umax}"
+        );
         // Temperature stays near the reference (adiabatic, low-Mach): bounded.
         for &ti in &t {
-            assert!(ti > 0.5 && ti < 2.0, "all-Mach temperature out of band: {ti}");
+            assert!(
+                ti > 0.5 && ti < 2.0,
+                "all-Mach temperature out of band: {ti}"
+            );
         }
     }
 
@@ -1718,7 +1806,7 @@ mod tests {
         let s = model.system.unknowns_per_cell() as usize; // rho, rho_ux, rho_uy, rho_e
         let mut solver = StructuredModelSolver::new(grid, &model, 0.01, 1).unwrap();
         solver.set_fluid(1.0, 0.0); // inviscid
-        // Gas at rest: rho=1, rho_u=0, rho_e = p/(g-1) = 1/0.4 = 2.5.
+                                    // Gas at rest: rho=1, rho_u=0, rho_e = p/(g-1) = 1/0.4 = 2.5.
         let (rho0, e0, p0) = (1.0, 2.5, 1.0);
         solver.set_named_field("rho", |_, _| rho0);
         solver.set_named_field("rho_e", |_, _| e0);
@@ -1730,12 +1818,24 @@ mod tests {
         // Boundaries pinned (Dirichlet) to the uniform conserved state.
         solver.set_boundaries(move |_edge, _x, _y| {
             let mut v = vec![
-                BcComp { kind: 1, value: rho0 as f32 },
-                BcComp { kind: 1, value: 0.0 },
-                BcComp { kind: 1, value: 0.0 },
+                BcComp {
+                    kind: 1,
+                    value: rho0 as f32,
+                },
+                BcComp {
+                    kind: 1,
+                    value: 0.0,
+                },
+                BcComp {
+                    kind: 1,
+                    value: 0.0,
+                },
             ];
             if s >= 4 {
-                v.push(BcComp { kind: 1, value: e0 as f32 });
+                v.push(BcComp {
+                    kind: 1,
+                    value: e0 as f32,
+                });
             }
             (3, v) // Wall
         });
@@ -1746,7 +1846,10 @@ mod tests {
         let rho = solver.state_field(solver.field_offset("rho").unwrap());
         let rho_e = solver.state_field(solver.field_offset("rho_e").unwrap());
         for (&r, &re) in rho.iter().zip(&rho_e) {
-            assert!(r.is_finite() && re.is_finite(), "compressible state diverged");
+            assert!(
+                r.is_finite() && re.is_finite(),
+                "compressible state diverged"
+            );
             assert!(r > 0.5 && r < 2.0, "compressible density drifted: {r}");
             assert!(re > 1.0 && re < 5.0, "compressible energy drifted: {re}");
         }
@@ -1786,12 +1889,24 @@ mod tests {
         const SENTINEL: f32 = -999.0;
         solver.set_boundaries(move |_edge, _x, _y| {
             let mut v = vec![
-                BcComp { kind: 0, value: SENTINEL },
-                BcComp { kind: 0, value: 0.0 },
-                BcComp { kind: 0, value: 0.0 },
+                BcComp {
+                    kind: 0,
+                    value: SENTINEL,
+                },
+                BcComp {
+                    kind: 0,
+                    value: 0.0,
+                },
+                BcComp {
+                    kind: 0,
+                    value: 0.0,
+                },
             ];
             if s >= 4 {
-                v.push(BcComp { kind: 0, value: 0.0 });
+                v.push(BcComp {
+                    kind: 0,
+                    value: 0.0,
+                });
             }
             (2, v) // Outlet
         });

@@ -142,12 +142,13 @@ struct CompiledKernel {
     eos_fields: Vec<String>,
 }
 
-/// Pack the `constants` uniform for a kernel whose `Constants` struct is the 12
+/// Pack the `constants` uniform for a kernel whose `Constants` struct is the canonical
 /// base fields followed by `eos_fields` (in declared order), padded to the WGSL
 /// 16-byte uniform alignment.
 fn pack_kernel_constants(c: &GpuConstants, eos_fields: &[String]) -> Vec<u8> {
-    // First 48 bytes of GpuConstants are the 12 canonical base fields.
-    let mut bytes = bytemuck::bytes_of(c)[0..48].to_vec();
+    let base_bytes =
+        cfd2_codegen::solver::codegen::constants::base_constant_field_names().len() * 4;
+    let mut bytes = bytemuck::bytes_of(c)[0..base_bytes].to_vec();
     for f in eos_fields {
         let v: f32 = match f.as_str() {
             "eos_gamma" => c.eos_gamma,
@@ -252,8 +253,9 @@ impl CompiledKernel {
             compilation_options: Default::default(),
             cache: None,
         });
-        // `Constants` = 12 base fields (48 B) + eos_fields, padded to 16 B.
-        let cbytes = 48 + eos_fields.len() * 4;
+        let base_bytes =
+            cfd2_codegen::solver::codegen::constants::base_constant_field_names().len() * 4;
+        let cbytes = base_bytes + eos_fields.len() * 4;
         let csize = ((cbytes + 15) / 16 * 16).max(16) as u64;
         let constants_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some(id),
@@ -343,7 +345,7 @@ fn lower_structured_kernels(
                         access: b.access,
                     })
                     .collect();
-                // The kernel's `Constants` tail (EOS params beyond the 12 base
+                // The kernel's `Constants` tail (EOS params beyond the canonical base
                 // fields), read from the EMITTED WGSL — authoritative, since the
                 // codegen derives them from referenced params, not p.eos_params
                 // (which is empty for e.g. bc_expr yet its struct has eos_gm1/eos_r).
@@ -356,7 +358,7 @@ fn lower_structured_kernels(
     Ok(out)
 }
 
-/// The `struct Constants` fields BEYOND the 12 canonical base fields, in order,
+/// The `struct Constants` fields beyond the canonical base fields, in order,
 /// parsed from emitted WGSL. These are the EOS/buoyant params a kernel appends;
 /// they drive per-kernel `constants` uniform packing so `eos_*` reads land at the
 /// right offset (bc_expr appends only the params it references, not the full set).
@@ -382,9 +384,10 @@ fn parse_constants_eos_fields(wgsl: &str) -> Vec<String> {
             }
         }
     }
-    // Drop the 12 base fields; the remainder is the EOS/buoyant tail.
-    if fields.len() > 12 {
-        fields.split_off(12)
+    let base_len =
+        cfd2_codegen::solver::codegen::constants::base_constant_field_names().len();
+    if fields.len() > base_len {
+        fields.split_off(base_len)
     } else {
         Vec::new()
     }
@@ -1176,6 +1179,14 @@ impl StructuredGpuSolver {
         self.write_kernel_constants();
     }
 
+    /// Stage-time velocity-inlet soft-start inputs. A zero duration disables
+    /// the ramp and applies `velocity` immediately.
+    pub fn set_inlet_ramp(&mut self, velocity: f32, duration: f32) {
+        self.constants.inlet_velocity = velocity;
+        self.constants.inlet_ramp_time = duration.max(0.0);
+        self.write_kernel_constants();
+    }
+
     /// Change the time scheme without changing solver-program families.
     /// Euler↔BDF2 is live; transitions to/from RK4 require reconstruction.
     pub fn try_set_time_scheme(
@@ -1271,6 +1282,12 @@ impl StructuredGpuSolver {
     /// Scalar field (e.g. pressure) per cell — the GUI readback shape.
     pub fn get_scalar(&self, offset: usize) -> Vec<f64> {
         self.state_field(offset)
+    }
+
+    /// Read the complete packed state in one transfer. Explicit thermal
+    /// stability and positivity checks use this instead of one map per field.
+    pub fn packed_state_f32(&self) -> Vec<f32> {
+        self.read_f32("state", self.n * self.state_stride)
     }
 }
 

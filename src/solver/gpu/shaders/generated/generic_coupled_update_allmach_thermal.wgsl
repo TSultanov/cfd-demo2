@@ -14,6 +14,8 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
+    inlet_velocity: f32,
+    inlet_ramp_time: f32,
     eos_gamma: f32,
     eos_gm1: f32,
     eos_r: f32,
@@ -41,7 +43,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     state[idx * 21u + 12u] = select(state[idx * 21u + 12u], select(x[idx * 4u + 3u], mix(state[idx * 21u + 12u], x[idx * 4u + 3u], constants.alpha_u), state[idx * 21u + 12u] == state[idx * 21u + 12u] && abs(state[idx * 21u + 12u]) < 340000000000000000000000000000000000000.0), x[idx * 4u + 3u] == x[idx * 4u + 3u] && abs(x[idx * 4u + 3u]) < 340000000000000000000000000000000000000.0);
     x[idx * 4u + 3u] = select(state[idx * 21u + 12u], select(x[idx * 4u + 3u], mix(state[idx * 21u + 12u], x[idx * 4u + 3u], constants.alpha_u), state[idx * 21u + 12u] == state[idx * 21u + 12u] && abs(state[idx * 21u + 12u]) < 340000000000000000000000000000000000000.0), x[idx * 4u + 3u] == x[idx * 4u + 3u] && abs(x[idx * 4u + 3u]) < 340000000000000000000000000000000000000.0);
     state[idx * 21u + 8u] = max(state[idx * 21u + 18u] * state[idx * 21u + 17u] / state[idx * 21u + 12u], state[idx * 21u + 18u]);
-    state[idx * 21u + 9u] = state[idx * 21u + 20u] * max(state[idx * 21u + 8u], 1.0 / max(state[idx * 21u + 0u] * state[idx * 21u + 0u] + state[idx * 21u + 1u] * state[idx * 21u + 1u], state[idx * 21u + 19u] * state[idx * 21u + 19u]));
+    state[idx * 21u + 9u] = state[idx * 21u + 20u] * (0.4 * state[idx * 21u + 18u] * state[idx * 21u + 17u] / state[idx * 21u + 12u] + max(state[idx * 21u + 8u], 1.0 / max(max(state[idx * 21u + 0u] * state[idx * 21u + 0u] + state[idx * 21u + 1u] * state[idx * 21u + 1u], state[idx * 21u + 19u] * state[idx * 21u + 19u]), 0.000000000001)));
     state[idx * 21u + 11u] = max(state[idx * 21u + 13u] / state[idx * 21u + 12u] + 1.4 * state[idx * 21u + 18u] * state[idx * 21u + 17u] * state[idx * 21u + 2u] / state[idx * 21u + 12u], state[idx * 21u + 16u]);
     state[idx * 21u + 14u] = -((state[idx * 21u + 13u] + 1.4 * state[idx * 21u + 18u] * state[idx * 21u + 17u] * state[idx * 21u + 2u]) / (state[idx * 21u + 12u] * state[idx * 21u + 12u]));
     state[idx * 21u + 15u] = state[idx * 21u + 0u] * state[idx * 21u + 4u] + state[idx * 21u + 1u] * state[idx * 21u + 5u];

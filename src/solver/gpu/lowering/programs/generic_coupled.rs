@@ -3793,6 +3793,34 @@ pub(crate) fn param_time_scheme(
     Ok(())
 }
 
+pub(crate) fn param_inlet_velocity(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(velocity) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    r.fields.constants.values_mut().inlet_velocity = velocity;
+    r.fields.constants.write(&queue);
+    Ok(())
+}
+
+pub(crate) fn param_inlet_ramp_time(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(duration) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    r.fields.constants.values_mut().inlet_ramp_time = duration.max(0.0);
+    r.fields.constants.write(&queue);
+    Ok(())
+}
+
 pub(crate) fn param_viscosity(
     plan: &mut GpuProgramPlan,
     value: PlanParamValue,

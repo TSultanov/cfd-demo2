@@ -96,6 +96,10 @@ pub struct GpuConstants {
     pub alpha_u: f32,   // Velocity under-relaxation
     pub stride_x: u32,
     pub time_scheme: u32, // 0: Euler, 1: BDF2
+    /// Immutable target for a stage-time velocity-inlet soft start.
+    pub inlet_velocity: f32,
+    /// Ramp duration; zero disables the soft start.
+    pub inlet_ramp_time: f32,
 
     // --- Equation of state (runtime) ---
     pub eos_gamma: f32,
@@ -131,6 +135,8 @@ impl Default for GpuConstants {
             alpha_u: 0.7,
             stride_x: 65535 * 64,
             time_scheme: 0,
+            inlet_velocity: 0.0,
+            inlet_ramp_time: 0.0,
             eos_gamma: 1.4,
             eos_gm1: 0.4,
             eos_r: 1.0,

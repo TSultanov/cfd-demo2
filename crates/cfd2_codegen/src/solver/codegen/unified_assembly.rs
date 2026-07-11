@@ -117,6 +117,62 @@ fn split_dp_coeff_factor(
     }
 }
 
+/// Build the interior-face diffusion coefficient, including the structured-IBM
+/// Rhie--Chow conductance rule. Both implicit assembly and the matrix-free
+/// explicit residual must call this helper: using different interpolation for
+/// `laplacian(rho*d_p,p)` than the flux module uses for the two pressure-bracket
+/// terms reintroduces a collocated pressure null mode.
+fn interior_diffusion_coefficient(
+    slots: &ResolvedStateSlotsSpec,
+    coeff: Option<&Coefficient>,
+    kappa_own: Expr,
+    kappa_other: Expr,
+) -> Expr {
+    let interpolated = kappa_own.clone() * Expr::ident("lambda_f")
+        + kappa_other.clone() * (Expr::from(1.0) - Expr::ident("lambda_f"));
+    let ibm_dp_seal = find_slot(slots, IBM_PENALTY_SLOT).and_then(|pen_slot| {
+        coeff
+            .and_then(split_dp_coeff_factor)
+            .map(|split| (pen_slot, split))
+    });
+    let Some((pen_slot, (dp_field, rest))) = ibm_dp_seal else {
+        return interpolated;
+    };
+
+    let dp_slot = find_slot(slots, dp_field.name()).unwrap_or_else(|| {
+        panic!(
+            "IBM d_p seal: missing '{}' in resolved state slots",
+            dp_field.name()
+        )
+    });
+    let dp_own = state_component_slot(slots.stride, "state", "idx", dp_slot, 0);
+    let dp_neigh = state_component_slot(slots.stride, "state", "other_idx", dp_slot, 0);
+    let dp_min = dsl::min(dp_own, dp_neigh);
+    let sealed = match rest {
+        Some(rest) => {
+            let rest_own = coefficient_value_expr(slots, Some(&rest), "idx", 1.0.into());
+            let rest_other =
+                coefficient_value_expr(slots, Some(&rest), "other_idx", 1.0.into());
+            (rest_own * Expr::ident("lambda_f")
+                + rest_other * (Expr::from(1.0) - Expr::ident("lambda_f")))
+                * dp_min
+        }
+        None => dp_min,
+    };
+
+    // Fluid rows use the min-based impermeable-wall conductance. Solid rows
+    // retain the unsealed interpolation so their otherwise flux-isolated
+    // pressure remains slaved to neighbouring pressure instead of resonating.
+    let sp_own_abs = dsl::abs(state_component_slot(
+        slots.stride,
+        "state",
+        "idx",
+        pen_slot,
+        0,
+    ));
+    dsl::select(sealed, interpolated, sp_own_abs.gt(0.0))
+}
+
 /// `mesh_fluxes` storage binding (group 0 / binding 8): per-face volumetric
 /// swept rate `V̇_f = A_swept(f)/dt` (Volume/Time), signed along the stored
 /// face normal (owner convention, like the `fluxes` mass flux). Computed
@@ -129,6 +185,18 @@ fn mesh_fluxes_item() -> Item {
         Type::array(Type::F32),
         0,
         8,
+        AccessMode::Read,
+    )
+}
+
+/// Periodic-seam shift that lifts the wrapped neighbour centre into the face
+/// owner's coordinate frame. It is zero on ordinary faces/static domains.
+fn face_wrap_shift_item() -> Item {
+    storage_var(
+        "face_wrap_shift",
+        Type::array(Type::Custom("Vector2".to_string())),
+        0,
+        14,
         AccessMode::Read,
     )
 }
@@ -391,6 +459,7 @@ pub fn generate_unified_assembly_wgsl(
                     needs_fluxes,
                     self.eos_params,
                 ));
+                module.push(face_wrap_shift_item());
             }
             if unified_assembly_needs_mesh_fluxes(self.system) {
                 validate_ale_unified_assembly(self.system, self.slots);
@@ -450,6 +519,9 @@ pub fn generate_unified_assembly_kernel_program(
             } else {
                 base_assembly_items(self.needs_gradients, needs_fluxes, self.eos_params)
             };
+            if self.system.topology() == TopologyMode::Unstructured {
+                items.push(face_wrap_shift_item());
+            }
             if unified_assembly_needs_mesh_fluxes(self.system) {
                 validate_ale_unified_assembly(self.system, self.slots);
                 items.push(mesh_fluxes_item());
@@ -513,12 +585,15 @@ pub fn generate_matrix_free_residual_kernel_program(
         fn call<Ax: typed::CoupledAxis>(&self) -> Result<KernelProgram, String> {
             let needs_fluxes = unified_assembly_needs_fluxes(self.system);
             validate_unified_assembly_inputs(needs_fluxes, self.flux_stride);
-            let items = super::coupled_common::base_matrix_free_residual_items(
+            let mut items = super::coupled_common::base_matrix_free_residual_items(
                 self.system.topology(),
                 self.needs_gradients,
                 needs_fluxes,
                 self.eos_params,
             );
+            if self.system.topology() == TopologyMode::Unstructured {
+                items.push(face_wrap_shift_item());
+            }
             let bindings = kernel_bindings_from_items(&items)?;
             let main = main_assembly_fn::<Ax>(
                 self.system,
@@ -615,6 +690,7 @@ fn structured_face_head() -> Vec<Stmt> {
         // outward, so `owner == idx` unconditionally — this keeps the shared
         // convection/reconstruction orientation guards (`owner != idx`) inert.
         dsl::let_expr("owner", id("idx")),
+        dsl::let_expr("center_frame", id("center")),
         dsl::let_expr("axis_is_x", axis_is_x),
         dsl::let_expr("sign_f", dsl::select(-1.0, 1.0, k_pos.clone())),
         dsl::let_expr(
@@ -1158,6 +1234,15 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                 dsl::var_typed_expr("is_boundary", Type::Bool, Some(false.into())),
                 dsl::var_typed_expr("other_idx", Type::U32, Some(Expr::ident("idx"))),
                 dsl::var_typed_expr("other_center", Type::Custom("Vector2".to_string()), None),
+                dsl::let_expr(
+                    "wrap_shift",
+                    dsl::array_access("face_wrap_shift", Expr::ident("face_idx")),
+                ),
+                dsl::var_typed_expr(
+                    "center_frame",
+                    Type::Custom("Vector2".to_string()),
+                    Some(Expr::ident("center")),
+                ),
                 // Make normal outward from `idx`.
                 dsl::if_block_expr(
                     Expr::ident("owner").ne(Expr::ident("idx")),
@@ -1169,6 +1254,19 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                         dsl::assign_expr(
                             Expr::ident("normal").field("y"),
                             -Expr::ident("normal").field("y"),
+                        ),
+                        // The face centre is stored in the face owner's frame.
+                        // Lift the wrapped neighbour-row centre into that same
+                        // frame before computing d and interpolation weights.
+                        dsl::assign_op_expr(
+                            AssignOp::Add,
+                            Expr::ident("center_frame").field("x"),
+                            Expr::ident("wrap_shift").field("x"),
+                        ),
+                        dsl::assign_op_expr(
+                            AssignOp::Add,
+                            Expr::ident("center_frame").field("y"),
+                            Expr::ident("wrap_shift").field("y"),
                         ),
                     ]),
                     None,
@@ -1193,6 +1291,25 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     Expr::ident("other_center"),
                     dsl::array_access("cell_centers", Expr::ident("other_idx")),
                 ),
+                // Owner row: lift the wrapped neighbour into the owner's
+                // frame. Neighbour row already lifted `center_frame` above and
+                // its `other_center` is the unshifted face owner.
+                dsl::if_block_expr(
+                    Expr::ident("owner").eq(Expr::ident("idx")),
+                    dsl::block(vec![
+                        dsl::assign_op_expr(
+                            AssignOp::Add,
+                            Expr::ident("other_center").field("x"),
+                            Expr::ident("wrap_shift").field("x"),
+                        ),
+                        dsl::assign_op_expr(
+                            AssignOp::Add,
+                            Expr::ident("other_center").field("y"),
+                            Expr::ident("wrap_shift").field("y"),
+                        ),
+                    ]),
+                    None,
+                ),
             ]);
 
             let boundary_block = dsl::block(vec![
@@ -1210,11 +1327,11 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
 
         body.push(dsl::let_expr(
             "dx",
-            Expr::ident("other_center").field("x") - Expr::ident("center").field("x"),
+            Expr::ident("other_center").field("x") - Expr::ident("center_frame").field("x"),
         ));
         body.push(dsl::let_expr(
             "dy",
-            Expr::ident("other_center").field("y") - Expr::ident("center").field("y"),
+            Expr::ident("other_center").field("y") - Expr::ident("center_frame").field("y"),
         ));
         body.push(dsl::let_expr(
             "dist_proj",
@@ -1261,9 +1378,10 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
         body.push(dsl::let_expr(
             "lam_d_own",
             dsl::abs(
-                (Expr::ident("f_center").field("x") - Expr::ident("center").field("x"))
+                (Expr::ident("f_center").field("x") - Expr::ident("center_frame").field("x"))
                     * Expr::ident("normal").field("x")
-                    + (Expr::ident("f_center").field("y") - Expr::ident("center").field("y"))
+                    + (Expr::ident("f_center").field("y")
+                        - Expr::ident("center_frame").field("y"))
                         * Expr::ident("normal").field("y"),
             ),
         ));
@@ -1391,66 +1509,12 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                 // faces see min(a,a) == a for the uniform ClosedForm d_p, so
                 // the fluid operator is unchanged; non-IBM models (no
                 // `ibm_penalty_U` slot) emit byte-identical code.
-                let ibm_dp_seal = find_slot(slots, IBM_PENALTY_SLOT).and_then(|pen_slot| {
-                    diff_op
-                        .coeff
-                        .as_ref()
-                        .and_then(split_dp_coeff_factor)
-                        .map(|split| (pen_slot, split))
-                });
-                let kappa_interior = if let Some((pen_slot, (dp_field, rest))) = &ibm_dp_seal {
-                    let dp_slot = find_slot(slots, dp_field.name()).unwrap_or_else(|| {
-                        panic!(
-                            "IBM d_p seal: missing '{}' in resolved state slots",
-                            dp_field.name()
-                        )
-                    });
-                    let dp_own = state_component_slot(slots.stride, "state", "idx", dp_slot, 0);
-                    let dp_neigh =
-                        state_component_slot(slots.stride, "state", "other_idx", dp_slot, 0);
-                    let dp_min = dsl::min(dp_own, dp_neigh);
-                    let sealed = match rest {
-                        Some(rest) => {
-                            let rest_own =
-                                coefficient_value_expr(slots, Some(rest), "idx", 1.0.into());
-                            let rest_other =
-                                coefficient_value_expr(slots, Some(rest), "other_idx", 1.0.into());
-                            (rest_own * Expr::ident("lambda_f")
-                                + rest_other * (Expr::from(1.0) - Expr::ident("lambda_f")))
-                                * dp_min
-                        }
-                        None => dp_min,
-                    };
-                    // ROW-DEPENDENT conductance (the anchor half of the seal):
-                    // SOLID rows (|Sp_own| > 0) keep the ORIGINAL unsealed
-                    // blend, so a solid cell's pressure stays strongly slaved
-                    // to its neighbours (p_S ~ conductance-weighted average;
-                    // its face flux is sealed to 0, so nothing forces the row).
-                    // Without this the sealed solid block is only ~1/|Sp|-
-                    // coupled and becomes a pressure RESONATOR: fluid momentum
-                    // reads solid p directly through the Green-Gauss pressure
-                    // force, and under the all-Mach ddt(psi_precond, p) the
-                    // sloshing solid p drives a bounded interface limit cycle
-                    // (GUI-regime probe: ring mean|U| ~ 16x inlet). FLUID rows
-                    // take the sealed min, keeping the wall impermeable in the
-                    // fluid continuity (matrix matches the sealed flux to
-                    // O(d_p_solid)). The pressure block becomes nonsymmetric
-                    // at mixed faces ONLY — solid-solid and fluid-fluid faces
-                    // agree on both rows (min == blend for uniform d_p).
-                    let sp_own_abs = dsl::abs(state_component_slot(
-                        slots.stride,
-                        "state",
-                        "idx",
-                        pen_slot,
-                        0,
-                    ));
-                    let unsealed = kappa_own.clone() * Expr::ident("lambda_f")
-                        + kappa_other.clone() * (Expr::from(1.0) - Expr::ident("lambda_f"));
-                    dsl::select(sealed, unsealed, sp_own_abs.gt(0.0))
-                } else {
-                    kappa_own.clone() * Expr::ident("lambda_f")
-                        + kappa_other * (Expr::from(1.0) - Expr::ident("lambda_f"))
-                };
+                let kappa_interior = interior_diffusion_coefficient(
+                    slots,
+                    diff_op.coeff.as_ref(),
+                    kappa_own.clone(),
+                    kappa_other,
+                );
                 // Distance-weighted for interior faces; owner value at boundaries.
                 let kappa = dsl::select(kappa_own, kappa_interior, !Expr::ident("is_boundary"));
 
@@ -1626,10 +1690,15 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     coefficient_value_expr(slots, diff_op.coeff.as_ref(), "idx", 1.0.into());
                 let kappa_other =
                     coefficient_value_expr(slots, diff_op.coeff.as_ref(), "other_idx", 1.0.into());
+                let kappa_interior = interior_diffusion_coefficient(
+                    slots,
+                    diff_op.coeff.as_ref(),
+                    kappa_own.clone(),
+                    kappa_other,
+                );
                 let kappa_face = dsl::select(
                     kappa_own.clone(),
-                    kappa_own.clone() * Expr::ident("lambda_f")
-                        + kappa_other * (Expr::from(1.0) - Expr::ident("lambda_f")),
+                    kappa_interior,
                     !Expr::ident("is_boundary"),
                 );
 

@@ -69,8 +69,8 @@ struct ScheduleGroups {
     /// `per_iter` for outer iterations AFTER the first: without
     /// [`KernelId::FLUX_MODULE_GRADIENTS`] when the update group contains a
     /// Rhie-Chow grad_p refresher ([`KernelId::refreshes_grad_p`]) — that
-    /// kernel already wrote the identical Green-Gauss pressure gradient
-    /// (same stencil, same boundary closure) and nothing modifies `p` in
+    /// kernel already wrote the identical normalized-WLS pressure gradient
+    /// (same rows, same boundary closure) and nothing modifies `p` in
     /// between, so the recompute is redundant. `CFD2_NO_GRADP_SKIP=1` disables
     /// (then this equals `per_iter`).
     per_iter_tail: Vec<String>,
@@ -876,6 +876,12 @@ impl CpuSolver {
     }
     pub fn set_density(&mut self, rho: f32) {
         self.constants.density = rho;
+    }
+    pub fn set_inlet_velocity_target(&mut self, velocity: f32) {
+        self.constants.inlet_velocity = velocity;
+    }
+    pub fn set_inlet_ramp_time(&mut self, duration: f32) {
+        self.constants.inlet_ramp_time = duration.max(0.0);
     }
     /// Update an EOS runtime constant by its `eos.<field>` param name, mirroring
     /// the GPU `set_eos` (which writes the same constants the assembly reads). Lets
@@ -2117,6 +2123,16 @@ fn constants_ctx(c: &GpuConstants, lm: &GpuLowMachParams) -> Ctx {
         .with_constant("constants", "alpha_u", Value::F32(c.alpha_u))
         .with_constant("constants", "stride_x", Value::U32(c.stride_x))
         .with_constant("constants", "time_scheme", Value::U32(c.time_scheme))
+        .with_constant(
+            "constants",
+            "inlet_velocity",
+            Value::F32(c.inlet_velocity),
+        )
+        .with_constant(
+            "constants",
+            "inlet_ramp_time",
+            Value::F32(c.inlet_ramp_time),
+        )
         .with_constant("constants", "eos_gamma", Value::F32(c.eos_gamma))
         .with_constant("constants", "eos_gm1", Value::F32(c.eos_gm1))
         .with_constant("constants", "eos_r", Value::F32(c.eos_r))

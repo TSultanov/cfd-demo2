@@ -14,6 +14,8 @@ struct Constants {
     alpha_u: f32,
     stride_x: u32,
     time_scheme: u32,
+    inlet_velocity: f32,
+    inlet_ramp_time: f32,
 }
 
 
@@ -23,11 +25,11 @@ struct Constants {
 @compute @workgroup_size(64, 1, 1)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.y * constants.stride_x + global_id.x;
-    if (idx >= (arrayLength(&state) / 12u)) { return; }
-    let base = idx * 12u;
+    if (idx >= (arrayLength(&state) / 14u)) { return; }
+    let base = idx * 14u;
     // synthesized by fusion rule: rhie_chow:dp_update_store_grad_p_v1
     // begin fused segment: dp_update_from_diag
-    let rho = max(constants.density, 0.000000000001);
+    let rho = max(state[base + 11u], 0.000000000001);
     let dt = max(constants.dt, 0.0);
     let d_p = constants.alpha_u * dt / rho;
     state[base + 3u] = d_p;

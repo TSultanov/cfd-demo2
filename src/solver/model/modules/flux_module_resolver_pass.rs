@@ -154,7 +154,9 @@ fn collect_from_scalar_expr(
         | FaceScalarExpr::LowMachParam(_)
         | FaceScalarExpr::MeshFlux => {}
 
-        FaceScalarExpr::State { name, .. } => {
+        FaceScalarExpr::State { name, .. }
+        | FaceScalarExpr::CellState { name, .. }
+        | FaceScalarExpr::BoundaryDirichlet { name } => {
             out.insert(name.clone());
         }
 
@@ -407,4 +409,3 @@ mod tests {
         assert!(resolved_new.slots.iter().any(|s| s.name == "rho_u"));
     }
 }
-

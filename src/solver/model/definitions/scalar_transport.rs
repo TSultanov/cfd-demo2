@@ -109,6 +109,7 @@ fn build_scalar_transport_model(
         &system,
         &layout,
         &primitives,
+        None,
     )
     .map_err(|e| format!("{id}: failed to build flux_module module: {e}"))?;
 

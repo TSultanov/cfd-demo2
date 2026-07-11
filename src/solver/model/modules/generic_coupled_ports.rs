@@ -1,5 +1,7 @@
 // Separate from the main module to avoid build-script include issues.
-use cfd2_ir::dimensions::{Dimensionless, Density, DynamicViscosity, Time, UnitDimension};
+use cfd2_ir::dimensions::{
+    Dimensionless, Density, DynamicViscosity, Time, UnitDimension, Velocity,
+};
 use crate::solver::ir::ports::ParamSpec;
 use crate::solver::model::module::PortManifest as ModulePortManifest;
 
@@ -42,6 +44,18 @@ pub fn generic_coupled_uniform_port_manifest(
             wgsl_field: "time_scheme",
             wgsl_type: "u32",
             unit: Dimensionless::UNIT,
+        },
+        ParamSpec {
+            key: "inlet_velocity",
+            wgsl_field: "inlet_velocity",
+            wgsl_type: "f32",
+            unit: Velocity::UNIT,
+        },
+        ParamSpec {
+            key: "inlet_ramp_time",
+            wgsl_field: "inlet_ramp_time",
+            wgsl_type: "f32",
+            unit: Time::UNIT,
         },
     ];
 

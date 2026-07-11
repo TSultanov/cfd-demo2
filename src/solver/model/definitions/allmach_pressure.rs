@@ -31,9 +31,11 @@
 //! iteration.
 
 use crate::solver::gpu::enums::GpuBoundaryType;
+use crate::solver::model::backend::algebraic::ParamRef;
 use crate::solver::model::backend::ast::{
     surface_scalar_dim, vol_scalar_dim, vol_vector_dim, EquationSystem, FieldRef, FluxRef,
 };
+use crate::solver::model::backend::boundary::BoundaryExpr as B;
 use crate::solver::model::backend::typed_ast::{
     typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef, TypedFluxRef, Vector2,
 };
@@ -43,7 +45,7 @@ use cfd2_codegen::solver::codegen::dsl::XY;
 use cfd2_ir::ast::Expr;
 use cfd2_ir::dimensions::{
     Density, DivDim, DynamicViscosity, Force, InvTime, Length, MassFlux, MulDim, Pressure,
-    Temperature, Time, Velocity, Volume,
+    Temperature, Time, UnitDimension, Velocity, Volume,
 };
 use std::collections::HashMap;
 
@@ -282,9 +284,8 @@ fn build_allmach_system(
             + typed_fvc::div_dev2_grad_transpose(mu_coeff2, u_typed).cast_to::<Force>();
     }
     if with_mms_source {
-        let mms_src_typed = TypedFieldRef::<DivDim<Force, Volume>, Vector2>::new(
-            ALLMACH_MMS_SOURCE_U_FIELD,
-        );
+        let mms_src_typed =
+            TypedFieldRef::<DivDim<Force, Volume>, Vector2>::new(ALLMACH_MMS_SOURCE_U_FIELD);
         momentum_sum =
             momentum_sum + typed_fvc::source_vector(mms_src_typed, u_typed).cast_to::<Force>();
     }
@@ -339,9 +340,8 @@ fn build_allmach_system(
         let term = if with_mms_source {
             term
         } else {
-            let psi_lin = TypedCoeff::from_field(TypedFieldRef::<Compressibility, Scalar>::new(
-                "psi",
-            ));
+            let psi_lin =
+                TypedCoeff::from_field(TypedFieldRef::<Compressibility, Scalar>::new("psi"));
             term.with_pressure_flux_linearization(psi_lin)
         };
         // Continuity on the moving mesh is mesh-relative too: the compensating
@@ -366,8 +366,9 @@ fn build_allmach_system(
     // pinned closed-box march); production (`allmach_thermal`) always carries it.
     if thermal && !strip_all {
         let t_typed_p = TypedFieldRef::<Temperature, Scalar>::new(ALLMACH_TEMPERATURE_FIELD);
-        let rho_dt_coeff =
-            TypedCoeff::from_field(TypedFieldRef::<RhoDtUnit, Scalar>::new(ALLMACH_RHO_DT_FIELD));
+        let rho_dt_coeff = TypedCoeff::from_field(TypedFieldRef::<RhoDtUnit, Scalar>::new(
+            ALLMACH_RHO_DT_FIELD,
+        ));
         let thermal_expansion_term = typed_fvm::ddt_coeff(rho_dt_coeff, t_typed_p);
         pressure_sum = pressure_sum + thermal_expansion_term.cast_to::<MassFlux>();
     }
@@ -447,9 +448,12 @@ fn build_allmach_system(
                 TypedCoeff::constant(-(ALLMACH_GAMMA - 1.0) * ALLMACH_T_REF);
             // 1/cp = (gamma-1)*T_ref*psi_ref uses the REFERENCE compressibility so cp
             // stays constant (an ideal gas) as `psi` becomes the local 1/c^2.
-            let inv_cp = inv_cp_const.multiply(TypedCoeff::from_field(
-                TypedFieldRef::<Compressibility, Scalar>::new(ALLMACH_PSI_REF_FIELD),
-            ));
+            let inv_cp = inv_cp_const.multiply(TypedCoeff::from_field(TypedFieldRef::<
+                Compressibility,
+                Scalar,
+            >::new(
+                ALLMACH_PSI_REF_FIELD
+            )));
             let comp_ddt = typed_fvm::ddt_coeff(inv_cp, p_typed);
             t_sum = t_sum + comp_ddt.cast_to::<TEquationUnit>();
 
@@ -468,12 +472,18 @@ fn build_allmach_system(
             let inv_cp_src: TypedCoeff<Temperature> =
                 TypedCoeff::constant((ALLMACH_GAMMA - 1.0) * ALLMACH_T_REF);
             let comp_adv_coeff = inv_cp_src
-                .multiply(TypedCoeff::from_field(
-                    TypedFieldRef::<Compressibility, Scalar>::new(ALLMACH_PSI_REF_FIELD),
-                ))
-                .multiply(TypedCoeff::from_field(
-                    TypedFieldRef::<PressureRateUnit, Scalar>::new(ALLMACH_U_DOT_GRAD_P_FIELD),
-                ));
+                .multiply(TypedCoeff::from_field(TypedFieldRef::<
+                    Compressibility,
+                    Scalar,
+                >::new(
+                    ALLMACH_PSI_REF_FIELD
+                )))
+                .multiply(TypedCoeff::from_field(TypedFieldRef::<
+                    PressureRateUnit,
+                    Scalar,
+                >::new(
+                    ALLMACH_U_DOT_GRAD_P_FIELD
+                )));
             t_sum =
                 t_sum + typed_fvc::source_coeff(comp_adv_coeff, t_typed).cast_to::<TEquationUnit>();
 
@@ -489,22 +499,25 @@ fn build_allmach_system(
             // state), unlike the transient compression/thermal-expansion terms.
             let visc_diss_coeff =
                 TypedCoeff::<Temperature>::constant((ALLMACH_GAMMA - 1.0) * ALLMACH_T_REF)
-                    .multiply(TypedCoeff::from_field(
-                        TypedFieldRef::<Compressibility, Scalar>::new(ALLMACH_PSI_REF_FIELD),
-                    ))
-                    .multiply(TypedCoeff::from_field(
-                        TypedFieldRef::<DynamicViscosity, Scalar>::new("mu"),
-                    ));
+                    .multiply(TypedCoeff::from_field(TypedFieldRef::<
+                        Compressibility,
+                        Scalar,
+                    >::new(
+                        ALLMACH_PSI_REF_FIELD
+                    )))
+                    .multiply(TypedCoeff::from_field(TypedFieldRef::<
+                        DynamicViscosity,
+                        Scalar,
+                    >::new("mu")));
             t_sum = t_sum
                 + typed_fvc::viscous_dissipation(visc_diss_coeff, u_typed)
                     .cast_to::<TEquationUnit>();
         }
 
         if with_mms_source {
-            let mms_src_t =
-                TypedCoeff::from_field(TypedFieldRef::<TSourceUnit, Scalar>::new(
-                    ALLMACH_MMS_SOURCE_T_FIELD,
-                ));
+            let mms_src_t = TypedCoeff::from_field(TypedFieldRef::<TSourceUnit, Scalar>::new(
+                ALLMACH_MMS_SOURCE_T_FIELD,
+            ));
             t_sum = t_sum + typed_fvc::source_coeff(mms_src_t, t_typed).cast_to::<TEquationUnit>();
         }
         system.add_equation(t_sum.eqn(t_typed));
@@ -618,10 +631,24 @@ pub fn apply_pressure_inlet_nozzle_bcs(model: &mut ModelSpec) {
     use cfd2_ir::dimensions::{DivDim, InvTime, Length, Pressure, Temperature, Velocity};
 
     if let Some(u) = model.boundaries.fields.get_mut("U") {
+        // Keep the production stage-time expression attached while changing its
+        // kind to ZeroGradient.  The pre-generated GPU recipe is keyed by model id
+        // and therefore still schedules `bc_expr_update`; preserving this entry
+        // keeps the runtime CPU program and the committed GPU program identical.
+        // `bc_neighbor_scalar` ignores the refreshed value for ZeroGradient, so the
+        // axial face state is still extrapolated from the owner cell.
+        let mut axial = u
+            .by_boundary
+            .get(&GpuBoundaryType::Inlet)
+            .and_then(|conditions| conditions.first())
+            .filter(|condition| condition.expr_value().is_some())
+            .cloned()
+            .unwrap_or_else(BoundaryCondition::zero_gradient_dim::<InvTime>);
+        axial.kind = crate::solver::gpu::enums::GpuBcKind::ZeroGradient;
         u.by_boundary.insert(
             GpuBoundaryType::Inlet,
             vec![
-                BoundaryCondition::zero_gradient_dim::<InvTime>(), // U_x develops with the drop
+                axial,                                             // U_x develops with the drop
                 BoundaryCondition::dirichlet_dim::<Velocity>(0.0), // U_y pinned axial
             ],
         );
@@ -633,13 +660,17 @@ pub fn apply_pressure_inlet_nozzle_bcs(model: &mut ModelSpec) {
         );
         p.by_boundary.insert(
             GpuBoundaryType::Outlet,
-            vec![BoundaryCondition::zero_gradient_dim::<DivDim<Pressure, Length>>()],
+            vec![BoundaryCondition::zero_gradient_dim::<
+                DivDim<Pressure, Length>,
+            >()],
         );
     }
     if let Some(t) = model.boundaries.fields.get_mut(ALLMACH_TEMPERATURE_FIELD) {
         t.by_boundary.insert(
             GpuBoundaryType::Outlet,
-            vec![BoundaryCondition::zero_gradient_dim::<DivDim<Temperature, Length>>()],
+            vec![BoundaryCondition::zero_gradient_dim::<
+                DivDim<Temperature, Length>,
+            >()],
         );
     }
 }
@@ -688,8 +719,14 @@ fn allmach_pressure_model_impl_topo(
     // The structured (dense-Cartesian) variant is immersed-boundary-capable:
     // obstacles are a per-cell Brinkman momentum mask, never cut from the grid.
     let ibm = topology == cfd2_ir::equation::TopologyMode::Structured2D;
-    let mut system =
-        build_allmach_system(&fields, with_mms_source, compressible_mms, thermal, ale, ibm);
+    let mut system = build_allmach_system(
+        &fields,
+        with_mms_source,
+        compressible_mms,
+        thermal,
+        ale,
+        ibm,
+    );
     system.set_topology(topology);
 
     // Keep U,p,d_p,grad_p,grad_p_old at the same offsets as incompressible
@@ -721,7 +758,9 @@ fn allmach_pressure_model_impl_topo(
         if !strip_all {
             layout_fields.push(vol_scalar_dim::<RhoDtUnit>(ALLMACH_RHO_DT_FIELD));
             // U.grad(p), recovered on-device for the compression-heating source.
-            layout_fields.push(vol_scalar_dim::<PressureRateUnit>(ALLMACH_U_DOT_GRAD_P_FIELD));
+            layout_fields.push(vol_scalar_dim::<PressureRateUnit>(
+                ALLMACH_U_DOT_GRAD_P_FIELD,
+            ));
             // EOS density floor (= psi * absolute-pressure floor), seeded by the driver.
             // Clamps the on-device density recovery positive against transient pressure
             // undershoot through vacuum (see ALLMACH_RHO_FLOOR_FIELD).
@@ -739,13 +778,17 @@ fn allmach_pressure_model_impl_topo(
             // carries the LOCAL 1/c^2(T). Appended last so every prior field's offset
             // is unchanged (offsets are load-bearing).
             layout_fields.push(vol_scalar_dim::<Compressibility>(ALLMACH_PSI_REF_FIELD));
-            // Preconditioner inputs for the on-device psi_precond recovery: the
-            // inlet-scale velocity floor `u_ref` and the 0/1 enable `precond_mask`.
-            layout_fields.push(vol_scalar_dim::<Velocity>(ALLMACH_U_REF_FIELD));
-            layout_fields.push(vol_scalar_dim::<cfd2_ir::dimensions::Dimensionless>(
-                ALLMACH_PRECOND_MASK_FIELD,
-            ));
         }
+    }
+    if !strip_all {
+        // Preconditioner inputs are state fields for both thermal and barotropic
+        // production models.  Explicit RK recovers `psi_precond` from the live
+        // stage velocity; keeping this closure on-device makes the trajectory
+        // independent of GUI/readback cadence.
+        layout_fields.push(vol_scalar_dim::<Velocity>(ALLMACH_U_REF_FIELD));
+        layout_fields.push(vol_scalar_dim::<cfd2_ir::dimensions::Dimensionless>(
+            ALLMACH_PRECOND_MASK_FIELD,
+        ));
     }
     if with_mms_source {
         layout_fields.push(vol_vector_dim::<DivDim<Force, Volume>>(
@@ -760,7 +803,9 @@ fn allmach_pressure_model_impl_topo(
     }
     if ibm {
         // Per-cell Brinkman momentum-penalty mask (structured immersed obstacles).
-        layout_fields.push(vol_scalar_dim::<DivDim<Density, Time>>(IBM_MOMENTUM_PENALTY_FIELD));
+        layout_fields.push(vol_scalar_dim::<DivDim<Density, Time>>(
+            IBM_MOMENTUM_PENALTY_FIELD,
+        ));
     }
     let layout = PortRegistry::from_fields(layout_fields).into_state_layout();
 
@@ -773,7 +818,9 @@ fn allmach_pressure_model_impl_topo(
             .map_err(|e| format!("failed to derive Rhie–Chow flux: {e}"))?;
 
     let (u0, u1, p) = {
-        use crate::solver::model::ports::{PortRegistry, Pressure as PortPressure, Velocity as PortVelocity};
+        use crate::solver::model::ports::{
+            PortRegistry, Pressure as PortPressure, Velocity as PortVelocity,
+        };
 
         let mut registry = PortRegistry::new(layout.clone());
         registry
@@ -816,20 +863,56 @@ fn allmach_pressure_model_impl_topo(
         vec![u0, u1]
     };
 
+    let inlet_u_conditions = if with_mms_source {
+        vec![BoundaryCondition::dirichlet_dim::<Velocity>(0.0); 2]
+    } else {
+        // Velocity-inlet startup is a prescribed non-autonomous boundary, so
+        // evaluate it in the Preparation phase at each RK abscissa (constants.time
+        // is set to t_n, t_n+dt/2, t_n+dt/2, t_n+dt). The immutable target and
+        // ramp duration are uniform params; reading and overwriting the same BC
+        // table entry would compound the ramp from stage to stage.
+        let stage_time = B::param(ParamRef::new("time", Time::UNIT));
+        let ramp_time = B::param(ParamRef::new("inlet_ramp_time", Time::UNIT));
+        let target = B::param(ParamRef::new("inlet_velocity", Velocity::UNIT));
+        let x = (stage_time / ramp_time.clone().max(B::lit(1.0e-20)))
+            .max(B::lit(0.0))
+            .min(B::lit(1.0));
+        // C4 nonic smootherstep: derivatives through order four vanish at
+        // both endpoints, so an adaptive step crossing t_r does not inject a
+        // lower-regularity acoustic impulse.
+        let x2 = x.clone() * x.clone();
+        let x4 = x2.clone() * x2;
+        let x5 = x4 * x.clone();
+        let polynomial = B::lit(126.0)
+            + x.clone()
+                * (B::lit(-420.0)
+                    + x.clone()
+                        * (B::lit(540.0) + x.clone() * (B::lit(-315.0) + x * B::lit(70.0))));
+        let smooth = x5 * polynomial;
+        let ramped = ramp_time.select_gt(B::lit(0.0), target.clone() * smooth, target);
+        vec![
+            BoundaryCondition::with_expr_value_dim::<Velocity>(
+                crate::solver::gpu::enums::GpuBcKind::Dirichlet,
+                ramped,
+            )?,
+            BoundaryCondition::dirichlet_dim::<Velocity>(0.0),
+        ]
+    };
+    let outlet_u_condition = if with_mms_source {
+        // MMS uses one Outlet-labelled edge to pin the manufactured pressure.
+        // Keep velocity Dirichlet there as well so changing the patch label does
+        // not replace the exact manufactured wall velocity by an outflow closure.
+        BoundaryCondition::dirichlet_dim::<Velocity>(0.0)
+    } else {
+        BoundaryCondition::zero_gradient_dim::<InvTime>()
+    };
+
     let mut boundaries = BoundarySpec::default();
     boundaries.set_field(
         "U",
         FieldBoundarySpec::new()
-            .set_uniform(
-                GpuBoundaryType::Inlet,
-                2,
-                BoundaryCondition::dirichlet_dim::<Velocity>(0.0),
-            )
-            .set_uniform(
-                GpuBoundaryType::Outlet,
-                2,
-                BoundaryCondition::zero_gradient_dim::<InvTime>(),
-            )
+            .set_components(GpuBoundaryType::Inlet, inlet_u_conditions)
+            .set_uniform(GpuBoundaryType::Outlet, 2, outlet_u_condition)
             .set_uniform(
                 GpuBoundaryType::Wall,
                 2,
@@ -931,7 +1014,9 @@ fn allmach_pressure_model_impl_topo(
         },
     );
     let flux_module = crate::solver::model::flux_module::FluxModuleSpec::Kernel {
-        gradients: Some(crate::solver::model::flux_module::FluxModuleGradientsSpec::FromStateLayout),
+        gradients: Some(
+            crate::solver::model::flux_module::FluxModuleGradientsSpec::FromStateLayout,
+        ),
         kernel: derived_rhie_chow.flux_kernel,
     };
     // Thermal variant: recover the EOS density on-device from the solved (p,T)
@@ -970,13 +1055,15 @@ fn allmach_pressure_model_impl_topo(
                 * Expr::ident("p")
                 / Expr::ident(ALLMACH_TEMPERATURE_FIELD)
         };
-        let rho_recovery = Expr::ident(ALLMACH_RHO_T_REF_FIELD)
-            / Expr::ident(ALLMACH_TEMPERATURE_FIELD)
-            + p_compr;
+        let rho_recovery =
+            Expr::ident(ALLMACH_RHO_T_REF_FIELD) / Expr::ident(ALLMACH_TEMPERATURE_FIELD) + p_compr;
         let rho_recovery = if strip_all {
             rho_recovery
         } else {
-            Expr::call_named("max", vec![rho_recovery, Expr::ident(ALLMACH_RHO_FLOOR_FIELD)])
+            Expr::call_named(
+                "max",
+                vec![rho_recovery, Expr::ident(ALLMACH_RHO_FLOOR_FIELD)],
+            )
         };
         derivations.insert("rho".to_string(), rho_recovery);
         // Thermal-expansion coefficient rho_dT = d(rho)/dT, recovered on-device. With the
@@ -1034,8 +1121,14 @@ fn allmach_pressure_model_impl_topo(
             );
             // Low-Mach (Turkel) preconditioned pseudo-compressibility, moved on-device
             // so the raw-solver nozzle tests exercise it (it was host-seeded before).
-            // psi_precond = precond_mask * max(psi, 1/beta^2), beta^2 =
-            // max(|U|^2, u_ref^2), using the LOCAL psi so the pseudo-acoustic scale
+            // The p/T mass block eliminates to the target Schur compressibility
+            // `chi_target=max(psi,1/beta^2)`. The temperature row contributes
+            // `-(gamma-1)*psi_ref*T_ref/T` to that Schur complement, so the raw
+            // pressure-row storage must add that exact EOS cross coefficient to
+            // `chi_target`. Do not use the clamped local `psi` for this addend: when
+            // T>T_ref, `psi` is held at psi_ref for stability while the thermal
+            // cross coefficient still scales as 1/T.
+            // beta^2 = max(|U|^2, u_ref^2), using the LOCAL psi so the pseudo-acoustic scale
             // tracks the true local sound speed (the plan's real-sound-speed
             // preconditioner). NOTE the design trade-off: at a deeply-cooled exit the
             // local psi grows, so the pressure ddt mass term over-damps the pseudo-time
@@ -1050,36 +1143,97 @@ fn allmach_pressure_model_impl_topo(
             let beta2 = Expr::call_named(
                 "max",
                 vec![
-                    Expr::ident("U_x") * Expr::ident("U_x")
-                        + Expr::ident("U_y") * Expr::ident("U_y"),
-                    Expr::ident(ALLMACH_U_REF_FIELD) * Expr::ident(ALLMACH_U_REF_FIELD),
+                    Expr::call_named(
+                        "max",
+                        vec![
+                            Expr::ident("U_x") * Expr::ident("U_x")
+                                + Expr::ident("U_y") * Expr::ident("U_y"),
+                            Expr::ident(ALLMACH_U_REF_FIELD) * Expr::ident(ALLMACH_U_REF_FIELD),
+                        ],
+                    ),
+                    Expr::lit_f32(1.0e-12),
                 ],
             );
             derivations.insert(
                 "psi_precond".to_string(),
                 Expr::ident(ALLMACH_PRECOND_MASK_FIELD)
-                    * Expr::call_named(
-                        "max",
-                        vec![Expr::ident("psi"), Expr::lit_f32(1.0) / beta2],
-                    ),
+                    * (Expr::lit_f32((ALLMACH_GAMMA - 1.0) as f32)
+                        * Expr::ident(ALLMACH_PSI_REF_FIELD)
+                        * Expr::ident(ALLMACH_T_REF_FIELD)
+                        / Expr::ident(ALLMACH_TEMPERATURE_FIELD)
+                        + Expr::call_named(
+                            "max",
+                            vec![Expr::ident("psi"), Expr::lit_f32(1.0) / beta2],
+                        )),
             );
         }
         PrimitiveDerivations { derivations }
     } else {
         PrimitiveDerivations::identity()
     };
-    // The barotropic model keeps rho as a storage field rather than an
-    // equation target.  Implicit stepping refreshes it on the host; explicit
-    // stages need the identical EOS closure locally before the next residual.
-    let explicit_primitives = if thermal {
-        None
-    } else {
-        let mut derivations = HashMap::new();
-        derivations.insert(
-            "rho".to_string(),
-            Expr::ident("constants").field("density")
-                + Expr::ident("psi") * Expr::ident("p"),
-        );
+    // Explicit RK consumes all coefficient/storage fields before every face
+    // flux. Give it a complete local closure rather than relying on the
+    // implicit Update phase: the thermal EOS fields are refreshed from (p,T),
+    // while the barotropic variant recovers rho from p.
+    let explicit_primitives = {
+        let mut derivations = if thermal {
+            primitives.derivations.clone()
+        } else {
+            HashMap::new()
+        };
+        if !thermal {
+            derivations.insert(
+                "rho".to_string(),
+                Expr::ident("constants").field("density") + Expr::ident("psi") * Expr::ident("p"),
+            );
+            if !strip_all {
+                let beta2 = Expr::call_named(
+                    "max",
+                    vec![
+                        Expr::call_named(
+                            "max",
+                            vec![
+                                Expr::ident("U_x") * Expr::ident("U_x")
+                                    + Expr::ident("U_y") * Expr::ident("U_y"),
+                                Expr::ident(ALLMACH_U_REF_FIELD) * Expr::ident(ALLMACH_U_REF_FIELD),
+                            ],
+                        ),
+                        Expr::lit_f32(1.0e-12),
+                    ],
+                );
+                let physical = Expr::ident("psi");
+                let preconditioned =
+                    Expr::call_named("max", vec![physical.clone(), Expr::lit_f32(1.0) / beta2]);
+                derivations.insert(
+                    "psi_precond".to_string(),
+                    physical.clone()
+                        + Expr::ident(ALLMACH_PRECOND_MASK_FIELD) * (preconditioned - physical),
+                );
+            }
+        }
+
+        // Explicit Rhie--Chow scale. `dt_local` is a mesh/acoustic
+        // stabilization time supplied by the driver and is intentionally
+        // independent of the adaptive integrator step, keeping the spatial
+        // MOL operator fixed under temporal refinement. A low-level caller
+        // that bypasses SolverDriver must seed dt_local explicitly; zero then
+        // disables only the stabilization instead of coupling it to RK dt.
+        let stabilization_time =
+            Expr::call_named("max", vec![Expr::ident("dt_local"), Expr::lit_f32(0.0)]);
+        let rho_safe = Expr::call_named("max", vec![Expr::ident("rho"), Expr::lit_f32(1.0e-12)]);
+        // `alpha_u` is an implicit under-relaxation parameter, not part of the
+        // semi-discrete momentum equation. Explicit RK therefore uses the full
+        // local inverse momentum scale; otherwise a disabled GUI relaxation
+        // control silently weakens checkerboard suppression.
+        let dp0 = stabilization_time / rho_safe;
+        let d_p = if ibm {
+            dp0.clone()
+                / (Expr::lit_f32(1.0)
+                    + Expr::call_named("abs", vec![Expr::ident(IBM_MOMENTUM_PENALTY_FIELD)]) * dp0)
+        } else {
+            dp0
+        };
+        derivations.insert("d_p".to_string(), d_p);
         Some(PrimitiveDerivations { derivations })
     };
 
@@ -1089,8 +1243,21 @@ fn allmach_pressure_model_impl_topo(
         &system,
         &layout_for_flux,
         &primitives,
+        explicit_primitives.as_ref(),
     )
     .map_err(|e| format!("failed to build flux_module module: {e}"))?;
+
+    let mut modules = vec![
+        crate::solver::model::modules::eos::eos_module(
+            crate::solver::model::eos::EosSpec::Constant,
+        ),
+        flux_module_module,
+        crate::solver::model::modules::generic_coupled::generic_coupled_module(method),
+        derived_rhie_chow.aux_module,
+    ];
+    if !with_mms_source {
+        modules.push(crate::solver::model::modules::bc_expr::bc_expr_module());
+    }
 
     Ok(ModelSpec {
         id: match (thermal, with_mms_source, compressible_mms, ale, topology) {
@@ -1121,14 +1288,7 @@ fn allmach_pressure_model_impl_topo(
         system,
         state_layout: layout,
         boundaries,
-        modules: vec![
-            crate::solver::model::modules::eos::eos_module(
-                crate::solver::model::eos::EosSpec::Constant,
-            ),
-            flux_module_module,
-            crate::solver::model::modules::generic_coupled::generic_coupled_module(method),
-            derived_rhie_chow.aux_module,
-        ],
+        modules,
         linear_solver: Some(crate::solver::model::linear_solver::ModelLinearSolverSpec {
             preconditioner: crate::solver::model::linear_solver::ModelPreconditionerSpec::Schur {
                 // Explicit (not the 1.0 = auto heavy-ball 1.95): the all-Mach
@@ -1146,8 +1306,7 @@ fn allmach_pressure_model_impl_topo(
                 // margin above the measured saturation point.
                 sweeps_cap: 32,
                 layout: crate::solver::model::linear_solver::SchurBlockLayout::from_u_p(
-                    &schur_u,
-                    p,
+                    &schur_u, p,
                 )
                 .map_err(|e| format!("invalid SchurBlockLayout: {e}"))?,
             },
@@ -1156,4 +1315,79 @@ fn allmach_pressure_model_impl_topo(
         primitives,
         explicit_primitives,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::solver::gpu::enums::{GpuBcKind, GpuBoundaryType};
+    use crate::solver::model::backend::boundary::eval_boundary_expr;
+
+    #[test]
+    fn production_velocity_inlet_ramp_is_stage_time_expression() {
+        let model = crate::solver::model::allmach_thermal_model().expect("all-Mach thermal");
+        let condition = &model
+            .boundaries
+            .field("U")
+            .expect("U boundaries")
+            .by_boundary[&GpuBoundaryType::Inlet][0];
+        assert_eq!(condition.kind, GpuBcKind::Dirichlet);
+        let expression = condition.expr_value().expect("stage-time inlet expression");
+
+        let evaluate = |time: f64, target: f64, duration: f64| {
+            eval_boundary_expr(
+                expression,
+                &|field, _| Err(format!("unexpected interior({})", field.name())),
+                &|field, _| Err(format!("unexpected bc({})", field.name())),
+                &|param| match param.name() {
+                    "time" => Ok(time),
+                    "inlet_velocity" => Ok(target),
+                    "inlet_ramp_time" => Ok(duration),
+                    other => Err(format!("unexpected param {other}")),
+                },
+            )
+            .expect("evaluate ramp")
+        };
+
+        assert_eq!(evaluate(0.0, 3.0, 2.0), 0.0);
+        assert!((evaluate(1.0, 3.0, 2.0) - 1.5).abs() < 1.0e-12);
+        assert!((evaluate(2.0, 3.0, 2.0) - 3.0).abs() < 1.0e-12);
+        assert!((evaluate(10.0, 3.0, 2.0) - 3.0).abs() < 1.0e-12);
+        assert_eq!(evaluate(0.0, 3.0, 0.0), 3.0);
+
+        let mms = crate::solver::model::allmach_thermal_mms_model().expect("MMS model");
+        assert!(
+            mms.boundaries
+                .field("U")
+                .expect("MMS U boundaries")
+                .by_boundary[&GpuBoundaryType::Inlet][0]
+                .expr_value()
+                .is_none(),
+            "MMS boundary must remain externally manufactured"
+        );
+    }
+
+    #[test]
+    fn pressure_inlet_rewrite_preserves_the_scheduled_boundary_expression() {
+        let mut model = crate::solver::model::allmach_thermal_model().expect("all-Mach thermal");
+        assert!(model.modules.iter().any(|module| module.name == "bc_expr"));
+        let original = model
+            .boundaries
+            .field("U")
+            .expect("U boundaries")
+            .by_boundary[&GpuBoundaryType::Inlet][0]
+            .expr_value()
+            .expect("velocity ramp")
+            .clone();
+
+        super::apply_pressure_inlet_nozzle_bcs(&mut model);
+
+        assert!(model.modules.iter().any(|module| module.name == "bc_expr"));
+        let axial = &model
+            .boundaries
+            .field("U")
+            .expect("U boundaries")
+            .by_boundary[&GpuBoundaryType::Inlet][0];
+        assert_eq!(axial.kind, GpuBcKind::ZeroGradient);
+        assert_eq!(axial.expr_value(), Some(&original));
+    }
 }

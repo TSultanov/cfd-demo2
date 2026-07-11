@@ -8,6 +8,8 @@ pub(crate) fn handler_for_key(key: &'static str) -> Option<ProgramParamHandler> 
         "dtau" => Some(generic_coupled::param_dtau),
         "advection_scheme" => Some(generic_coupled::param_advection_scheme),
         "time_scheme" => Some(generic_coupled::param_time_scheme),
+        "inlet_velocity" => Some(generic_coupled::param_inlet_velocity),
+        "inlet_ramp_time" => Some(generic_coupled::param_inlet_ramp_time),
         "preconditioner" => Some(generic_coupled::param_preconditioner),
         "linear_solver.max_restart" => Some(generic_coupled::param_linear_solver_max_restart),
         "linear_solver.max_iters" => Some(generic_coupled::param_linear_solver_max_iters),

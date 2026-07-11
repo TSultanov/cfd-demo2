@@ -279,6 +279,7 @@ pub fn flux_module_module(
     system: &crate::solver::model::backend::ast::EquationSystem,
     state_layout: &StateLayout,
     primitives: &crate::solver::model::primitives::PrimitiveDerivations,
+    explicit_primitives: Option<&crate::solver::model::primitives::PrimitiveDerivations>,
 ) -> Result<KernelBundleModule, String> {
     let has_gradients = match &flux {
         FluxModuleSpec::Kernel { gradients, .. } => gradients.is_some(),
@@ -341,6 +342,27 @@ pub fn flux_module_module(
             KernelId::FLUX_MODULE_GRADIENTS,
             generate_flux_module_gradients_kernel_program_for_model,
         ));
+    }
+
+    // A differential RK stage consumes storage coefficients (EOS density,
+    // pressure/temperature mass-block entries, Rhie--Chow d_p, and possibly
+    // U.grad(p)) in the face flux and residual. Refresh those closures after
+    // the current-stage gradients and immediately before the face flux. The
+    // placement inside this bundle is load-bearing for the CPU schedule,
+    // which preserves module order while grouping gradient/flux/assembly
+    // kernels together.
+    if !explicit_primitives.unwrap_or(primitives).is_identity() {
+        out.kernels.push(ModelKernelSpec {
+            id: KernelId::EXPLICIT_PRIMITIVE_RECOVERY,
+            phase: KernelPhaseId::FluxComputation,
+            dispatch: DispatchKindId::Cells,
+            condition: KernelConditionId::RequiresExplicitStepping,
+        });
+        out.generators
+            .push(ModelKernelGeneratorSpec::new_explicit_rk4_dsl(
+                KernelId::EXPLICIT_PRIMITIVE_RECOVERY,
+                crate::solver::model::kernel::generate_explicit_primitive_recovery_kernel_program,
+            ));
     }
 
     out.kernels.push(ModelKernelSpec {
@@ -494,8 +516,7 @@ fn generate_flux_module_kernel_program_for_model(
         .ok_or_else(|| "flux_module port_manifest missing resolved_state_slots".to_string())?;
 
     let eos_params = crate::solver::model::kernel::extract_eos_params(model);
-    let structured =
-        model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D;
+    let structured = model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D;
 
     match flux {
         crate::solver::model::flux_module::FluxModuleSpec::Kernel { kernel, .. } => {

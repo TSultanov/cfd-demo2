@@ -404,6 +404,7 @@ fn incompressible_momentum_model_impl_topo(
         &system,
         &layout_for_flux,
         &primitives,
+        None,
     )
     .map_err(|e| format!("failed to build flux_module module: {e}"))?;
 

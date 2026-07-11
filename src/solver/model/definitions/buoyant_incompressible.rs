@@ -288,6 +288,7 @@ fn buoyant_incompressible_model_impl(with_mms_sources: bool) -> Result<ModelSpec
         &system,
         &layout_for_flux,
         &primitives,
+        None,
     )
     .map_err(|e| format!("failed to build flux_module module: {e}"))?;
 

@@ -3053,9 +3053,7 @@ impl MovingMeshDriver {
         let kill_set: std::collections::HashSet<usize> = kills.iter().cloned().collect();
         let floor = |i: usize| -> f64 {
             match targets.get(i) {
-                Some(&t) if t.is_finite() && t > 0.0 => {
-                    vol_lo.min(RECYCLE_SQUEEZE_FRACTION * t)
-                }
+                Some(&t) if t.is_finite() && t > 0.0 => vol_lo.min(RECYCLE_SQUEEZE_FRACTION * t),
                 _ => vol_lo,
             }
         };
@@ -3083,7 +3081,12 @@ impl MovingMeshDriver {
             })
             .map(|i| self.seeds[i])
             .collect();
-        occupants.extend(births.iter().filter(|(p, _)| p.x < band_lim).map(|&(p, _)| p));
+        occupants.extend(
+            births
+                .iter()
+                .filter(|(p, _)| p.x < band_lim)
+                .map(|&(p, _)| p),
+        );
         let min_sep = RECYCLE_MIN_SEP_CELLS * h;
         let cand_step = 0.25 * h;
         let x_levels = [1.5 * h, 2.0 * h, 2.5 * h, 3.0 * h];
@@ -4886,7 +4889,9 @@ fn configure_rayon_budget() {
                 .and_then(|v| v.trim().parse::<usize>().ok())
                 .filter(|&t| t >= 1)
             {
-                let _ = rayon::ThreadPoolBuilder::new().num_threads(t).build_global();
+                let _ = rayon::ThreadPoolBuilder::new()
+                    .num_threads(t)
+                    .build_global();
             }
         }
     });

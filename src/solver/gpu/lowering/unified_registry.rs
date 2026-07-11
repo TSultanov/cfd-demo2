@@ -20,6 +20,10 @@ pub struct UnifiedOpRegistryConfig {
     pub finalize: Option<HostOpHandler>,
     pub solve: Option<HostOpHandler>,
 
+    pub explicit_stage_time: [Option<HostOpHandler>; 4],
+    pub explicit_residual_graph: Option<GraphOpHandler>,
+    pub explicit_stage_graph: [Option<GraphOpHandler>; 4],
+
     pub assembly_graph: Option<GraphOpHandler>,
     pub update_graph: Option<GraphOpHandler>,
     pub gradients_graph: Option<GraphOpHandler>,
@@ -72,9 +76,31 @@ pub fn build_unified_registry(
                 config.prepare.unwrap_or(noop_host),
             )?;
             registry.register_graph(
-                GraphOpKind("explicit:update"),
-                config.update_graph.unwrap_or(noop_graph),
+                GraphOpKind("explicit:residual"),
+                config.explicit_residual_graph.unwrap_or(noop_graph),
             )?;
+            for (kind, handler) in [
+                HostOpKind("explicit:set_stage_1_time"),
+                HostOpKind("explicit:set_stage_2_time"),
+                HostOpKind("explicit:set_stage_3_time"),
+                HostOpKind("explicit:set_stage_4_time"),
+            ]
+            .into_iter()
+            .zip(config.explicit_stage_time)
+            {
+                registry.register_host(kind, handler.unwrap_or(noop_host))?;
+            }
+            for (kind, handler) in [
+                GraphOpKind("explicit:stage_1"),
+                GraphOpKind("explicit:stage_2"),
+                GraphOpKind("explicit:stage_3"),
+                GraphOpKind("explicit:stage_4"),
+            ]
+            .into_iter()
+            .zip(config.explicit_stage_graph)
+            {
+                registry.register_graph(kind, handler.unwrap_or(noop_graph))?;
+            }
             registry.register_host(
                 HostOpKind("explicit:finalize"),
                 config.finalize.unwrap_or(noop_host),

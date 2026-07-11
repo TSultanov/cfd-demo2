@@ -18,7 +18,19 @@ pub(in crate::solver::gpu::lowering) fn register_ops_from_recipe(
         SteppingMode::Explicit => UnifiedOpRegistryConfig {
             prepare: Some(host_explicit_prepare),
             finalize: Some(host_explicit_finalize),
-            update_graph: Some(explicit_graph_run),
+            explicit_stage_time: [
+                Some(host_explicit_stage_1_time),
+                Some(host_explicit_stage_2_time),
+                Some(host_explicit_stage_3_time),
+                Some(host_explicit_stage_4_time),
+            ],
+            explicit_residual_graph: Some(explicit_residual_graph_run),
+            explicit_stage_graph: [
+                Some(explicit_stage_1_graph_run),
+                Some(explicit_stage_2_graph_run),
+                Some(explicit_stage_3_graph_run),
+                Some(explicit_stage_4_graph_run),
+            ],
             ..Default::default()
         },
         SteppingMode::Implicit { .. } => UnifiedOpRegistryConfig {
@@ -181,23 +193,59 @@ pub(in crate::solver::gpu::lowering) fn step_stats(plan: &GpuProgramPlan) -> Pla
 pub(in crate::solver::gpu::lowering) fn linear_debug_provider(
     plan: &mut GpuProgramPlan,
 ) -> Option<&mut dyn PlanLinearSystemDebug> {
-    Some(&mut plan.resources.backend as &mut dyn PlanLinearSystemDebug)
+    plan.resources
+        .backend
+        .has_linear_system()
+        .then_some(&mut plan.resources.backend as &mut dyn PlanLinearSystemDebug)
 }
 
 fn host_explicit_prepare(plan: &mut GpuProgramPlan) {
-    generic_coupled_program::host_prepare_step(plan);
+    generic_coupled_program::host_prepare_explicit_step(plan);
 }
 
-fn explicit_graph_run(
+fn host_explicit_stage_1_time(plan: &mut GpuProgramPlan) {
+    generic_coupled_program::host_set_explicit_stage_1_time(plan);
+}
+
+fn host_explicit_stage_2_time(plan: &mut GpuProgramPlan) {
+    generic_coupled_program::host_set_explicit_stage_2_time(plan);
+}
+
+fn host_explicit_stage_3_time(plan: &mut GpuProgramPlan) {
+    generic_coupled_program::host_set_explicit_stage_3_time(plan);
+}
+
+fn host_explicit_stage_4_time(plan: &mut GpuProgramPlan) {
+    generic_coupled_program::host_set_explicit_stage_4_time(plan);
+}
+
+fn explicit_residual_graph_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
-    generic_coupled_program::explicit_graph_run(plan, context, mode)
+    generic_coupled_program::explicit_residual_graph_run(plan, context, mode)
 }
 
+macro_rules! explicit_stage_graph_runner {
+    ($name:ident, $target:ident) => {
+        fn $name(
+            plan: &GpuProgramPlan,
+            context: &crate::solver::gpu::context::GpuContext,
+            mode: GraphExecMode,
+        ) -> (f64, Option<GraphDetail>) {
+            generic_coupled_program::$target(plan, context, mode)
+        }
+    };
+}
+
+explicit_stage_graph_runner!(explicit_stage_1_graph_run, explicit_stage_1_graph_run);
+explicit_stage_graph_runner!(explicit_stage_2_graph_run, explicit_stage_2_graph_run);
+explicit_stage_graph_runner!(explicit_stage_3_graph_run, explicit_stage_3_graph_run);
+explicit_stage_graph_runner!(explicit_stage_4_graph_run, explicit_stage_4_graph_run);
+
 fn host_explicit_finalize(plan: &mut GpuProgramPlan) {
-    generic_coupled_program::host_finalize_step(plan);
+    generic_coupled_program::host_finalize_explicit_step(plan);
 }
 
 fn implicit_outer_iters(plan: &GpuProgramPlan) -> usize {

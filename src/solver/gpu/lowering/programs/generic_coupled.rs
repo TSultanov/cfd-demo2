@@ -7,9 +7,6 @@ use crate::solver::gpu::modules::generic_coupled_schur::{
     GenericCoupledSchurSetupBindGroupInputs,
 };
 use crate::solver::gpu::modules::graph::{DispatchKind, ModuleGraph, RuntimeDims};
-use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
-use crate::solver::gpu::program::generic_coupled_backend::scatter_bc_tables;
-use crate::solver::mesh::MeshRefreshReport;
 use crate::solver::gpu::modules::krylov_precond::{DispatchGrids, KrylovDispatch};
 use crate::solver::gpu::modules::krylov_solve::KrylovSolveModule;
 use crate::solver::gpu::modules::linear_solver::{
@@ -19,6 +16,7 @@ use crate::solver::gpu::modules::linear_solver::{
 use crate::solver::gpu::modules::linear_system::LinearSystemView;
 use crate::solver::gpu::modules::outer_convergence::OuterConvergenceMonitor;
 use crate::solver::gpu::modules::outer_gate::OuterAdaptiveGate;
+use crate::solver::gpu::modules::resource_registry::ResourceRegistry;
 use crate::solver::gpu::modules::runtime_preconditioner::{
     RuntimePreconditionerInputs, RuntimePreconditionerModule,
 };
@@ -27,23 +25,25 @@ use crate::solver::gpu::modules::unified_field_resources::UnifiedFieldResources;
 use crate::solver::gpu::modules::unified_graph::{
     build_graph_for_phases, build_optional_graph_for_phase, build_optional_graph_for_phases,
 };
+use crate::solver::gpu::program::generic_coupled_backend::scatter_bc_tables;
 use crate::solver::gpu::program::plan::{GpuProgramPlan, ProgramParamHandler};
 use crate::solver::gpu::program::plan_instance::{
     OuterStepStatus, PlanFuture, PlanLinearSystemDebug, PlanParamValue,
 };
-use crate::solver::gpu::recipe::{KernelPhase, LinearSolverType, SolverRecipe};
+use crate::solver::gpu::recipe::{KernelPhase, LinearSolverType, SolverRecipe, SteppingMode};
 use crate::solver::gpu::runtime::GpuCsrRuntime;
 use crate::solver::gpu::structs::{
     GpuGenericCoupledSchurSetupParams, GpuSchurPrecondGenericParams, LinearSolverStats,
 };
+use crate::solver::mesh::MeshRefreshReport;
 use crate::solver::model::backend::ast::FieldKind;
 use crate::solver::model::ports::PortRegistry;
 use crate::solver::model::{ModelPreconditionerSpec, ModelSpec};
 use bytemuck::bytes_of;
-use wgpu::util::DeviceExt;
 use cfd2_codegen::solver::codegen::bc_table::{HostBcTable, BOUNDARY_TYPE_COUNT};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use wgpu::util::DeviceExt;
 
 const RHO_POSITIVITY_FLOOR: f32 = 1.0e-8;
 const PRESSURE_POSITIVITY_FLOOR: f32 = 0.0;
@@ -187,7 +187,11 @@ pub(crate) struct GenericCoupledProgramResources {
     matrix_freeze_period: u32,
     apply_graph: ModuleGraph<GeneratedKernelsModule>,
     update_graph: ModuleGraph<GeneratedKernelsModule>,
-    explicit_graph: ModuleGraph<GeneratedKernelsModule>,
+    /// Full spatial-residual refresh used before every explicit RK stage:
+    /// expression BCs, gradients, face fluxes, then the matrix-free residual.
+    explicit_residual_graph: ModuleGraph<GeneratedKernelsModule>,
+    /// Exactly one low-storage RK update per graph, ordered k1 through k4.
+    explicit_stage_graphs: [ModuleGraph<GeneratedKernelsModule>; 4],
     outer_iters: usize,
     outer_tol: f32,
     outer_tol_abs: f32,
@@ -239,7 +243,6 @@ struct GenericCoupledKrylovResources {
     _b_diag_v: wgpu::Buffer,
     _b_diag_p: wgpu::Buffer,
 }
-
 
 impl GenericCoupledProgramResources {
     pub(crate) fn new(
@@ -302,7 +305,9 @@ impl GenericCoupledProgramResources {
         // RHS-only assembly graph for matrix-frozen outer iterations (see the
         // field docs; kernels exist only for the generic coupled models).
         let freeze_eligible = !model.system.equations().iter().any(|eq| {
-            eq.terms().iter().any(|t| t.linearize_pressure_flux.is_some())
+            eq.terms()
+                .iter()
+                .any(|t| t.linearize_pressure_flux.is_some())
         });
         let assembly_graph_frozen = build_optional_graph_for_phases(
             recipe,
@@ -312,7 +317,10 @@ impl GenericCoupledProgramResources {
         )?
         .filter(|_| {
             freeze_eligible
-                && recipe.kernels_for_phase(KernelPhase::AssemblyRhsOnly).next().is_some()
+                && recipe
+                    .kernels_for_phase(KernelPhase::AssemblyRhsOnly)
+                    .next()
+                    .is_some()
         });
         let matrix_freeze_period: u32 = std::env::var("CFD2_MATRIX_FREEZE")
             .ok()
@@ -338,21 +346,49 @@ impl GenericCoupledProgramResources {
         )?
         .unwrap_or_else(|| ModuleGraph::new(Vec::new()));
 
-        // Explicit stepping uses a single graph op; build a combined graph covering all
-        // compute phases that might be present in explicit recipes.
-        let explicit_graph = build_optional_graph_for_phases(
+        // Explicit stepping refreshes the entire spatial operator at every RK
+        // abscissa. Preparation is included because expression-valued BCs may
+        // depend on both the current stage state and `constants.time`.
+        let explicit_residual_graph = build_optional_graph_for_phases(
             recipe,
             &[
+                KernelPhase::Preparation,
                 KernelPhase::Gradients,
                 KernelPhase::FluxComputation,
                 KernelPhase::Assembly,
-                KernelPhase::Apply,
-                KernelPhase::Update,
             ],
             &kernels,
             "generic_coupled",
         )?
         .unwrap_or_else(|| ModuleGraph::new(Vec::new()));
+
+        let explicit_stage_graphs = if matches!(recipe.stepping, SteppingMode::Explicit) {
+            let stage_ids = [
+                crate::solver::model::KernelId::EXPLICIT_RK4_STAGE_1,
+                crate::solver::model::KernelId::EXPLICIT_RK4_STAGE_2,
+                crate::solver::model::KernelId::EXPLICIT_RK4_STAGE_3,
+                crate::solver::model::KernelId::EXPLICIT_RK4_STAGE_4,
+            ];
+            let mut graphs = Vec::with_capacity(stage_ids.len());
+            for stage_id in stage_ids {
+                let mut stage_recipe = recipe.clone();
+                stage_recipe.kernels.retain(|kernel| kernel.id == stage_id);
+                graphs.push(build_graph_for_phases(
+                    &stage_recipe,
+                    &[KernelPhase::Update],
+                    &kernels,
+                    "generic_coupled",
+                )?);
+            }
+            graphs.try_into().map_err(|graphs: Vec<_>| {
+                format!(
+                    "expected four explicit RK stage graphs, got {}",
+                    graphs.len()
+                )
+            })?
+        } else {
+            std::array::from_fn(|_| ModuleGraph::new(Vec::new()))
+        };
 
         let outer_iters = match recipe.stepping {
             crate::solver::gpu::recipe::SteppingMode::Implicit { outer_iters } => outer_iters,
@@ -360,6 +396,7 @@ impl GenericCoupledProgramResources {
         };
 
         let linear_solver = recipe.linear_solver.clone();
+        let (schur, krylov, outer_convergence, outer_gate) = if recipe.is_implicit() {
         let scalar_row_offsets = &runtime.common.mesh.b_scalar_row_offsets;
         let scalar_col_indices = &runtime.common.mesh.b_scalar_col_indices;
         let schur = build_generic_schur(
@@ -374,9 +411,7 @@ impl GenericCoupledProgramResources {
         } else {
             build_generic_krylov(recipe, &runtime)?
         };
-
         let unknown_mapping = resolve_unknown_mapping_runtime(model, &recipe.port_registry)?;
-
         let outer_convergence = OuterConvergenceMonitor::new(
             &runtime.common.context.device,
             &runtime.common.context.queue,
@@ -386,7 +421,6 @@ impl GenericCoupledProgramResources {
             runtime.linear_port_space.buffer(runtime.linear_ports.x),
             &unknown_mapping,
         )?;
-
         let outer_gate = outer_convergence.as_ref().map(|oc| {
             OuterAdaptiveGate::new(
                 &runtime.common.context.device,
@@ -403,6 +437,10 @@ impl GenericCoupledProgramResources {
                 &oc.b_break_status,
             )
         });
+            (schur, krylov, outer_convergence, outer_gate)
+        } else {
+            (None, None, None, None)
+        };
 
         let requested_time_scheme = match recipe.initial_constants.time_scheme {
             0 => crate::solver::gpu::enums::TimeScheme::Euler,
@@ -432,7 +470,8 @@ impl GenericCoupledProgramResources {
             matrix_freeze_period,
             apply_graph,
             update_graph,
-            explicit_graph,
+            explicit_residual_graph,
+            explicit_stage_graphs,
             outer_iters,
             outer_tol: 1e-3,
             outer_tol_abs: 1e-6,
@@ -454,6 +493,10 @@ impl GenericCoupledProgramResources {
 }
 
 impl GenericCoupledProgramResources {
+    pub(crate) fn has_linear_system(&self) -> bool {
+        self.runtime.scalar_cg.is_some()
+    }
+
     fn runtime_dims(&self) -> RuntimeDims {
         RuntimeDims {
             num_cells: self.runtime.common.num_cells,
@@ -509,7 +552,18 @@ impl GenericCoupledProgramResources {
         let upc = self.model.system.unknowns_per_cell();
 
         let _prof = std::env::var("CFD2_REFRESH_PROFILE").is_ok();
-        macro_rules! tick { ($t:expr, $label:literal) => { if _prof { eprintln!("[refresh-prof] {}: {:.2} ms", $label, $t.elapsed().as_secs_f64()*1e3); $t = std::time::Instant::now(); } }; }
+        macro_rules! tick {
+            ($t:expr, $label:literal) => {
+                if _prof {
+                    eprintln!(
+                        "[refresh-prof] {}: {:.2} ms",
+                        $label,
+                        $t.elapsed().as_secs_f64() * 1e3
+                    );
+                    $t = std::time::Instant::now();
+                }
+            };
+        }
         let mut _t = std::time::Instant::now();
 
         // Warm-start carry-forward: the coupled FGMRES uses the `x` buffer as
@@ -521,11 +575,13 @@ impl GenericCoupledProgramResources {
         // reallocates the linear system, then copy it into the fresh `x` below.
         // At step 0 the old `x` is still zero, so this is byte-identical to a
         // fresh build; the benefit is mid-run only.
-        let old_x = self
-            .runtime
+        let rebuild_linear = self.recipe.is_implicit();
+        let old_x = rebuild_linear.then(|| {
+            self.runtime
             .linear_port_space
             .buffer(self.runtime.linear_ports.x)
-            .clone();
+                .clone()
+        });
         let x_carry_bytes = (self.runtime.num_dofs as u64) * 4;
 
         // 1. Mesh buffers + CSR + block CSR + scalar-CG linear system.
@@ -534,7 +590,7 @@ impl GenericCoupledProgramResources {
         // Copy the captured warm-start into the freshly-reallocated `x`. Both
         // buffers are sized for the invariant `num_dofs`; the copy is a device
         // buffer→buffer blit (no CPU readback).
-        {
+        if let Some(old_x) = old_x {
             let new_x = self
                 .runtime
                 .linear_port_space
@@ -573,6 +629,7 @@ impl GenericCoupledProgramResources {
         self.boundary_faces = scattered.boundary_faces;
         tick!(_t, "3.scatter_bc_tables");
 
+        if rebuild_linear {
         // 4a. Preconditioner (Schur or plain FGMRES/krylov) over the new system.
         let schur = build_generic_schur(
             &self.model,
@@ -593,14 +650,17 @@ impl GenericCoupledProgramResources {
         // 4b. Outer-convergence monitor + adaptive gate (the monitor captures
         //     the warm-start `x` buffer, which the linear-system rebuild
         //     reallocated; the gate is sized by num_faces).
-        let unknown_mapping = resolve_unknown_mapping_runtime(&self.model, &self.recipe.port_registry)?;
+            let unknown_mapping =
+                resolve_unknown_mapping_runtime(&self.model, &self.recipe.port_registry)?;
         let outer_convergence = OuterConvergenceMonitor::new(
             &device,
             &queue,
             &self.runtime.common.context.pipeline_cache,
             &self.model,
             num_cells,
-            self.runtime.linear_port_space.buffer(self.runtime.linear_ports.x),
+                self.runtime
+                    .linear_port_space
+                    .buffer(self.runtime.linear_ports.x),
             &unknown_mapping,
         )?;
         let outer_gate = outer_convergence.as_ref().map(|oc| {
@@ -617,6 +677,7 @@ impl GenericCoupledProgramResources {
         self.outer_convergence = outer_convergence;
         self.outer_gate = outer_gate;
         tick!(_t, "4b.outer_convergence+gate");
+        }
 
         // 5. Generated-kernel bind groups: in-place rebuild over the refreshed
         //    buffers, cached pipelines reused (no generated-WGSL recompile).
@@ -627,29 +688,41 @@ impl GenericCoupledProgramResources {
             .with_unified_fields(&self.fields)
             .with_buffer(
                 "matrix_values",
-                self.runtime.linear_port_space.buffer(self.runtime.linear_ports.values),
+                self.runtime
+                    .linear_port_space
+                    .buffer(self.runtime.linear_ports.values),
             )
             .with_buffer(
                 "rhs",
-                self.runtime.linear_port_space.buffer(self.runtime.linear_ports.rhs),
+                self.runtime
+                    .linear_port_space
+                    .buffer(self.runtime.linear_ports.rhs),
             )
             .with_buffer(
                 "x",
-                self.runtime.linear_port_space.buffer(self.runtime.linear_ports.x),
+                self.runtime
+                    .linear_port_space
+                    .buffer(self.runtime.linear_ports.x),
             )
             .with_buffer(
                 "row_offsets",
-                self.runtime.linear_port_space.buffer(self.runtime.linear_ports.row_offsets),
+                self.runtime
+                    .linear_port_space
+                    .buffer(self.runtime.linear_ports.row_offsets),
             )
             .with_buffer(
                 "col_indices",
-                self.runtime.linear_port_space.buffer(self.runtime.linear_ports.col_indices),
+                self.runtime
+                    .linear_port_space
+                    .buffer(self.runtime.linear_ports.col_indices),
             )
             .with_buffer("bc_kind", &self._b_bc_kind)
             .with_buffer("bc_value", &self._b_bc_value)
             .with_buffer(
                 "y",
-                self.runtime.linear_port_space.buffer(self.runtime.linear_ports.rhs),
+                self.runtime
+                    .linear_port_space
+                    .buffer(self.runtime.linear_ports.rhs),
             );
         self.kernels
             .rebuild_bind_groups(&device, self.model.id, &self.recipe, &registry)?;
@@ -754,7 +827,11 @@ fn validate_schur_model(
     let Some(solver) = model.linear_solver else {
         return Err("model does not define a linear solver spec".into());
     };
-    let ModelPreconditionerSpec::Schur { omega, sweeps_cap, layout } = solver.preconditioner
+    let ModelPreconditionerSpec::Schur {
+        omega,
+        sweeps_cap,
+        layout,
+    } = solver.preconditioner
     else {
         return Err("model does not request Schur preconditioning".into());
     };
@@ -825,9 +902,7 @@ fn validate_schur_model(
     if layout_indices != target_indices {
         return Err(format!(
             "SchurBlockLayout {:?} must cover exactly the model equation targets (layout={:?}, targets={:?})",
-            layout,
-            layout_indices,
-            target_indices
+            layout, layout_indices, target_indices
         ));
     }
 
@@ -1342,8 +1417,7 @@ pub(crate) fn spec_permute_cells(plan: &GpuProgramPlan, perm: &[u32]) -> Result<
         let mut new = vec![0.0f32; n * width];
         for (i, &src) in perm.iter().enumerate() {
             let src = src as usize;
-            new[i * width..(i + 1) * width]
-                .copy_from_slice(&old[src * width..(src + 1) * width]);
+            new[i * width..(i + 1) * width].copy_from_slice(&old[src * width..(src + 1) * width]);
         }
         ctx.queue.write_buffer(buf, 0, bytemuck::cast_slice(&new));
     };
@@ -1355,11 +1429,13 @@ pub(crate) fn spec_permute_cells(plan: &GpuProgramPlan, perm: &[u32]) -> Result<
     permute_buf(&mesh.b_cell_vols, 1);
     permute_buf(&mesh.b_cell_vols_old, 1);
     permute_buf(&mesh.b_cell_vols_old_old, 1);
+    if r.has_linear_system() {
     let s = (r.recipe.unknowns_per_cell as usize).max(1);
     permute_buf(
         r.runtime.linear_port_space.buffer(r.runtime.linear_ports.x),
         s,
     );
+    }
     Ok(())
 }
 
@@ -1422,7 +1498,7 @@ pub(crate) fn spec_reinit_cells(
         let v_bytes = (new_vols[k] as f32).to_le_bytes();
         queue.write_buffer(&mesh.b_cell_vols_old, (cell as u64) * 4, &v_bytes);
         queue.write_buffer(&mesh.b_cell_vols_old_old, (cell as u64) * 4, &v_bytes);
-        if s > 1 {
+        if s > 1 && r.has_linear_system() {
             let mut x_row = vec![0.0f32; s];
             for (i, (xbase, field)) in offs.iter().enumerate() {
                 let next = offs.get(i + 1).map(|(o, _)| *o).unwrap_or(s);
@@ -1434,10 +1510,7 @@ pub(crate) fn spec_reinit_cells(
                     x_row[xbase + c] = row[soff as usize + c];
                 }
             }
-            let x_buf = r
-                .runtime
-                .linear_port_space
-                .buffer(r.runtime.linear_ports.x);
+            let x_buf = r.runtime.linear_port_space.buffer(r.runtime.linear_ports.x);
             queue.write_buffer(
                 x_buf,
                 (cell as u64) * (s as u64) * 4,
@@ -1480,11 +1553,9 @@ pub(crate) fn spec_snapshot_full(plan: &GpuProgramPlan) -> crate::solver::Solver
             n * stride,
             "snapshot:state_old_old",
         ),
-        x: if s_unk > 0 {
+        x: if s_unk > 0 && r.has_linear_system() {
             read_f32(
-                r.runtime
-                    .linear_port_space
-                    .buffer(r.runtime.linear_ports.x),
+                r.runtime.linear_port_space.buffer(r.runtime.linear_ports.x),
                 n * s_unk,
                 "snapshot:x",
             )
@@ -1554,12 +1625,10 @@ pub(crate) fn spec_restore_full(
         0,
         bytemuck::cast_slice(&snap.state_old_old),
     );
-    if s_unk > 0 && !snap.x.is_empty() {
+    if s_unk > 0 && r.has_linear_system() && !snap.x.is_empty() {
         expect("x", snap.x.len(), n * s_unk)?;
         queue.write_buffer(
-            r.runtime
-                .linear_port_space
-                .buffer(r.runtime.linear_ports.x),
+            r.runtime.linear_port_space.buffer(r.runtime.linear_ports.x),
             0,
             bytemuck::cast_slice(&snap.x),
         );
@@ -1657,6 +1726,19 @@ pub(crate) fn spec_set_bc_values_per_face(
     Ok(())
 }
 
+pub(crate) fn host_prepare_explicit_step(plan: &mut GpuProgramPlan) {
+    // Defence in depth: explicit RK4 is a physical-time method and must never
+    // inherit pseudo-time state from a restored snapshot or a generic named
+    // parameter update.
+    let queue = plan.context.queue.clone();
+    {
+        let r = res_mut(plan);
+        r.fields.constants.values_mut().dtau = 0.0;
+        r.fields.constants.write(&queue);
+    }
+    host_prepare_step(plan);
+}
+
 pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
     let profile = std::env::var("CFD2_PROFILE_FGMRES").is_ok();
     let t0 = profile.then(std::time::Instant::now);
@@ -1724,8 +1806,54 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
     }
 }
 
+fn host_set_explicit_stage_time(plan: &mut GpuProgramPlan, abscissa: f32) {
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    // `host_prepare_step` follows the implicit path's convention and has
+    // already advanced the host clock to t^{n+1}. Recover t^n here, then write
+    // the classical RK abscissa before the residual graph submission.
+    let dt = r.time_integration.dt;
+    let base_time = r.time_integration.time as f32 - dt;
+    r.fields.constants.values_mut().time = base_time + abscissa * dt;
+    r.fields.constants.write(&queue);
+}
+
+macro_rules! explicit_stage_time_setter {
+    ($name:ident, $abscissa:expr) => {
+        pub(crate) fn $name(plan: &mut GpuProgramPlan) {
+            host_set_explicit_stage_time(plan, $abscissa);
+        }
+    };
+}
+
+explicit_stage_time_setter!(host_set_explicit_stage_1_time, 0.0);
+explicit_stage_time_setter!(host_set_explicit_stage_2_time, 0.5);
+explicit_stage_time_setter!(host_set_explicit_stage_3_time, 0.5);
+explicit_stage_time_setter!(host_set_explicit_stage_4_time, 1.0);
+
+/// Commit a successful explicit step without the implicit solver's
+/// positivity retry/rollback machinery. This matches the CPU RK4 contract:
+/// the adaptive CFL controller selects `dt` before the step, while RK4 itself
+/// advances once and rotates only the ordinary time history.
+pub(crate) fn host_finalize_explicit_step(plan: &mut GpuProgramPlan) {
+    let queue = plan.context.queue.clone();
+    let current_dtau = {
+        let r = res_mut(plan);
+        {
+            let values = r.fields.constants.values_mut();
+            values.time = r.time_integration.time as f32;
+            values.time_scheme = r.requested_time_scheme as u32;
+        }
+        r.time_integration
+            .finalize_step(&mut r.fields.constants, &queue);
+        r.fields.constants.values().dtau
+    };
+    plan.current_dtau = Some(current_dtau);
+}
+
 pub(crate) fn host_finalize_step(plan: &mut GpuProgramPlan) {
-    let positivity_action = evaluate_step_positivity(plan).map_or(PositivityFallbackAction::None, |report| {
+    let positivity_action =
+        evaluate_step_positivity(plan).map_or(PositivityFallbackAction::None, |report| {
         plan.positivity_min_rho = Some(report.min_rho);
         plan.positivity_min_p = Some(report.min_p);
         plan.positivity_rho_undershoot_count = report.rho_undershoot_count;
@@ -1774,7 +1902,8 @@ pub(crate) fn host_finalize_step(plan: &mut GpuProgramPlan) {
             r.nonconverged_dt_scale,
             r.nonconverged_dtau_scale,
         ) {
-            r.time_integration.set_dt(next_dt, &mut r.fields.constants, &queue);
+            r.time_integration
+                .set_dt(next_dt, &mut r.fields.constants, &queue);
             {
                 let values = r.fields.constants.values_mut();
                 values.dtau = next_dtau;
@@ -1824,7 +1953,8 @@ fn rollback_rejected_dual_time_step(plan: &mut GpuProgramPlan) {
             dt_scale,
             dtau_scale,
         ) {
-            r.time_integration.set_dt(next_dt, &mut r.fields.constants, &queue);
+            r.time_integration
+                .set_dt(next_dt, &mut r.fields.constants, &queue);
             {
                 let values = r.fields.constants.values_mut();
                 values.dtau = next_dtau;
@@ -1951,7 +2081,9 @@ pub(crate) fn host_solve_linear_system(plan: &mut GpuProgramPlan) {
         return;
     }
 
-    let stats = r.runtime.solve_linear_system_cg(r.linear_solver.max_iters, tol);
+    let stats = r
+        .runtime
+        .solve_linear_system_cg(r.linear_solver.max_iters, tol);
     plan.last_linear_stats = stats;
     plan.step_linear_stats.push(stats);
 }
@@ -2089,9 +2221,7 @@ pub(crate) fn try_host_coupled_solve_fused(plan: &mut GpuProgramPlan) -> bool {
             r.assembly_graph_tail.as_ref().unwrap_or(assembly_graph)
         };
         // Mirrors `iter_prepare_graph_run` (bc_expr refresh inside the outer loop).
-        let iter_prepare = r
-            .recurring_prepare_enabled
-            .then_some(&r.init_prepare_graph);
+        let iter_prepare = r.recurring_prepare_enabled.then_some(&r.init_prepare_graph);
         let update_graph = &r.update_graph;
         let kernels = &r.kernels;
         let runtime_dims = r.runtime_dims();
@@ -2277,9 +2407,7 @@ pub(crate) fn try_host_coupled_solve_fused(plan: &mut GpuProgramPlan) -> bool {
 /// otherwise burn the whole FGMRES budget at the tight tolerance.
 /// `CFD2_NO_EW_FIRST=1` disables.
 fn first_outer_tolerance(base_tol: f32, is_first_outer: bool, multi_outer: bool) -> f32 {
-    if !is_first_outer
-        || !multi_outer
-        || std::env::var("CFD2_NO_EW_FIRST").is_ok_and(|v| v == "1")
+    if !is_first_outer || !multi_outer || std::env::var("CFD2_NO_EW_FIRST").is_ok_and(|v| v == "1")
     {
         return base_tol;
     }
@@ -2333,9 +2461,7 @@ fn outer_plateau_active(plan: &GpuProgramPlan) -> bool {
     }
     plan.collect_convergence_stats && {
         let r = res(plan);
-        r.outer_break_enabled
-            && r.outer_iters > 1
-            && r.fields.constants.values().dtau <= 0.0
+        r.outer_break_enabled && r.outer_iters > 1 && r.fields.constants.values().dtau <= 0.0
     }
 }
 
@@ -2637,9 +2763,11 @@ fn scaled_outer_targets_converged(plan: &GpuProgramPlan) -> Option<bool> {
         .map(|(name, value)| (name.as_str(), *value))
         .collect();
     let conserved_targets = ["rho", "rho_u", "rho_e"];
-    let use_conserved_targets = conserved_targets
+    let use_conserved_targets = conserved_targets.iter().all(|target| {
+        plan.outer_field_residuals
         .iter()
-        .all(|target| plan.outer_field_residuals.iter().any(|(name, _)| name == target));
+            .any(|(name, _)| name == target)
+    });
 
     let mut matched = false;
     for (name, abs_residual) in &plan.outer_field_residuals {
@@ -2822,7 +2950,11 @@ fn compute_outer_residuals(plan: &mut GpuProgramPlan) -> Option<(Vec<f32>, Optio
             .iter()
             .map(|(n, r)| format!("{n}={r:.3e}"))
             .collect();
-        eprintln!("[outer-resid] iter#{} {}", plan.step_linear_stats.len(), scaled.join(" "));
+        eprintln!(
+            "[outer-resid] iter#{} {}",
+            plan.step_linear_stats.len(),
+            scaled.join(" ")
+        );
     }
 
     res_mut(plan).outer_convergence = Some(monitor);
@@ -2897,9 +3029,13 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
         let use_adaptive = supports_adaptive;
 
         let adaptive_resources = if use_adaptive {
-            let gate = r.outer_gate.as_ref()
+            let gate = r
+                .outer_gate
+                .as_ref()
                 .expect("outer_gate must be Some when use_adaptive is true (checked above)");
-            let monitor = r.outer_convergence.as_ref()
+            let monitor = r
+                .outer_convergence
+                .as_ref()
                 .expect("outer_convergence must be Some when use_adaptive is true (checked above)");
 
             // The indirect assembly graph is only ever encoded for iter_idx > 0
@@ -2941,7 +3077,12 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
             queue.write_buffer(&gate.b_iter_counter, 0, bytemuck::bytes_of(&zero));
 
             let stop_inject_bg = if solver_is_cg {
-                let b_scalars = r.runtime.scalar_cg.scalars();
+                let b_scalars = r
+                    .runtime
+                    .scalar_cg
+                    .as_ref()
+                    .expect("CG batch requested from matrix-free runtime")
+                    .scalars();
                 gate.create_stop_inject_bind_group_cg(&device, &monitor.b_break_status, b_scalars)
             } else {
                 let b_scalars = if let Some(schur) = &r.schur {
@@ -2993,7 +3134,9 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                 if let Some((ref asm_indirect, _, _, ref stop_bg)) = adaptive_resources {
                     if is_indirect {
                         // Inject STOP scalar so the linear solver becomes zero-cost when converged
-                        let gate = r.outer_gate.as_ref()
+                        let gate = r
+                            .outer_gate
+                            .as_ref()
                             .expect("outer_gate must be Some in adaptive path");
                         if solver_is_cg {
                             gate.encode_stop_inject_cg_into(encoder, stop_bg);
@@ -3011,9 +3154,11 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                     && iter_idx % matrix_freeze_period as usize != 0
                     && assembly_graph_frozen.is_some()
                 {
-                    assembly_graph_frozen
-                        .expect("checked is_some")
-                        .encode_into(encoder, kernels, runtime_dims);
+                    assembly_graph_frozen.expect("checked is_some").encode_into(
+                        encoder,
+                        kernels,
+                        runtime_dims,
+                    );
                 } else {
                     assembly_graph_tail.encode_into(encoder, kernels, runtime_dims);
                 }
@@ -3026,9 +3171,13 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                         update_graph.encode_into(encoder, kernels, runtime_dims);
                     }
                     // Convergence check + gate after every iteration in adaptive mode
-                    let monitor = r.outer_convergence.as_ref()
+                    let monitor = r
+                        .outer_convergence
+                        .as_ref()
                         .expect("outer_convergence must be Some in adaptive path");
-                    let gate = r.outer_gate.as_ref()
+                    let gate = r
+                        .outer_gate
+                        .as_ref()
                         .expect("outer_gate must be Some in adaptive path");
                     let first_iter = iter_idx == 0;
                     monitor.encode_convergence_check(encoder, bg_state, first_iter);
@@ -3085,7 +3234,10 @@ fn try_host_coupled_batch_tail_one_submission(plan: &mut GpuProgramPlan, remaini
                 encoded_tail_stats.push(stats);
             } else if solver_is_cg {
                 let stats = submit_solve_cg_fixed_iterations_chunked(
-                    &r.runtime.scalar_cg,
+                    r.runtime
+                        .scalar_cg
+                        .as_ref()
+                        .expect("CG batch requested from matrix-free runtime"),
                     &context,
                     n,
                     max_iters,
@@ -3374,20 +3526,53 @@ pub(crate) fn update_graph_run(
     run_module_graph(&r.update_graph, context, &r.kernels, r.runtime_dims(), mode)
 }
 
-pub(crate) fn explicit_graph_run(
+pub(crate) fn explicit_residual_graph_run(
     plan: &GpuProgramPlan,
     context: &crate::solver::gpu::context::GpuContext,
     mode: GraphExecMode,
 ) -> (f64, Option<GraphDetail>) {
     let r = res(plan);
     run_module_graph(
-        &r.explicit_graph,
+        &r.explicit_residual_graph,
         context,
         &r.kernels,
         r.runtime_dims(),
         mode,
     )
 }
+
+fn explicit_stage_graph_run(
+    plan: &GpuProgramPlan,
+    context: &crate::solver::gpu::context::GpuContext,
+    mode: GraphExecMode,
+    stage: usize,
+) -> (f64, Option<GraphDetail>) {
+    let r = res(plan);
+    run_module_graph(
+        &r.explicit_stage_graphs[stage],
+        context,
+        &r.kernels,
+        r.runtime_dims(),
+        mode,
+    )
+}
+
+macro_rules! explicit_stage_graph_runner {
+    ($name:ident, $stage:expr) => {
+        pub(crate) fn $name(
+            plan: &GpuProgramPlan,
+            context: &crate::solver::gpu::context::GpuContext,
+            mode: GraphExecMode,
+        ) -> (f64, Option<GraphDetail>) {
+            explicit_stage_graph_run(plan, context, mode, $stage)
+        }
+    };
+}
+
+explicit_stage_graph_runner!(explicit_stage_1_graph_run, 0);
+explicit_stage_graph_runner!(explicit_stage_2_graph_run, 1);
+explicit_stage_graph_runner!(explicit_stage_3_graph_run, 2);
+explicit_stage_graph_runner!(explicit_stage_4_graph_run, 3);
 
 pub(crate) fn apply_graph_run(
     plan: &GpuProgramPlan,
@@ -3554,6 +3739,11 @@ pub(crate) fn param_dtau(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Re
     let PlanParamValue::F32(dtau) = value else {
         return Err("invalid value type".into());
     };
+    if matches!(res(plan).recipe.stepping, SteppingMode::Explicit) && dtau != 0.0 {
+        return Err(
+            "explicit RK4 does not support pseudo-time stepping (dtau must be zero)".to_string(),
+        );
+    }
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     {
@@ -3588,6 +3778,10 @@ pub(crate) fn param_time_scheme(
     let PlanParamValue::TimeScheme(scheme) = value else {
         return Err("invalid value type".into());
     };
+    let built_explicit = matches!(res(plan).recipe.stepping, SteppingMode::Explicit);
+    if (scheme == crate::solver::gpu::enums::TimeScheme::RK4) != built_explicit {
+        return Err("switching to or from RK4 requires rebuilding the solver program".to_string());
+    }
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     r.requested_time_scheme = scheme;
@@ -4015,8 +4209,8 @@ pub(crate) fn param_low_mach_eps4(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::solver::gpu::structs::LinearSolverStats;
     use crate::solver::dimensions::{Pressure, UnitDimension, Velocity};
+    use crate::solver::gpu::structs::LinearSolverStats;
     use crate::solver::mesh::{generate_structured_rect_mesh, BoundarySides, BoundaryType};
     use crate::solver::model::backend::ast::{fvm, vol_scalar, vol_vector3, EquationSystem};
     use crate::solver::model::ports::PortRegistry;
@@ -4269,10 +4463,22 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!should_relax_nonconverged_apply(1.0e-5, converged_linear, None));
-        assert!(should_relax_nonconverged_apply(1.0e-5, stalled_linear, None));
+        assert!(!should_relax_nonconverged_apply(
+            1.0e-5,
+            converged_linear,
+            None
+        ));
+        assert!(should_relax_nonconverged_apply(
+            1.0e-5,
+            stalled_linear,
+            None
+        ));
         assert!(should_relax_nonconverged_apply(0.0, stalled_linear, None));
-        assert!(!should_relax_nonconverged_apply(0.0, converged_linear, None));
+        assert!(!should_relax_nonconverged_apply(
+            0.0,
+            converged_linear,
+            None
+        ));
     }
 
     #[test]

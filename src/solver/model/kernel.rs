@@ -350,10 +350,36 @@ pub(crate) type ModelKernelArtifactGenerator = Arc<
 pub enum KernelWgslScope {
     PerModel,
     Shared,
+    /// Per-model RK4 kernel emitted into committed WGSL only when the model's
+    /// method-of-lines capability gate passes. The typed program remains
+    /// available to the CPU backend and to compile-time schedule derivation for
+    /// every model, so unsupported models can still be diagnosed without
+    /// acquiring a dormant GPU pipeline.
+    ExplicitRk4PerModel,
     /// Typed program used by the CPU interpreter/transpiler only. It remains a
     /// first-class model kernel but is not emitted into the committed WGSL or
     /// GPU pipeline registry.
     CpuOnly,
+}
+
+impl KernelWgslScope {
+    /// Whether this generator is valid for model-specific backend artifacts.
+    ///
+    /// Most scopes are unconditional. Explicit RK4 programs are capability
+    /// gated because their schedule is intentionally derivable for every model,
+    /// while only static method-of-lines models may execute that schedule.
+    pub fn model_is_eligible(self, model: &crate::solver::model::ModelSpec) -> bool {
+        match self {
+            Self::ExplicitRk4PerModel => model.validate_explicit_rk4().is_ok(),
+            Self::PerModel | Self::Shared | Self::CpuOnly => true,
+        }
+    }
+
+    /// Whether build-time codegen should emit and register a per-model WGSL
+    /// artifact for this generator.
+    pub fn emits_per_model_wgsl(self, model: &crate::solver::model::ModelSpec) -> bool {
+        matches!(self, Self::PerModel | Self::ExplicitRk4PerModel) && self.model_is_eligible(model)
+    }
 }
 
 #[derive(Clone)]
@@ -434,6 +460,27 @@ impl ModelKernelGeneratorSpec {
         Self {
             id,
             scope: KernelWgslScope::Shared,
+            generator: Arc::new(move |model, schemes| {
+                generator(model, schemes).map(ModelKernelArtifact::DslProgram)
+            }),
+        }
+    }
+
+    /// Register a typed explicit-RK4 program for both CPU execution and
+    /// capability-gated per-model GPU WGSL emission.
+    pub fn new_explicit_rk4_dsl(
+        id: KernelId,
+        generator: impl Fn(
+                &crate::solver::model::ModelSpec,
+                &crate::solver::ir::SchemeRegistry,
+            ) -> Result<crate::solver::ir::KernelProgram, String>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        Self {
+            id,
+            scope: KernelWgslScope::ExplicitRk4PerModel,
             generator: Arc::new(move |model, schemes| {
                 generator(model, schemes).map(ModelKernelArtifact::DslProgram)
             }),
@@ -1302,7 +1349,7 @@ pub fn emit_model_kernels_wgsl_with_ids(
             }
             continue;
         };
-        if generator.scope != KernelWgslScope::PerModel {
+        if !generator.scope.emits_per_model_wgsl(model) {
             continue;
         }
 
@@ -1402,6 +1449,31 @@ mod contract_tests {
             program.body = body_stmts;
             Ok(program)
         }
+    }
+
+    #[test]
+    fn explicit_rk4_scope_is_capability_gated_for_gpu_emission() {
+        let supported = crate::solver::model::generic_diffusion_demo_model().expect("model");
+        let unsupported = crate::solver::model::incompressible_momentum_model().expect("model");
+        let scope = KernelWgslScope::ExplicitRk4PerModel;
+
+        assert!(scope.model_is_eligible(&supported));
+        assert!(scope.emits_per_model_wgsl(&supported));
+        assert!(!scope.model_is_eligible(&unsupported));
+        assert!(!scope.emits_per_model_wgsl(&unsupported));
+
+        let id = KernelId("contract/explicit_rk4");
+        let generator = ModelKernelGeneratorSpec::new_explicit_rk4_dsl(
+            id,
+            contract_dsl_kernel_generator(
+                id.as_str(),
+                cfd2_ir::ast::Stmt::Assign {
+                    target: cfd2_ir::ast::Expr::ident("value"),
+                    value: cfd2_ir::ast::Expr::ident("value"),
+                },
+            ),
+        );
+        assert_eq!(generator.scope, scope);
     }
 
     #[test]

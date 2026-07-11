@@ -110,6 +110,7 @@ fn scope_name(scope: Option<KernelWgslScope>) -> &'static str {
     match scope {
         Some(KernelWgslScope::PerModel) => "PerModel",
         Some(KernelWgslScope::Shared) => "Shared",
+        Some(KernelWgslScope::ExplicitRk4PerModel) => "ExplicitRk4PerModel",
         Some(KernelWgslScope::CpuOnly) => "CpuOnly",
         None => "-",
     }
@@ -192,7 +193,10 @@ fn collect_model_coverage(
 
             let phase = phase_by_id.get(generator.id.as_str()).copied();
             let eligible_for_dsl_migration = implementation == "WGSL"
-                && generator.scope == KernelWgslScope::PerModel
+                && matches!(
+                    generator.scope,
+                    KernelWgslScope::PerModel | KernelWgslScope::ExplicitRk4PerModel
+                )
                 && matches!(phase, Some(KernelPhaseId::Assembly | KernelPhaseId::Update));
 
             let note = if replacement_set.contains(generator.id.as_str()) {

@@ -21,6 +21,10 @@ pub struct UnifiedFieldResources {
     /// Gradient buffers keyed by field name
     pub gradients: HashMap<String, wgpu::Buffer>,
 
+    /// Cell-local scratch buffers declared by the recipe (for example the
+    /// packed `rk_base` and `rk_accum` workspaces used by explicit RK4).
+    pub workspaces: HashMap<String, wgpu::Buffer>,
+
     /// History buffers for multi-step time integration
     pub history_buffers: Vec<wgpu::Buffer>,
 
@@ -97,6 +101,23 @@ impl UnifiedFieldResources {
             gradients.insert(field_name.clone(), buffer);
         }
 
+        let mut workspaces = HashMap::new();
+        for spec in &recipe.aux_buffers {
+            if spec.purpose != BufferPurpose::Workspace {
+                continue;
+            }
+            let len = num_cells as usize * spec.size_per_cell;
+            let zero = vec![0.0f32; len.max(1)];
+            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some(&format!("UnifiedField {}", spec.name)),
+                contents: cast_slice(&zero),
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::COPY_SRC,
+            });
+            workspaces.insert(spec.name.to_string(), buffer);
+        }
+
         // Time history beyond PingPongState is unused by current kernels, but
         // the recipe can request it.
         let mut history_buffers = Vec::new();
@@ -168,6 +189,7 @@ impl UnifiedFieldResources {
             state,
             constants,
             gradients,
+            workspaces,
             history_buffers,
             iteration_snapshot,
             flux_buffer,
@@ -305,6 +327,9 @@ impl UnifiedFieldResources {
             "low_mach_params" => self.low_mach_params_buffer.as_ref(),
             "grad_state" => self.gradients.get("state"),
             _ => {
+                if let Some(buffer) = self.workspaces.get(name) {
+                    return Some(buffer);
+                }
                 // Check for gradient field names
                 if let Some(field) = name.strip_prefix("grad_") {
                     self.gradients.get(field)
@@ -335,6 +360,7 @@ impl UnifiedFieldResources {
                 names.push("grad_state");
             }
         }
+        names.extend(self.workspaces.keys().map(String::as_str));
         names
     }
 

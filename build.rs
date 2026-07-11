@@ -507,7 +507,7 @@ fn generate_kernel_registry_map(manifest_dir: &str, models: &[solver::model::Mod
         for module in &model.modules {
             let module: &dyn solver::model::module::ModelModule = module;
             for gen in module.kernel_generators() {
-                if gen.scope == solver::model::kernel::KernelWgslScope::PerModel {
+                if gen.scope.emits_per_model_wgsl(model) {
                     per_model_ids.insert(gen.id);
                 }
             }
@@ -991,6 +991,10 @@ fn collect_per_model_generated_kernel_ids(
         for module in &model.modules {
             let module: &dyn solver::model::module::ModelModule = module;
             for generator in module.kernel_generators() {
+                // Schedule derivation is model-structural, so retain
+                // capability-gated explicit IDs even when this model will not
+                // emit their GPU WGSL. Solver construction runs the capability
+                // gate before attempting a registry lookup.
                 if generator.scope != solver::model::kernel::KernelWgslScope::Shared {
                     ids.insert(generator.id.as_str().to_string());
                 }
@@ -1365,9 +1369,7 @@ fn emit_transpiled_cpu_kernels(
         for module in &model.modules {
             let module: &dyn ModelModule = module;
             for spec in module.kernel_generators() {
-                if spec.scope == solver::model::kernel::KernelWgslScope::CpuOnly
-                    && model.validate_explicit_rk4().is_err()
-                {
+                if !spec.scope.model_is_eligible(model) {
                     continue;
                 }
                 let artifact = match (spec.generator)(model, schemes) {

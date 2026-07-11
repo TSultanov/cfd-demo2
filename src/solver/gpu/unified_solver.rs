@@ -164,13 +164,6 @@ impl GpuUnifiedSolver {
             return Self::build_cpu_backend(mesh, model, config, device, queue, cpu_cfg);
         }
 
-        if config.stepping == SteppingMode::Explicit {
-            return Err(
-                "fully explicit RK4 is currently a CPU matrix-free backend; select the CPU backend"
-                    .to_string(),
-            );
-        }
-
         // Model-owned preconditioners (e.g. GenericCoupled+Schur) must remain authoritative.
         crate::solver::gpu::lowering::validate_model_owned_preconditioner_config(
             &model,
@@ -610,14 +603,42 @@ impl GpuUnifiedSolver {
     }
 
     pub fn set_named_param(&mut self, name: &str, value: PlanParamValue) -> Result<(), String> {
-        match &mut self.backend {
+        let requested_time_scheme = match (name, value) {
+            ("time_scheme", PlanParamValue::TimeScheme(scheme)) => {
+                let built_explicit = self.config.stepping == SteppingMode::Explicit;
+                if (scheme == TimeScheme::RK4) != built_explicit {
+                    return Err(
+                        "switching to or from RK4 requires rebuilding the solver program"
+                            .to_string(),
+                    );
+                }
+                Some(scheme)
+            }
+            ("dtau", PlanParamValue::F32(dtau))
+                if self.config.stepping == SteppingMode::Explicit && dtau != 0.0 =>
+            {
+                return Err(
+                    "explicit RK4 does not support pseudo-time stepping (dtau must be zero)"
+                        .to_string(),
+                );
+            }
+            _ => None,
+        };
+
+        let result = match &mut self.backend {
             SolverBackend::Gpu(p) => p.set_named_param(name, value),
             #[cfg(feature = "cpu")]
             SolverBackend::Cpu(c) => {
                 cpu_set_param(c, name, value);
                 Ok(())
             }
+        };
+        if result.is_ok() {
+            if let Some(scheme) = requested_time_scheme {
+                self.config.time_scheme = scheme;
+            }
         }
+        result
     }
 
     fn coupled_unknown_base_for_field(&self, field: &str) -> Option<(u32, u32)> {
@@ -727,9 +748,25 @@ impl GpuUnifiedSolver {
         let _ = self.set_named_param("advection_scheme", PlanParamValue::Scheme(scheme));
     }
 
-    pub fn set_time_scheme(&mut self, scheme: TimeScheme) {
+    /// Change the time scheme without changing solver-program families.
+    /// Euler↔BDF2 is live; transitions to/from RK4 require reconstruction
+    /// because the explicit program owns different kernels and work buffers.
+    pub fn try_set_time_scheme(&mut self, scheme: TimeScheme) -> Result<(), String> {
+        let built_explicit = self.config.stepping == SteppingMode::Explicit;
+        if (scheme == TimeScheme::RK4) != built_explicit {
+            return Err(
+                "switching to or from RK4 requires rebuilding the solver program".to_string(),
+            );
+        }
+        self.set_named_param("time_scheme", PlanParamValue::TimeScheme(scheme))?;
         self.config.time_scheme = scheme;
-        let _ = self.set_named_param("time_scheme", PlanParamValue::TimeScheme(scheme));
+        Ok(())
+    }
+
+    pub fn set_time_scheme(&mut self, scheme: TimeScheme) {
+        if let Err(error) = self.try_set_time_scheme(scheme) {
+            log::warn!("time-scheme change ignored: {error}");
+        }
     }
 
     pub fn set_preconditioner(&mut self, preconditioner: PreconditionerType) {
@@ -764,7 +801,7 @@ impl GpuUnifiedSolver {
 
     pub fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
         self.ale_step_armed = false;
-        let stats = match &mut self.backend {
+        let mut stats = match &mut self.backend {
             SolverBackend::Gpu(p) => p.step_with_stats()?,
             #[cfg(feature = "cpu")]
             SolverBackend::Cpu(c) => {
@@ -788,6 +825,21 @@ impl GpuUnifiedSolver {
                 }
             }
         };
+        // Explicit GPU steps do not run a linear solver, so an empty stats
+        // vector is normally correct. Scan the state when the caller asks for
+        // step statistics so a poisoned RK stage is still surfaced immediately
+        // to SolverDriver's existing divergence handling instead of waiting for
+        // a throttled visualization readback.
+        if self.config.stepping == SteppingMode::Explicit && !self.is_cpu() {
+            let state = pollster::block_on(self.read_state_f32());
+            if state.iter().any(|value| !value.is_finite()) {
+                stats.push(LinearSolverStats::diverged(
+                    0,
+                    f32::INFINITY,
+                    std::time::Duration::ZERO,
+                ));
+            }
+        }
         self.apply_srd();
         Ok(stats)
     }

@@ -500,9 +500,8 @@ impl StructuredGpuSolver {
     }
 
     /// Build against an existing device/queue with an explicit advection scheme
-    /// and time-integration scheme. Both are honoured at RUNTIME by the codegen
-    /// structured kernels (`constants.scheme` selects the deferred-correction
-    /// reconstruction; `constants.time_scheme==1` is BDF2) — no kernel change.
+    /// and time-integration scheme. Euler/BDF2 use the coupled banded program;
+    /// RK4 selects the fully explicit matrix-free program.
     pub fn with_config(
         ctx: GpuContext,
         grid: StructuredGrid,
@@ -515,12 +514,17 @@ impl StructuredGpuSolver {
         if model.system.topology() != cfd2_ir::equation::TopologyMode::Structured2D {
             return Err("StructuredGpuSolver requires a Structured2D model".to_string());
         }
+        let stepping = if time_scheme == TimeScheme::RK4 {
+            SteppingMode::Explicit
+        } else {
+            SteppingMode::Coupled
+        };
         let recipe = SolverRecipe::from_model(
             model,
             scheme,
             time_scheme,
             PreconditionerType::Jacobi,
-            SteppingMode::Coupled,
+            stepping,
         )?;
         let schemes = SchemeRegistry::new(scheme);
 
@@ -590,13 +594,21 @@ impl StructuredGpuSolver {
         for name in ["state", "state_old", "state_old_old", "state_iter"] {
             buffers.insert(name.to_string(), storage_buffer(dev, name, n * state_stride));
         }
-        buffers.insert(
-            "matrix_values".to_string(),
-            storage_buffer(dev, "matrix_values", n * BAND_STRIDE * s * s),
-        );
         buffers.insert("rhs".to_string(), storage_buffer(dev, "rhs", n * s));
-        buffers.insert("x".to_string(), storage_buffer(dev, "x", n * s));
-        buffers.insert("y".to_string(), storage_buffer(dev, "y", n * s));
+        if stepping == SteppingMode::Explicit {
+            buffers.insert("rk_base".to_string(), storage_buffer(dev, "rk_base", n * s));
+            buffers.insert(
+                "rk_accum".to_string(),
+                storage_buffer(dev, "rk_accum", n * s),
+            );
+        } else {
+            buffers.insert(
+                "matrix_values".to_string(),
+                storage_buffer(dev, "matrix_values", n * BAND_STRIDE * s * s),
+            );
+            buffers.insert("x".to_string(), storage_buffer(dev, "x", n * s));
+            buffers.insert("y".to_string(), storage_buffer(dev, "y", n * s));
+        }
         buffers.insert(
             "fluxes".to_string(),
             storage_buffer(dev, "fluxes", n * 4 * flux_stride),
@@ -892,11 +904,65 @@ impl StructuredGpuSolver {
         self.read_f32(name, len)
     }
 
-    /// One implicit (backward-Euler) time step: advance history, then
-    /// `outer_iters` sweeps of prep/flux/gradients/assembly → banded solve →
-    /// update. All on the GPU.
+    /// One classical RK4 step. Every stage refreshes expression-valued boundary
+    /// data and the spatial residual from that stage's state and physical time.
+    fn step_explicit_rk4(&mut self) {
+        let state_len = self.n * self.state_stride;
+
+        // Rotate history once for the complete RK step. RK4 itself is one-step,
+        // but the public history contract remains identical to Euler/BDF2.
+        self.copy_submit("state_old", "state_old_old", state_len);
+        self.copy_submit("state", "state_old", state_len);
+
+        self.constants.dt = self.dt as f32;
+        self.constants.dt_old = self.dt_old as f32;
+        self.constants.dtau = 0.0;
+        self.constants.time_scheme = TimeScheme::RK4 as u32;
+
+        let stage_ids = [
+            crate::solver::model::KernelId::EXPLICIT_RK4_STAGE_1.as_str(),
+            crate::solver::model::KernelId::EXPLICIT_RK4_STAGE_2.as_str(),
+            crate::solver::model::KernelId::EXPLICIT_RK4_STAGE_3.as_str(),
+            crate::solver::model::KernelId::EXPLICIT_RK4_STAGE_4.as_str(),
+        ];
+        let stage_times = [0.0_f64, 0.5, 0.5, 1.0];
+        let base_time = self.time;
+        // Expression-valued BCs depend on the evolving stage state, so refresh
+        // them every stage. Other Preparation kernels retain their one-time
+        // semantics and are intentionally excluded, matching the CPU oracle.
+        let prep: Vec<String> = self
+            .prep
+            .iter()
+            .filter(|id| id.contains("bc_expr"))
+            .cloned()
+            .collect();
+        let residual = self.per_iter.clone();
+
+        for (&stage_id, &c) in stage_ids.iter().zip(stage_times.iter()) {
+            self.constants.time = (base_time + c * self.dt) as f32;
+            self.write_kernel_constants();
+            self.dispatch_ids(&prep);
+            self.dispatch_ids(&residual);
+            self.dispatch_ids(&[stage_id.to_string()]);
+        }
+
+        self.dt_old = self.dt;
+        self.step_count = self.step_count.saturating_add(1);
+        self.time = base_time + self.dt;
+        self.constants.time = self.time as f32;
+        self.write_kernel_constants();
+        self.last_stats = crate::solver::banded_schur::StructuredStepStats::default();
+    }
+
+    /// Advance one time step. RK4 runs the matrix-free four-stage program;
+    /// Euler/BDF2 run `outer_iters` coupled banded solves. All work stays on the
+    /// GPU.
     pub fn step(&mut self) {
         use crate::solver::TimeScheme;
+        if self.time_scheme == TimeScheme::RK4 {
+            self.step_explicit_rk4();
+            return;
+        }
         let n = self.n;
         let sstride = self.state_stride;
         // Variable-dt BDF2: `dt_old` lags `dt` (unstructured TimeIntegrationModule).
@@ -1110,11 +1176,29 @@ impl StructuredGpuSolver {
         self.write_kernel_constants();
     }
 
-    /// Live time-scheme switch (GUI).
-    pub fn set_time_scheme(&mut self, scheme: crate::solver::TimeScheme) {
+    /// Change the time scheme without changing solver-program families.
+    /// Euler↔BDF2 is live; transitions to/from RK4 require reconstruction.
+    pub fn try_set_time_scheme(
+        &mut self,
+        scheme: crate::solver::TimeScheme,
+    ) -> Result<(), String> {
+        let built_explicit = self.buffers.contains_key("rk_base");
+        if (scheme == crate::solver::TimeScheme::RK4) != built_explicit {
+            return Err(
+                "switching to or from RK4 requires rebuilding the structured solver program"
+                    .to_string(),
+            );
+        }
         self.time_scheme = scheme;
         self.constants.time_scheme = scheme as u32;
         self.write_kernel_constants();
+        Ok(())
+    }
+
+    pub fn set_time_scheme(&mut self, scheme: crate::solver::TimeScheme) {
+        if let Err(error) = self.try_set_time_scheme(scheme) {
+            log::warn!("structured time-scheme change ignored: {error}");
+        }
     }
 
     /// Cap on Picard (outer) sweeps per time step.

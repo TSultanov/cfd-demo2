@@ -171,27 +171,27 @@ pub fn generic_coupled_module(method: MethodSpec) -> KernelBundleModule {
                 KernelId::GENERIC_COUPLED_UPDATE,
                 crate::solver::model::kernel::generate_generic_coupled_update_kernel_program,
             ),
-            ModelKernelGeneratorSpec::new_cpu_dsl(
+            ModelKernelGeneratorSpec::new_explicit_rk4_dsl(
                 KernelId::EXPLICIT_RESIDUAL,
                 crate::solver::model::kernel::generate_explicit_residual_kernel_program,
             ),
-            ModelKernelGeneratorSpec::new_cpu_dsl(
+            ModelKernelGeneratorSpec::new_explicit_rk4_dsl(
                 KernelId::EXPLICIT_RESIDUAL_GRAD_STATE,
                 crate::solver::model::kernel::generate_explicit_residual_grad_state_kernel_program,
             ),
-            ModelKernelGeneratorSpec::new_cpu_dsl(
+            ModelKernelGeneratorSpec::new_explicit_rk4_dsl(
                 KernelId::EXPLICIT_RK4_STAGE_1,
                 crate::solver::model::kernel::generate_explicit_rk4_stage_1_kernel_program,
             ),
-            ModelKernelGeneratorSpec::new_cpu_dsl(
+            ModelKernelGeneratorSpec::new_explicit_rk4_dsl(
                 KernelId::EXPLICIT_RK4_STAGE_2,
                 crate::solver::model::kernel::generate_explicit_rk4_stage_2_kernel_program,
             ),
-            ModelKernelGeneratorSpec::new_cpu_dsl(
+            ModelKernelGeneratorSpec::new_explicit_rk4_dsl(
                 KernelId::EXPLICIT_RK4_STAGE_3,
                 crate::solver::model::kernel::generate_explicit_rk4_stage_3_kernel_program,
             ),
-            ModelKernelGeneratorSpec::new_cpu_dsl(
+            ModelKernelGeneratorSpec::new_explicit_rk4_dsl(
                 KernelId::EXPLICIT_RK4_STAGE_4,
                 crate::solver::model::kernel::generate_explicit_rk4_stage_4_kernel_program,
             ),

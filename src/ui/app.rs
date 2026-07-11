@@ -1,8 +1,12 @@
+use crate::solver::cpu::structured::StructuredModelSolver;
+use crate::solver::gpu::structured::{
+    BcComp as StructBc, Edge as StructEdge, StructuredGpuSolver, StructuredGrid,
+};
 use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_cvt_mesh, generate_delaunay_mesh,
     generate_structured_nozzle_mesh, generate_structured_rect_mesh,
-    generate_structured_symmetric_nozzle_mesh, generate_voronoi_mesh, BackwardsStep,
-    BoundarySides, BoundaryType, ChannelWithObstacle, LloydConfig, Mesh, Nozzle,
+    generate_structured_symmetric_nozzle_mesh, generate_voronoi_mesh, BackwardsStep, BoundarySides,
+    BoundaryType, ChannelWithObstacle, LloydConfig, Mesh, Nozzle,
 };
 use crate::solver::model::{
     allmach_pressure_ale_model, allmach_pressure_model, allmach_thermal_ale_model,
@@ -10,10 +14,6 @@ use crate::solver::model::{
     incompressible_momentum_model, ModelPreconditionerSpec, ModelSpec,
 };
 use crate::solver::scheme::Scheme;
-use crate::solver::cpu::structured::StructuredModelSolver;
-use crate::solver::gpu::structured::{
-    BcComp as StructBc, Edge as StructEdge, StructuredGpuSolver, StructuredGrid,
-};
 use crate::solver::{
     GpuLowMachPrecondModel, LinearSolverStats, OuterStepStatus, PreconditionerType,
     TimeScheme as GpuTimeScheme, UiPortSet, UnifiedSolver,
@@ -377,7 +377,12 @@ impl StructuredCpuBridge {
                 | wgpu::BufferUsages::COPY_SRC
                 | wgpu::BufferUsages::COPY_DST,
         });
-        Self { solver, state_buf, size_bytes, queue }
+        Self {
+            solver,
+            state_buf,
+            size_bytes,
+            queue,
+        }
     }
 
     fn step(&mut self) {
@@ -391,7 +396,8 @@ impl StructuredCpuBridge {
     fn copy_state_to_buffer(&self, dst: &wgpu::Buffer) {
         // Write the CURRENT host state straight into the viz buffer.
         let packed = self.solver.packed_state_f32();
-        self.queue.write_buffer(dst, 0, bytemuck::cast_slice(&packed));
+        self.queue
+            .write_buffer(dst, 0, bytemuck::cast_slice(&packed));
     }
 }
 
@@ -511,11 +517,10 @@ impl SolverMode {
                 if !params.adaptive_dt {
                     s.solver.set_dt(params.requested_dt as f64);
                 }
-                s.solver.set_fluid(params.density as f64, params.viscosity as f64);
                 s.solver
-                    .set_outer_iters(params.outer_iters.max(1) as usize);
-                s.solver
-                    .set_outer_auto_converge(params.outer_auto_converge);
+                    .set_fluid(params.density as f64, params.viscosity as f64);
+                s.solver.set_outer_iters(params.outer_iters.max(1) as usize);
+                s.solver.set_outer_auto_converge(params.outer_auto_converge);
                 s.solver.set_alpha_u(params.alpha_u);
                 s.solver.set_alpha_p(params.alpha_p);
                 s.solver.set_time_scheme(params.time_scheme);
@@ -1502,7 +1507,11 @@ impl CFDApp {
             std::env::set_var("CFD2_CPU_THREADS", self.cpu_threads.max(1).to_string());
             std::env::set_var(
                 "CFD2_CPU_SIMD",
-                if self.backend == BackendChoice::CpuTranspiledSimd { "1" } else { "0" },
+                if self.backend == BackendChoice::CpuTranspiledSimd {
+                    "1"
+                } else {
+                    "0"
+                },
             );
             std::env::set_var(
                 "CFD2_CPU_PRECISION",
@@ -1937,8 +1946,7 @@ impl CFDApp {
                 let (cx, cy) = (mesh.cell_cx[i], mesh.cell_cy[i]);
                 let mut corners: Vec<[f64; 2]> = Vec::new();
                 let mut merge_tol2 = f64::INFINITY;
-                for &f in &mesh.cell_faces
-                    [mesh.cell_face_offsets[i]..mesh.cell_face_offsets[i + 1]]
+                for &f in &mesh.cell_faces[mesh.cell_face_offsets[i]..mesh.cell_face_offsets[i + 1]]
                 {
                     let (tx, ty) = (-mesh.face_ny[f], mesh.face_nx[f]);
                     let h = 0.5 * mesh.face_area[f];
@@ -2213,7 +2221,9 @@ impl CFDApp {
                 .iter()
                 .map(|poly| {
                     let n = poly.len().max(1) as f64;
-                    let (cx, cy) = poly.iter().fold((0.0, 0.0), |(ax, ay), p| (ax + p[0], ay + p[1]));
+                    let (cx, cy) = poly
+                        .iter()
+                        .fold((0.0, 0.0), |(ax, ay), p| (ax + p[0], ay + p[1]));
                     structured_geometry_is_solid(geom, cx / n, cy / n, lx, ly)
                 })
                 .collect()
@@ -2246,10 +2256,8 @@ impl CFDApp {
         // enable checkbox happens to be ticked.
         self.solver_is_moving = matches!(mode, SolverMode::MovingMesh(_));
 
-        self.solver_worker.send(SolverWorkerCommand::SetSolver {
-            mode,
-            viz_field,
-        });
+        self.solver_worker
+            .send(SolverWorkerCommand::SetSolver { mode, viz_field });
         self.sync_worker_params();
 
         if self.trace_enabled {
@@ -2599,7 +2607,10 @@ impl CFDApp {
         let outer = request.params.outer_iters.max(1) as usize;
 
         let u_in = request.params.inlet_velocity as f64;
-        let (density, viscosity) = (request.params.density as f64, request.params.viscosity as f64);
+        let (density, viscosity) = (
+            request.params.density as f64,
+            request.params.viscosity as f64,
+        );
         let (scheme, time_scheme) = (request.params.advection_scheme, request.params.time_scheme);
         let precond = request.structured_precond;
         let solver_start = std::time::Instant::now();
@@ -2638,8 +2649,14 @@ impl CFDApp {
             seed_structured_ibm(&mut cpu, request.selected_geometry, lx, ly);
             setup_structured_bcs(&mut cpu, request.model_id, u_in, s);
             let ports = UiPortSet::from_layout(cpu.state_layout());
-            let cached_u = ports.u_offset.map(|o| cpu.get_u(o as usize)).unwrap_or_default();
-            let cached_p = ports.p_offset.map(|o| cpu.get_scalar(o as usize)).unwrap_or_default();
+            let cached_u = ports
+                .u_offset
+                .map(|o| cpu.get_u(o as usize))
+                .unwrap_or_default();
+            let cached_p = ports
+                .p_offset
+                .map(|o| cpu.get_scalar(o as usize))
+                .unwrap_or_default();
             let bridge = StructuredCpuBridge::new(cpu, &device, queue);
             (SolverMode::StructuredCpu(bridge), cached_u, cached_p)
         } else {
@@ -2649,8 +2666,15 @@ impl CFDApp {
             ))?;
             // Honour the selected advection + time-integration schemes (structured
             // kernels read them at runtime — full parity with the unstructured path).
-            let mut solver =
-                StructuredGpuSolver::with_config(ctx, grid, &model, dt, outer, scheme, time_scheme)?;
+            let mut solver = StructuredGpuSolver::with_config(
+                ctx,
+                grid,
+                &model,
+                dt,
+                outer,
+                scheme,
+                time_scheme,
+            )?;
             solver.set_fluid(density, viscosity);
             // Coupled-solve preconditioner: the model-owned SIMPLE Schur (if the
             // model declares a layout) or block-Jacobi. No-op where unsupported.
@@ -2669,8 +2693,14 @@ impl CFDApp {
             seed_structured_ibm(&mut solver, request.selected_geometry, lx, ly);
             setup_structured_bcs(&mut solver, request.model_id, u_in, s);
             let ports = UiPortSet::from_layout(solver.state_layout());
-            let cached_u = ports.u_offset.map(|o| solver.get_u(o as usize)).unwrap_or_default();
-            let cached_p = ports.p_offset.map(|o| solver.get_scalar(o as usize)).unwrap_or_default();
+            let cached_u = ports
+                .u_offset
+                .map(|o| solver.get_u(o as usize))
+                .unwrap_or_default();
+            let cached_p = ports
+                .p_offset
+                .map(|o| solver.get_scalar(o as usize))
+                .unwrap_or_default();
             (SolverMode::Structured(solver), cached_u, cached_p)
         };
         CFDApp::push_trace_init_event(
@@ -2726,8 +2756,12 @@ impl CFDApp {
         // silently swapped; models without an ALE variant are gated out of the
         // toggle in the UI, so reaching here with an unsupported model is a
         // programming error (surfaced as an init Err, not a wrong-physics run).
-        let ale_id = CFDApp::ale_model_for(request.model_id)
-            .ok_or_else(|| format!("model '{}' has no moving-mesh (ALE) variant", request.model_id))?;
+        let ale_id = CFDApp::ale_model_for(request.model_id).ok_or_else(|| {
+            format!(
+                "model '{}' has no moving-mesh (ALE) variant",
+                request.model_id
+            )
+        })?;
         let model = ale_model_by_id(ale_id)?;
         let model_caps = CFDApp::model_ui_caps(&model);
 
@@ -3108,8 +3142,7 @@ impl CFDApp {
                     ui.label(format!("Faces: {}", mesh.num_faces()));
                     ui.label(format!("Vertices: {}", mesh.num_vertices()));
                     if !mesh.cell_vol.is_empty() {
-                        let min_vol =
-                            mesh.cell_vol.iter().cloned().fold(f64::INFINITY, f64::min);
+                        let min_vol = mesh.cell_vol.iter().cloned().fold(f64::INFINITY, f64::min);
                         let max_vol = mesh
                             .cell_vol
                             .iter()
@@ -3257,7 +3290,8 @@ impl CFDApp {
                                 let painter = ui.painter_at(rect);
                                 let grey = egui::Color32::from_rgba_unmultiplied(90, 90, 90, 220);
                                 for (i, poly) in cells.iter().enumerate() {
-                                    if !self.structured_solid_mask.get(i).copied().unwrap_or(false) {
+                                    if !self.structured_solid_mask.get(i).copied().unwrap_or(false)
+                                    {
                                         continue;
                                     }
                                     let pts: Vec<egui::Pos2> = poly
@@ -4198,7 +4232,9 @@ impl eframe::App for CFDApp {
                             {
                                 self.update_gpu_outer_iters();
                             }
-                            if self.model_caps.supports_dtau {
+                            if self.model_caps.supports_dtau
+                                && self.time_scheme != GpuTimeScheme::RK4
+                            {
                                 ui.separator();
                                 ui.label("Dual Time Stepping");
                                 if ui
@@ -4646,7 +4682,6 @@ impl eframe::App for CFDApp {
                                     self.update_gpu_time_scheme();
                                 }
                                 let rk4_enabled = self.model_caps.supports_explicit_rk4
-                                    && self.backend.is_cpu()
                                     && !self.enable_moving_mesh
                                     && !self.solver_is_moving;
                                 let rk4 = ui.add_enabled(
@@ -4664,7 +4699,7 @@ impl eframe::App for CFDApp {
                                 }
                                 if !rk4_enabled {
                                     rk4.on_disabled_hover_text(
-                                        "Explicit RK4 requires a method-of-lines model, a static mesh, and a CPU backend.",
+                                        "Explicit RK4 requires a method-of-lines model and a static mesh.",
                                     );
                                 }
                             });
@@ -4731,15 +4766,10 @@ impl eframe::App for CFDApp {
                                 // affects the unstructured solve; on structured it is
                                 // the same transpiled kernels + shared banded solve.)
                                 for choice in BackendChoice::ALL {
-                                    let enabled = self.time_scheme != GpuTimeScheme::RK4
-                                        || choice.is_cpu();
-                                    let entry = ui.add_enabled(
-                                        enabled,
-                                        egui::SelectableLabel::new(
+                                    let entry = ui.add(egui::SelectableLabel::new(
                                             self.backend == choice,
                                             choice.label(),
-                                        ),
-                                    );
+                                    ));
                                     if entry.clicked() {
                                         self.backend = choice;
                                     }
@@ -4997,10 +5027,7 @@ fn trace_runtime_params_from_worker(params: RuntimeParams) -> tracefmt::TraceRun
     }
 }
 
-fn solver_worker_stop_trace(
-    trace: &mut Option<SolverTraceSession>,
-    mode: &mut Option<SolverMode>,
-) {
+fn solver_worker_stop_trace(trace: &mut Option<SolverTraceSession>, mode: &mut Option<SolverMode>) {
     let Some(mut session) = trace.take() else {
         return;
     };
@@ -5200,6 +5227,15 @@ impl StructuredSteppable for StructuredModelSolver {
     }
 }
 
+/// Magnitude of the structured GUI's Brinkman momentum sink. Keep this shared
+/// by the seeding and explicit-stability paths: RK4 integrates the sink rather
+/// than placing it on an implicit diagonal.
+const STRUCTURED_IBM_PENALTY_RATE: f64 = 1.0e5;
+
+/// Conservative extent of classical RK4's stability interval on the negative
+/// real axis (the exact endpoint is about 2.785).
+const RK4_NEGATIVE_REAL_SAFETY: f64 = 2.5;
+
 /// Pin `dt` for one structured step — the same CFL policy as
 /// [`crate::sim::SolverDriver::step`].
 fn structured_pin_dt(
@@ -5256,9 +5292,21 @@ fn structured_pin_dt(
                 alpha = alpha.max(crate::solver::model::ALLMACH_K_OVER_CP / rho);
             }
             if alpha.is_finite() && alpha > 1.0e-14 {
-                let diffusion_dt =
-                    0.25 * params.target_cfl * min_h * min_h / alpha;
+                let diffusion_dt = 0.25 * params.target_cfl * min_h * min_h / alpha;
                 stable_dt = Some(stable_dt.map_or(diffusion_dt, |dt| dt.min(diffusion_dt)));
+            }
+
+            // The structured density-based model carries a -1e5 1/s Brinkman
+            // reaction in immersed-solid cells. The implicit path puts that
+            // sink on the matrix diagonal; RK4 integrates it explicitly, so
+            // acoustic/diffusive CFL limits alone are insufficient. Keep
+            // |lambda*dt| inside the negative-real RK4 stability interval.
+            if model_id == "compressible_structured"
+                && s.st_layout().offset_for("ibm_penalty_U").is_some()
+            {
+                let reaction_dt = RK4_NEGATIVE_REAL_SAFETY * params.target_cfl.clamp(0.0, 1.0)
+                    / STRUCTURED_IBM_PENALTY_RATE;
+                stable_dt = Some(stable_dt.map_or(reaction_dt, |dt| dt.min(reaction_dt)));
             }
         }
         if let Some(mut next_dt) = stable_dt {
@@ -5307,7 +5355,11 @@ fn structured_step(
     // developing jet/wake and overshoot the true Courant number for several
     // steps — the driver has the same pattern, but structured steps are cheap
     // enough on the CPU path (default) that a local U scan is fine.
-    let need_u = readback || params.adaptive_dt;
+    // Explicit RK4 has no linear solve whose residual can carry a divergence
+    // bit. Scan U every explicit step (and p below) so a poisoned stage is
+    // surfaced immediately instead of waiting for the throttled GUI snapshot.
+    let explicit_rk4 = params.time_scheme == GpuTimeScheme::RK4;
+    let need_u = readback || params.adaptive_dt || explicit_rk4;
     let u_for_cfl = if need_u {
         ports
             .u_offset
@@ -5316,15 +5368,34 @@ fn structured_step(
     } else {
         Vec::new()
     };
-    if params.adaptive_dt && !u_for_cfl.is_empty() {
+    let mut step_nonfinite_u = 0usize;
+    if !u_for_cfl.is_empty() {
         let mut max_vel = 0.0f64;
         for &(ux, uy) in &u_for_cfl {
             if ux.is_finite() && uy.is_finite() {
                 max_vel = max_vel.max(ux.hypot(uy));
+            } else {
+                step_nonfinite_u += 1;
             }
         }
+        if params.adaptive_dt {
         *prev_max_vel = max_vel;
     }
+    }
+
+    let step_nonfinite_p = if explicit_rk4 && !readback {
+        ports
+            .p_offset
+            .map(|off| {
+                s.st_get_scalar(off as usize)
+                    .into_iter()
+                    .filter(|value| !value.is_finite())
+                    .count()
+            })
+            .unwrap_or(0)
+    } else {
+        0
+    };
 
     let readback = if readback {
         let u = u_for_cfl;
@@ -5369,15 +5440,14 @@ fn structured_step(
         None
     };
 
-    let diverged = readback.as_ref().and_then(|rb| {
-        if rb.stats.nonfinite_u > 0 || rb.stats.nonfinite_p > 0 {
-            Some(DivergeReason::NonFinite {
-                u: rb.stats.nonfinite_u,
-                p: rb.stats.nonfinite_p,
-            })
-        } else {
-            None
-        }
+    let (nonfinite_u, nonfinite_p) = readback
+        .as_ref()
+        .map_or((step_nonfinite_u, step_nonfinite_p), |rb| {
+            (rb.stats.nonfinite_u, rb.stats.nonfinite_p)
+        });
+    let diverged = (nonfinite_u > 0 || nonfinite_p > 0).then_some(DivergeReason::NonFinite {
+        u: nonfinite_u,
+        p: nonfinite_p,
     });
 
     // Convergence telemetry for the GUI readout. The banded solve is a direct
@@ -5491,11 +5561,7 @@ impl StructuredSeed for StructuredModelSolver {
     }
 }
 
-fn seed_structured_state(
-    s: &mut impl StructuredSeed,
-    model_id: &str,
-    params: &RuntimeParams,
-) {
+fn seed_structured_state(s: &mut impl StructuredSeed, model_id: &str, params: &RuntimeParams) {
     match model_id {
         "allmach_thermal_structured" => {
             // Match SolverDriver all-Mach seeds: real fluid compressibility
@@ -5581,7 +5647,7 @@ fn seed_structured_ibm(s: &mut impl StructuredSeed, geom: GeometryType, lx: f64,
     };
     s.sc_set_component(off, move |x, y| {
         if structured_geometry_is_solid(geom, x, y, lx, ly) {
-            -1.0e5
+            -STRUCTURED_IBM_PENALTY_RATE
         } else {
             0.0
         }
@@ -5643,7 +5709,10 @@ fn setup_structured_bcs(s: &mut impl StructuredSeed, model_id: &str, u_in: f64, 
         let (rho0, e0) = (1.0f32, 2.5f32);
         s.sc_set_boundaries(move |edge, _x, _y| {
             let d = |v: f32| StructBc { kind: 1, value: v };
-            let n = || StructBc { kind: 2, value: 0.0 };
+            let n = || StructBc {
+                kind: 2,
+                value: 0.0,
+            };
             let (btype, mut v): (u32, Vec<StructBc>) = match edge {
                 StructEdge::Left => (1, vec![d(rho0), d(rho0 * u_in as f32), d(0.0)]),
                 StructEdge::Right => (2, vec![n(), n(), n()]),
@@ -5666,34 +5735,67 @@ fn setup_structured_bcs(s: &mut impl StructuredSeed, model_id: &str, u_in: f64, 
                 StructEdge::Left => (
                     1,
                     vec![
-                        StructBc { kind: 1, value: u_in as f32 },
-                        StructBc { kind: 1, value: 0.0 },
-                        StructBc { kind: 2, value: 0.0 },
+                        StructBc {
+                            kind: 1,
+                            value: u_in as f32,
+                        },
+                        StructBc {
+                            kind: 1,
+                            value: 0.0,
+                        },
+                        StructBc {
+                            kind: 2,
+                            value: 0.0,
+                        },
                     ],
                 ),
                 StructEdge::Right => (
                     2,
                     vec![
-                        StructBc { kind: 2, value: 0.0 },
-                        StructBc { kind: 2, value: 0.0 },
-                        StructBc { kind: 1, value: 0.0 },
+                        StructBc {
+                            kind: 2,
+                            value: 0.0,
+                        },
+                        StructBc {
+                            kind: 2,
+                            value: 0.0,
+                        },
+                        StructBc {
+                            kind: 1,
+                            value: 0.0,
+                        },
                     ],
                 ),
                 _ => (
                     3,
                     vec![
-                        StructBc { kind: 1, value: 0.0 },
-                        StructBc { kind: 1, value: 0.0 },
-                        StructBc { kind: 2, value: 0.0 },
+                        StructBc {
+                            kind: 1,
+                            value: 0.0,
+                        },
+                        StructBc {
+                            kind: 1,
+                            value: 0.0,
+                        },
+                        StructBc {
+                            kind: 2,
+                            value: 0.0,
+                        },
                     ],
                 ),
             };
             if stride_s >= 4 {
                 // T: Dirichlet at inlet, zero-gradient elsewhere.
                 v.push(if matches!(edge, StructEdge::Left) {
-                    StructBc { kind: 1, value: 1.0 }
+                    StructBc {
+                        kind: 1,
+                        value: 1.0,
+                    }
                 } else {
-                    StructBc { kind: 2, value: 0.0 }
+                    StructBc {
+                        kind: 2,
+                        value: 0.0,
+                    }
                 });
             }
             (btype, v)
@@ -5896,8 +5998,17 @@ fn solver_worker_main(
         };
         if let Some(DivergeReason::StepError(err)) = &outcome.diverged {
             running = false;
-            let _ =
-                evt_tx.send(SolverWorkerEvent::Error(format!("solver step failed: {err}")));
+            let _ = evt_tx.send(SolverWorkerEvent::Error(format!(
+                "solver step failed: {err}"
+            )));
+            let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+            continue;
+        }
+        if let Some(DivergeReason::NonFinite { u, p }) = &outcome.diverged {
+            running = false;
+            let _ = evt_tx.send(SolverWorkerEvent::Error(format!(
+                "divergence detected (nonfinite u={u}, p={p})"
+            )));
             let _ = evt_tx.send(SolverWorkerEvent::Running(false));
             continue;
         }
@@ -5977,9 +6088,8 @@ fn solver_worker_main(
             stats.positivity_min_p = step_stats.positivity_min_p;
             stats.positivity_rho_undershoots =
                 step_stats.positivity_rho_undershoot_count.unwrap_or(0);
-            stats.positivity_pressure_undershoots = step_stats
-                .positivity_pressure_undershoot_count
-                .unwrap_or(0);
+            stats.positivity_pressure_undershoots =
+                step_stats.positivity_pressure_undershoot_count.unwrap_or(0);
         } else {
             if let Some(iters) = outcome.outer_iters {
                 stats.outer_iterations = iters;

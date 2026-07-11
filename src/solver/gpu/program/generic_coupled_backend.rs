@@ -114,14 +114,12 @@ pub(crate) async fn build_generic_coupled_backend(
         .map_err(|_| "recipe.unknowns_per_cell overflows u32".to_string())?;
     // Build paths reserve EXACT capacity: sized bindings at full size are
     // byte-equivalent to whole-buffer bindings.
-    let runtime = GpuCsrRuntime::new(
-        mesh,
-        unknowns_per_cell,
-        device,
-        queue,
-        crate::solver::gpu::capacity::CapacityPlan::EXACT,
-    )
-    .await?;
+    let capacity = crate::solver::gpu::capacity::CapacityPlan::EXACT;
+    let runtime = if recipe.is_implicit() {
+        GpuCsrRuntime::new(mesh, unknowns_per_cell, device, queue, capacity).await?
+    } else {
+        GpuCsrRuntime::new_explicit(mesh, unknowns_per_cell, device, queue, capacity).await?
+    };
 
     let device = &runtime.common.context.device;
 

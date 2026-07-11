@@ -231,10 +231,13 @@ impl SolverRecipe {
         if matches!(stepping, SteppingMode::Explicit) {
             model.validate_explicit_rk4()?;
             if time_scheme != TimeScheme::RK4 {
-                return Err(
-                    "fully explicit stepping requires TimeScheme::RK4".to_string(),
-                );
+                return Err("fully explicit stepping requires TimeScheme::RK4".to_string());
             }
+        } else if time_scheme == TimeScheme::RK4 {
+            return Err(
+                "TimeScheme::RK4 requires SteppingMode::Explicit; rebuild the solver program when switching to or from RK4"
+                    .to_string(),
+            );
         }
 
         // State fields must be registered before module manifests so equation target
@@ -425,6 +428,27 @@ impl SolverRecipe {
             }
         }
 
+        // Classical RK4 keeps one packed copy of the step-start unknowns and
+        // one packed weighted slope accumulator.  These are cell-local
+        // matrix-free workspaces (not full-state history buffers): each stores
+        // exactly the differential/algebraic unknown row used by the explicit
+        // residual and stage kernels.
+        if matches!(stepping, SteppingMode::Explicit) {
+            let size_per_cell = model.system.unknowns_per_cell() as usize;
+            aux_buffers.extend([
+                BufferSpec {
+                    name: "rk_base",
+                    size_per_cell,
+                    purpose: BufferPurpose::Workspace,
+                },
+                BufferSpec {
+                    name: "rk_accum",
+                    size_per_cell,
+                    purpose: BufferPurpose::Workspace,
+                },
+            ]);
+        }
+
         let time_integration = TimeIntegrationSpec::for_scheme(time_scheme);
 
         if matches!(
@@ -507,7 +531,11 @@ impl SolverRecipe {
 
         match &self.stepping {
             SteppingMode::Explicit => {
-                // Explicit: prepare → update_graph → finalize
+                // Classical RK4: rotate/copy history once, then refresh the
+                // complete spatial residual at each Butcher abscissa before
+                // applying exactly one stage.  Stage-time host ops are kept
+                // between graph submissions so time-dependent sources and
+                // expression BCs observe t, t+dt/2, t+dt/2, t+dt.
                 program.push(
                     root,
                     ProgramSpecNode::Host {
@@ -515,14 +543,60 @@ impl SolverRecipe {
                         kind: HostOpKind("explicit:prepare"),
                     },
                 );
-                program.push(
-                    root,
-                    ProgramSpecNode::Graph {
-                        label: "explicit:update",
-                        kind: GraphOpKind("explicit:update"),
-                        mode: GraphExecMode::SplitTimed,
-                    },
-                );
+                for (time_label, time_kind, residual_label, stage_label, stage_kind) in [
+                    (
+                        "explicit:set_stage_1_time",
+                        HostOpKind("explicit:set_stage_1_time"),
+                        "explicit:stage_1_residual",
+                        "explicit:stage_1",
+                        GraphOpKind("explicit:stage_1"),
+                    ),
+                    (
+                        "explicit:set_stage_2_time",
+                        HostOpKind("explicit:set_stage_2_time"),
+                        "explicit:stage_2_residual",
+                        "explicit:stage_2",
+                        GraphOpKind("explicit:stage_2"),
+                    ),
+                    (
+                        "explicit:set_stage_3_time",
+                        HostOpKind("explicit:set_stage_3_time"),
+                        "explicit:stage_3_residual",
+                        "explicit:stage_3",
+                        GraphOpKind("explicit:stage_3"),
+                    ),
+                    (
+                        "explicit:set_stage_4_time",
+                        HostOpKind("explicit:set_stage_4_time"),
+                        "explicit:stage_4_residual",
+                        "explicit:stage_4",
+                        GraphOpKind("explicit:stage_4"),
+                    ),
+                ] {
+                    program.push(
+                        root,
+                        ProgramSpecNode::Host {
+                            label: time_label,
+                            kind: time_kind,
+                        },
+                    );
+                    program.push(
+                        root,
+                        ProgramSpecNode::Graph {
+                            label: residual_label,
+                            kind: GraphOpKind("explicit:residual"),
+                            mode: GraphExecMode::SingleSubmit,
+                        },
+                    );
+                    program.push(
+                        root,
+                        ProgramSpecNode::Graph {
+                            label: stage_label,
+                            kind: stage_kind,
+                            mode: GraphExecMode::SingleSubmit,
+                        },
+                    );
+                }
                 program.push(
                     root,
                     ProgramSpecNode::Host {

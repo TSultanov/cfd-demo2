@@ -262,6 +262,10 @@ pub trait SolverRuntimeParamsExt {
 
 impl SolverRuntimeParamsExt for GpuUnifiedSolver {
     fn set_dtau(&mut self, dtau: f32) -> Result<(), String> {
+        if self.config().stepping == crate::solver::SteppingMode::Explicit && dtau != 0.0 {
+            return Err("explicit RK4 does not support pseudo-time stepping (dtau must be zero)"
+                .to_string());
+        }
         self.set_named_param("dtau", PlanParamValue::F32(dtau))
     }
 

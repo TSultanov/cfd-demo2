@@ -28,6 +28,10 @@ struct Constants {
     eos_p_ref: f32,
     eos_theta_ref: f32,
     eos_rho_ref: f32,
+    eos_gauge_rho_ref: f32,
+    eos_gauge_p_ref: f32,
+    eos_gauge_e_ref: f32,
+    eos_gauge_p_bias: f32,
 }
 
 
@@ -120,53 +124,53 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 lambda = d_neigh / total_dist;
             }
             let lambda_other = 1.0 - lambda;
-            grad_acc_0 += normal_vec * (state[idx * 31u + 0u] * lambda + select(state[other_idx * 31u + 0u], select(select(state[idx * 31u + 0u], bc_value[face_idx * 12u + 0u], bc_kind[face_idx * 12u + 0u] == 1u), state[idx * 31u + 0u] + bc_value[face_idx * 12u + 0u] * d_own, bc_kind[face_idx * 12u + 0u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_1 += normal_vec * (state[idx * 31u + 1u] * lambda + select(state[other_idx * 31u + 1u], select(select(state[idx * 31u + 1u], bc_value[face_idx * 12u + 1u], bc_kind[face_idx * 12u + 1u] == 1u), state[idx * 31u + 1u] + bc_value[face_idx * 12u + 1u] * d_own, bc_kind[face_idx * 12u + 1u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_2 += normal_vec * (state[idx * 31u + 2u] * lambda + select(state[other_idx * 31u + 2u], select(select(state[idx * 31u + 2u], bc_value[face_idx * 12u + 2u], bc_kind[face_idx * 12u + 2u] == 1u), state[idx * 31u + 2u] + bc_value[face_idx * 12u + 2u] * d_own, bc_kind[face_idx * 12u + 2u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_3 += normal_vec * (state[idx * 31u + 7u] * lambda + select(state[other_idx * 31u + 7u], select(select(state[idx * 31u + 7u], bc_value[face_idx * 12u + 3u], bc_kind[face_idx * 12u + 3u] == 1u), state[idx * 31u + 7u] + bc_value[face_idx * 12u + 3u] * d_own, bc_kind[face_idx * 12u + 3u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_4 += normal_vec * (state[idx * 31u + 10u] * lambda + select(state[other_idx * 31u + 10u], select(select(state[idx * 31u + 10u], bc_value[face_idx * 12u + 4u], bc_kind[face_idx * 12u + 4u] == 1u), state[idx * 31u + 10u] + bc_value[face_idx * 12u + 4u] * d_own, bc_kind[face_idx * 12u + 4u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_5 += normal_vec * (state[idx * 31u + 11u] * lambda + select(state[other_idx * 31u + 11u], select(select(state[idx * 31u + 11u], bc_value[face_idx * 12u + 5u], bc_kind[face_idx * 12u + 5u] == 1u), state[idx * 31u + 11u] + bc_value[face_idx * 12u + 5u] * d_own, bc_kind[face_idx * 12u + 5u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_6 += normal_vec * (state[idx * 31u + 8u] * lambda + select(state[other_idx * 31u + 8u], select(select(state[idx * 31u + 8u], bc_value[face_idx * 12u + 6u], bc_kind[face_idx * 12u + 6u] == 1u), state[idx * 31u + 8u] + bc_value[face_idx * 12u + 6u] * d_own, bc_kind[face_idx * 12u + 6u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_7 += normal_vec * (state[idx * 31u + 9u] * lambda + select(state[other_idx * 31u + 9u], select(select(state[idx * 31u + 9u], bc_value[face_idx * 12u + 7u], bc_kind[face_idx * 12u + 7u] == 1u), state[idx * 31u + 9u] + bc_value[face_idx * 12u + 7u] * d_own, bc_kind[face_idx * 12u + 7u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_8 += normal_vec * (state[idx * 31u + 22u] * lambda + select(state[other_idx * 31u + 22u], select(select(state[idx * 31u + 22u], bc_value[face_idx * 12u + 8u], bc_kind[face_idx * 12u + 8u] == 1u), state[idx * 31u + 22u] + bc_value[face_idx * 12u + 8u] * d_own, bc_kind[face_idx * 12u + 8u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_9 += normal_vec * (state[idx * 31u + 23u] * lambda + select(state[other_idx * 31u + 23u], select(select(state[idx * 31u + 23u], bc_value[face_idx * 12u + 9u], bc_kind[face_idx * 12u + 9u] == 1u), state[idx * 31u + 23u] + bc_value[face_idx * 12u + 9u] * d_own, bc_kind[face_idx * 12u + 9u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_10 += normal_vec * (state[idx * 31u + 24u] * lambda + select(state[other_idx * 31u + 24u], select(select(state[idx * 31u + 24u], bc_value[face_idx * 12u + 10u], bc_kind[face_idx * 12u + 10u] == 1u), state[idx * 31u + 24u] + bc_value[face_idx * 12u + 10u] * d_own, bc_kind[face_idx * 12u + 10u] == 2u), is_boundary) * lambda_other) * area;
-            grad_acc_11 += normal_vec * (state[idx * 31u + 25u] * lambda + select(state[other_idx * 31u + 25u], select(select(state[idx * 31u + 25u], bc_value[face_idx * 12u + 11u], bc_kind[face_idx * 12u + 11u] == 1u), state[idx * 31u + 25u] + bc_value[face_idx * 12u + 11u] * d_own, bc_kind[face_idx * 12u + 11u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_0 += normal_vec * ((state[idx * 31u + 0u] * lambda + select(state[other_idx * 31u + 0u], select(select(state[idx * 31u + 0u], bc_value[face_idx * 12u + 0u], bc_kind[face_idx * 12u + 0u] == 1u), state[idx * 31u + 0u] + bc_value[face_idx * 12u + 0u] * d_own, bc_kind[face_idx * 12u + 0u] == 2u), is_boundary) * lambda_other) * area);
+            grad_acc_1 += normal_vec * ((state[idx * 31u + 1u] * lambda + select(state[other_idx * 31u + 1u], select(select(state[idx * 31u + 1u], bc_value[face_idx * 12u + 1u], bc_kind[face_idx * 12u + 1u] == 1u), state[idx * 31u + 1u] + bc_value[face_idx * 12u + 1u] * d_own, bc_kind[face_idx * 12u + 1u] == 2u), is_boundary) * lambda_other) * area);
+            grad_acc_2 += normal_vec * ((state[idx * 31u + 2u] * lambda + select(state[other_idx * 31u + 2u], select(select(state[idx * 31u + 2u], bc_value[face_idx * 12u + 2u], bc_kind[face_idx * 12u + 2u] == 1u), state[idx * 31u + 2u] + bc_value[face_idx * 12u + 2u] * d_own, bc_kind[face_idx * 12u + 2u] == 2u), is_boundary) * lambda_other) * area);
+            grad_acc_3 += normal_vec * ((state[idx * 31u + 7u] * lambda + select(state[other_idx * 31u + 7u], select(select(state[idx * 31u + 7u], bc_value[face_idx * 12u + 3u], bc_kind[face_idx * 12u + 3u] == 1u), state[idx * 31u + 7u] + bc_value[face_idx * 12u + 3u] * d_own, bc_kind[face_idx * 12u + 3u] == 2u), is_boundary) * lambda_other) * area);
+            grad_acc_4 += normal_vec * ((state[idx * 31u + 10u] * lambda + select(state[other_idx * 31u + 10u], select(select(state[idx * 31u + 10u], bc_value[face_idx * 12u + 4u], bc_kind[face_idx * 12u + 4u] == 1u), state[idx * 31u + 10u] + bc_value[face_idx * 12u + 4u] * d_own, bc_kind[face_idx * 12u + 4u] == 2u), is_boundary) * lambda_other) * area);
+            grad_acc_5 += normal_vec * ((state[idx * 31u + 11u] * lambda + select(state[other_idx * 31u + 11u], select(select(state[idx * 31u + 11u], bc_value[face_idx * 12u + 5u], bc_kind[face_idx * 12u + 5u] == 1u), state[idx * 31u + 11u] + bc_value[face_idx * 12u + 5u] * d_own, bc_kind[face_idx * 12u + 5u] == 2u), is_boundary) * lambda_other) * area);
+            grad_acc_6 += normal_vec * ((state[idx * 31u + 8u] * lambda + select(state[other_idx * 31u + 8u], select(select(state[idx * 31u + 8u], bc_value[face_idx * 12u + 6u], bc_kind[face_idx * 12u + 6u] == 1u), state[idx * 31u + 8u] + bc_value[face_idx * 12u + 6u] * d_own, bc_kind[face_idx * 12u + 6u] == 2u), is_boundary) * lambda_other) * area);
+            grad_acc_7 += normal_vec * ((state[idx * 31u + 9u] * lambda + select(state[other_idx * 31u + 9u], select(select(state[idx * 31u + 9u], bc_value[face_idx * 12u + 7u], bc_kind[face_idx * 12u + 7u] == 1u), state[idx * 31u + 9u] + bc_value[face_idx * 12u + 7u] * d_own, bc_kind[face_idx * 12u + 7u] == 2u), is_boundary) * lambda_other) * area);
+            grad_acc_8 += normal_vec * ((state[idx * 31u + 22u] * lambda + select(state[other_idx * 31u + 22u], select(select(state[idx * 31u + 22u], bc_value[face_idx * 12u + 8u], bc_kind[face_idx * 12u + 8u] == 1u), state[idx * 31u + 22u] + bc_value[face_idx * 12u + 8u] * d_own, bc_kind[face_idx * 12u + 8u] == 2u), is_boundary) * lambda_other) * area);
+            grad_acc_9 += normal_vec * ((state[idx * 31u + 23u] * lambda + select(state[other_idx * 31u + 23u], select(select(state[idx * 31u + 23u], bc_value[face_idx * 12u + 9u], bc_kind[face_idx * 12u + 9u] == 1u), state[idx * 31u + 23u] + bc_value[face_idx * 12u + 9u] * d_own, bc_kind[face_idx * 12u + 9u] == 2u), is_boundary) * lambda_other) * area);
+            grad_acc_10 += normal_vec * ((state[idx * 31u + 24u] * lambda + select(state[other_idx * 31u + 24u], select(select(state[idx * 31u + 24u], bc_value[face_idx * 12u + 10u], bc_kind[face_idx * 12u + 10u] == 1u), state[idx * 31u + 24u] + bc_value[face_idx * 12u + 10u] * d_own, bc_kind[face_idx * 12u + 10u] == 2u), is_boundary) * lambda_other) * area);
+            grad_acc_11 += normal_vec * ((state[idx * 31u + 25u] * lambda + select(state[other_idx * 31u + 25u], select(select(state[idx * 31u + 25u], bc_value[face_idx * 12u + 11u], bc_kind[face_idx * 12u + 11u] == 1u), state[idx * 31u + 25u] + bc_value[face_idx * 12u + 11u] * d_own, bc_kind[face_idx * 12u + 11u] == 2u), is_boundary) * lambda_other) * area);
         }
-        let grad_out_0: vec2<f32> = grad_acc_0 * 1.0 / max(vol, 0.000000000001);
+        let grad_out_0: vec2<f32> = grad_acc_0 * (1.0 / max(vol, 0.000000000001));
         grad_state[idx * 31u + 0u].x = grad_out_0.x;
         grad_state[idx * 31u + 0u].y = grad_out_0.y;
-        let grad_out_1: vec2<f32> = grad_acc_1 * 1.0 / max(vol, 0.000000000001);
+        let grad_out_1: vec2<f32> = grad_acc_1 * (1.0 / max(vol, 0.000000000001));
         grad_state[idx * 31u + 1u].x = grad_out_1.x;
         grad_state[idx * 31u + 1u].y = grad_out_1.y;
-        let grad_out_2: vec2<f32> = grad_acc_2 * 1.0 / max(vol, 0.000000000001);
+        let grad_out_2: vec2<f32> = grad_acc_2 * (1.0 / max(vol, 0.000000000001));
         grad_state[idx * 31u + 2u].x = grad_out_2.x;
         grad_state[idx * 31u + 2u].y = grad_out_2.y;
-        let grad_out_3: vec2<f32> = grad_acc_3 * 1.0 / max(vol, 0.000000000001);
+        let grad_out_3: vec2<f32> = grad_acc_3 * (1.0 / max(vol, 0.000000000001));
         grad_state[idx * 31u + 7u].x = grad_out_3.x;
         grad_state[idx * 31u + 7u].y = grad_out_3.y;
-        let grad_out_4: vec2<f32> = grad_acc_4 * 1.0 / max(vol, 0.000000000001);
+        let grad_out_4: vec2<f32> = grad_acc_4 * (1.0 / max(vol, 0.000000000001));
         grad_state[idx * 31u + 10u].x = grad_out_4.x;
         grad_state[idx * 31u + 10u].y = grad_out_4.y;
-        let grad_out_5: vec2<f32> = grad_acc_5 * 1.0 / max(vol, 0.000000000001);
+        let grad_out_5: vec2<f32> = grad_acc_5 * (1.0 / max(vol, 0.000000000001));
         grad_state[idx * 31u + 11u].x = grad_out_5.x;
         grad_state[idx * 31u + 11u].y = grad_out_5.y;
-        let grad_out_6: vec2<f32> = grad_acc_6 * 1.0 / max(vol, 0.000000000001);
+        let grad_out_6: vec2<f32> = grad_acc_6 * (1.0 / max(vol, 0.000000000001));
         grad_state[idx * 31u + 8u].x = grad_out_6.x;
         grad_state[idx * 31u + 8u].y = grad_out_6.y;
-        let grad_out_7: vec2<f32> = grad_acc_7 * 1.0 / max(vol, 0.000000000001);
+        let grad_out_7: vec2<f32> = grad_acc_7 * (1.0 / max(vol, 0.000000000001));
         grad_state[idx * 31u + 9u].x = grad_out_7.x;
         grad_state[idx * 31u + 9u].y = grad_out_7.y;
-        let grad_out_8: vec2<f32> = grad_acc_8 * 1.0 / max(vol, 0.000000000001);
+        let grad_out_8: vec2<f32> = grad_acc_8 * (1.0 / max(vol, 0.000000000001));
         grad_state[idx * 31u + 22u].x = grad_out_8.x;
         grad_state[idx * 31u + 22u].y = grad_out_8.y;
-        let grad_out_9: vec2<f32> = grad_acc_9 * 1.0 / max(vol, 0.000000000001);
+        let grad_out_9: vec2<f32> = grad_acc_9 * (1.0 / max(vol, 0.000000000001));
         grad_state[idx * 31u + 23u].x = grad_out_9.x;
         grad_state[idx * 31u + 23u].y = grad_out_9.y;
-        let grad_out_10: vec2<f32> = grad_acc_10 * 1.0 / max(vol, 0.000000000001);
+        let grad_out_10: vec2<f32> = grad_acc_10 * (1.0 / max(vol, 0.000000000001));
         grad_state[idx * 31u + 24u].x = grad_out_10.x;
         grad_state[idx * 31u + 24u].y = grad_out_10.y;
-        let grad_out_11: vec2<f32> = grad_acc_11 * 1.0 / max(vol, 0.000000000001);
+        let grad_out_11: vec2<f32> = grad_acc_11 * (1.0 / max(vol, 0.000000000001));
         grad_state[idx * 31u + 25u].x = grad_out_11.x;
         grad_state[idx * 31u + 25u].y = grad_out_11.y;
     }
@@ -430,18 +434,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     k1_rhs_1 += state[idx * 31u + 28u] * k1_vol;
     k1_rhs_2 += state[idx * 31u + 29u] * k1_vol;
     k1_rhs_3 += state[idx * 31u + 30u] * k1_vol;
-    k1_diag_4 -= -(state[idx * 31u + 0u] * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * k1_vol;
-    k1_diag_5 -= -(state[idx * 31u + 0u] * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * k1_vol;
+    k1_diag_4 -= (-(state[idx * 31u + 0u] * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0))) + -(constants.eos_gauge_rho_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)))) * k1_vol;
+    k1_diag_5 -= (-(state[idx * 31u + 0u] * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0))) + -(constants.eos_gauge_rho_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)))) * k1_vol;
     matrix_values[k1_start_row_4 + k1_diag_rank * 12u + 1u] -= 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
     matrix_values[k1_start_row_5 + k1_diag_rank * 12u + 2u] -= 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
     k1_diag_6 -= 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
-    matrix_values[k1_start_row_6 + k1_diag_rank * 12u + 3u] -= -constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
-    matrix_values[k1_start_row_6 + k1_diag_rank * 12u + 0u] -= 0.5 * constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * dot(vec2<f32>(state[idx * 31u + 10u], state[idx * 31u + 11u]), vec2<f32>(state[idx * 31u + 10u], state[idx * 31u + 11u])) * k1_vol;
-    matrix_values[k1_start_row_6 + k1_diag_rank * 12u + 0u] -= -constants.eos_dp_drho * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
-    k1_rhs_6 += constants.eos_dp_drho * constants.eos_rho_ref * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
-    k1_rhs_6 += -constants.eos_p_ref * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
-    k1_diag_7 -= state[idx * 31u + 0u] * constants.eos_r * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
+    matrix_values[k1_start_row_6 + k1_diag_rank * 12u + 3u] -= -constants.eos_gm1 * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * k1_vol;
+    matrix_values[k1_start_row_6 + k1_diag_rank * 12u + 0u] -= 0.5 * constants.eos_gm1 * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * dot(vec2<f32>(state[idx * 31u + 10u], state[idx * 31u + 11u]), vec2<f32>(state[idx * 31u + 10u], state[idx * 31u + 11u])) * k1_vol;
+    matrix_values[k1_start_row_6 + k1_diag_rank * 12u + 0u] -= -constants.eos_dp_drho * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * k1_vol;
+    k1_rhs_6 += 0.5 * constants.eos_gm1 * constants.eos_gauge_rho_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * dot(vec2<f32>(state[idx * 31u + 10u], state[idx * 31u + 11u]), vec2<f32>(state[idx * 31u + 10u], state[idx * 31u + 11u])) * k1_vol;
+    k1_rhs_6 += -constants.eos_dp_drho * constants.eos_gauge_rho_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * k1_vol;
+    k1_rhs_6 += constants.eos_dp_drho * constants.eos_rho_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * k1_vol;
+    k1_rhs_6 += -constants.eos_gauge_p_bias * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * k1_vol;
+    k1_diag_7 -= (state[idx * 31u + 0u] * constants.eos_r * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) + constants.eos_gauge_rho_ref * constants.eos_r * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0))) * k1_vol;
     matrix_values[k1_start_row_7 + k1_diag_rank * 12u + 6u] -= -(1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * k1_vol;
+    k1_rhs_7 += -constants.eos_gauge_p_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * k1_vol;
     k1_diag_8 -= -1.0;
     k1_diag_9 -= -1.0;
     k1_diag_10 -= -1.0;
@@ -591,7 +598,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             k1_phi_2 -= k1_phi_2 * 2.0;
         }
         k1_rhs_2 -= k1_phi_2;
-        let k1_diff_coeff_rho_e_T = select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * k1_lambda_f + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
+        let k1_diff_coeff_rho_e_T = select(constants.viscosity * (constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001)) / 0.71, constants.viscosity * (constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001)) / 0.71 * k1_lambda_f + constants.viscosity * (constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001)) / 0.71 * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
         if (!k1_is_boundary) {
             matrix_values[k1_start_row_3 + k1_diag_rank * 12u + 7u] += k1_diff_coeff_rho_e_T;
             matrix_values[k1_start_row_3 + k1_neighbor_rank * 12u + 7u] -= k1_diff_coeff_rho_e_T;
@@ -601,7 +608,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 k1_rhs_3 += k1_diff_coeff_rho_e_T * bc_value[k1_face_idx * 12u + 7u];
             } else {
                 if (bc_kind[k1_face_idx * 12u + 7u] == 2u) {
-                    k1_rhs_3 += select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * k1_lambda_f + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 7u];
+                    k1_rhs_3 += select(constants.viscosity * (constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001)) / 0.71, constants.viscosity * (constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001)) / 0.71 * k1_lambda_f + constants.viscosity * (constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001)) / 0.71 * (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 7u];
                 }
             }
         }
@@ -624,7 +631,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             k1_phi_3 -= k1_phi_3 * 2.0;
         }
         k1_rhs_3 -= k1_phi_3;
-        let k1_diff_coeff_lap_rho = select(1.0, k1_lambda_f + 1.0 - k1_lambda_f, !k1_is_boundary) * k1_area / k1_dist;
+        let k1_diff_coeff_lap_rho = select(1.0, k1_lambda_f + (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
         if (!k1_is_boundary) {
             matrix_values[k1_start_row_8 + k1_diag_rank * 12u + 0u] += k1_diff_coeff_lap_rho;
             matrix_values[k1_start_row_8 + k1_neighbor_rank * 12u + 0u] -= k1_diff_coeff_lap_rho;
@@ -634,11 +641,11 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 k1_rhs_8 += k1_diff_coeff_lap_rho * bc_value[k1_face_idx * 12u + 0u];
             } else {
                 if (bc_kind[k1_face_idx * 12u + 0u] == 2u) {
-                    k1_rhs_8 += select(1.0, k1_lambda_f + 1.0 - k1_lambda_f, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 0u];
+                    k1_rhs_8 += select(1.0, k1_lambda_f + (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 0u];
                 }
             }
         }
-        let k1_diff_coeff_lap_rho_u = select(1.0, k1_lambda_f + 1.0 - k1_lambda_f, !k1_is_boundary) * k1_area / k1_dist;
+        let k1_diff_coeff_lap_rho_u = select(1.0, k1_lambda_f + (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
         if (!k1_is_boundary) {
             matrix_values[k1_start_row_9 + k1_diag_rank * 12u + 1u] += k1_diff_coeff_lap_rho_u;
             matrix_values[k1_start_row_9 + k1_neighbor_rank * 12u + 1u] -= k1_diff_coeff_lap_rho_u;
@@ -652,7 +659,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     k1_rhs_9 += k1_diff_coeff_lap_rho_u * bc_value[k1_face_idx * 12u + 1u];
                 } else {
                     if (bc_kind[k1_face_idx * 12u + 1u] == 2u) {
-                        k1_rhs_9 += select(1.0, k1_lambda_f + 1.0 - k1_lambda_f, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 1u];
+                        k1_rhs_9 += select(1.0, k1_lambda_f + (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 1u];
                     }
                 }
             }
@@ -670,12 +677,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                     k1_rhs_10 += k1_diff_coeff_lap_rho_u * bc_value[k1_face_idx * 12u + 2u];
                 } else {
                     if (bc_kind[k1_face_idx * 12u + 2u] == 2u) {
-                        k1_rhs_10 += select(1.0, k1_lambda_f + 1.0 - k1_lambda_f, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 2u];
+                        k1_rhs_10 += select(1.0, k1_lambda_f + (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 2u];
                     }
                 }
             }
         }
-        let k1_diff_coeff_lap_rho_e = select(1.0, k1_lambda_f + 1.0 - k1_lambda_f, !k1_is_boundary) * k1_area / k1_dist;
+        let k1_diff_coeff_lap_rho_e = select(1.0, k1_lambda_f + (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area / k1_dist;
         if (!k1_is_boundary) {
             matrix_values[k1_start_row_11 + k1_diag_rank * 12u + 3u] += k1_diff_coeff_lap_rho_e;
             matrix_values[k1_start_row_11 + k1_neighbor_rank * 12u + 3u] -= k1_diff_coeff_lap_rho_e;
@@ -685,7 +692,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 k1_rhs_11 += k1_diff_coeff_lap_rho_e * bc_value[k1_face_idx * 12u + 3u];
             } else {
                 if (bc_kind[k1_face_idx * 12u + 3u] == 2u) {
-                    k1_rhs_11 += select(1.0, k1_lambda_f + 1.0 - k1_lambda_f, !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 3u];
+                    k1_rhs_11 += select(1.0, k1_lambda_f + (1.0 - k1_lambda_f), !k1_is_boundary) * k1_area * bc_value[k1_face_idx * 12u + 3u];
                 }
             }
         }

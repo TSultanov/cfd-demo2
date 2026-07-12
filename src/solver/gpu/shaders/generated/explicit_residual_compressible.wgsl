@@ -28,6 +28,10 @@ struct Constants {
     eos_p_ref: f32,
     eos_theta_ref: f32,
     eos_rho_ref: f32,
+    eos_gauge_rho_ref: f32,
+    eos_gauge_p_ref: f32,
+    eos_gauge_e_ref: f32,
+    eos_gauge_p_bias: f32,
 }
 
 
@@ -76,18 +80,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     var rhs_6: f32 = 0.0;
     var diag_7: f32 = 0.0;
     var rhs_7: f32 = 0.0;
-    rhs_4 += -(state[idx * 22u + 0u] * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol * state[idx * 22u + 10u];
-    rhs_5 += -(state[idx * 22u + 0u] * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol * state[idx * 22u + 11u];
+    rhs_4 += (-(state[idx * 22u + 0u] * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0))) + -(constants.eos_gauge_rho_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)))) * vol * state[idx * 22u + 10u];
+    rhs_5 += (-(state[idx * 22u + 0u] * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0))) + -(constants.eos_gauge_rho_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)))) * vol * state[idx * 22u + 11u];
     rhs_4 += 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol * state[idx * 22u + 1u];
     rhs_5 += 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol * state[idx * 22u + 2u];
     rhs_6 += 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol * state[idx * 22u + 8u];
-    rhs_6 += -constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol * state[idx * 22u + 7u];
-    rhs_6 += 0.5 * constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * dot(vec2<f32>(state[idx * 22u + 10u], state[idx * 22u + 11u]), vec2<f32>(state[idx * 22u + 10u], state[idx * 22u + 11u])) * vol * state[idx * 22u + 0u];
-    rhs_6 += -constants.eos_dp_drho * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol * state[idx * 22u + 0u];
-    rhs_6 += constants.eos_dp_drho * constants.eos_rho_ref * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
-    rhs_6 += -constants.eos_p_ref * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
-    rhs_7 += state[idx * 22u + 0u] * constants.eos_r * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol * state[idx * 22u + 9u];
+    rhs_6 += -constants.eos_gm1 * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol * state[idx * 22u + 7u];
+    rhs_6 += 0.5 * constants.eos_gm1 * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * dot(vec2<f32>(state[idx * 22u + 10u], state[idx * 22u + 11u]), vec2<f32>(state[idx * 22u + 10u], state[idx * 22u + 11u])) * vol * state[idx * 22u + 0u];
+    rhs_6 += -constants.eos_dp_drho * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol * state[idx * 22u + 0u];
+    rhs_6 += 0.5 * constants.eos_gm1 * constants.eos_gauge_rho_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * dot(vec2<f32>(state[idx * 22u + 10u], state[idx * 22u + 11u]), vec2<f32>(state[idx * 22u + 10u], state[idx * 22u + 11u])) * vol;
+    rhs_6 += -constants.eos_dp_drho * constants.eos_gauge_rho_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol;
+    rhs_6 += constants.eos_dp_drho * constants.eos_rho_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol;
+    rhs_6 += -constants.eos_gauge_p_bias * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol;
+    rhs_7 += (state[idx * 22u + 0u] * constants.eos_r * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) + constants.eos_gauge_rho_ref * constants.eos_r * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0))) * vol * state[idx * 22u + 9u];
     rhs_7 += -(1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol * state[idx * 22u + 8u];
+    rhs_7 += -constants.eos_gauge_p_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol;
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];
         let owner = face_owner[face_idx];
@@ -176,7 +183,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             phi_2 -= phi_2 * 2.0;
         }
         rhs_2 -= phi_2;
-        let diff_coeff_exp_rho_e_T = select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * lambda_f + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * (1.0 - lambda_f), !is_boundary) * area / dist;
+        let diff_coeff_exp_rho_e_T = select(constants.viscosity * (constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001)) / 0.71, constants.viscosity * (constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001)) / 0.71 * lambda_f + constants.viscosity * (constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001)) / 0.71 * (1.0 - lambda_f), !is_boundary) * area / dist;
         if (!is_boundary) {
             rhs_3 += diff_coeff_exp_rho_e_T * (state[other_idx * 22u + 9u] - state[idx * 22u + 9u]);
         } else {
@@ -184,7 +191,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 rhs_3 += diff_coeff_exp_rho_e_T * (bc_value[face_idx * 8u + 7u] - state[idx * 22u + 9u]);
             } else {
                 if (bc_kind[face_idx * 8u + 7u] == 2u) {
-                    rhs_3 += constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * area * bc_value[face_idx * 8u + 7u];
+                    rhs_3 += constants.viscosity * (constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001)) / 0.71 * area * bc_value[face_idx * 8u + 7u];
                 }
             }
         }

@@ -197,6 +197,11 @@ pub struct GpuUnifiedSolver {
     /// snapshot for CFL/all-Mach validation and GUI fields instead of issuing
     /// duplicate GPU readbacks after the step.
     last_explicit_state: Option<Vec<f32>>,
+    /// Gauge-storage references currently uploaded to the kernels
+    /// (`rho_ref`, `p_ref`, `e_ref`; all zero = absolute storage). Cached so
+    /// the absolute-valued host seeding/BC helpers can convert to stored
+    /// (gauge) values without a constants readback.
+    eos_gauge_refs: [f32; 3],
     #[cfg(feature = "cpu")]
     cpu_render: Option<CpuRender>,
 }
@@ -242,6 +247,7 @@ impl GpuUnifiedSolver {
             srd_enabled: false,
             ale_step_armed: false,
             last_explicit_state: None,
+            eos_gauge_refs: [0.0; 3],
             #[cfg(feature = "cpu")]
             cpu_render: None,
         };
@@ -345,6 +351,7 @@ impl GpuUnifiedSolver {
             srd_enabled: false,
             ale_step_armed: false,
             last_explicit_state: None,
+            eos_gauge_refs: [0.0; 3],
             cpu_render,
         };
         solver.sync_cpu_render();
@@ -742,6 +749,18 @@ impl GpuUnifiedSolver {
         value: PlanParamValue,
     ) -> Result<(), String> {
         self.set_named_param(name, value)
+    }
+
+    /// Gauge-storage references currently active on this solver
+    /// (`[rho_ref, p_ref, e_ref]`; all zero = absolute storage). Host helpers
+    /// that accept ABSOLUTE physical values subtract these before writing
+    /// state/BC tables.
+    pub fn eos_gauge_refs(&self) -> [f32; 3] {
+        self.eos_gauge_refs
+    }
+
+    pub(crate) fn cache_eos_gauge_refs(&mut self, refs: [f32; 3]) {
+        self.eos_gauge_refs = refs;
     }
 
     pub fn set_named_param(&mut self, name: &str, value: PlanParamValue) -> Result<(), String> {

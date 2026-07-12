@@ -45,7 +45,7 @@ fn safe_inverse(val: f32) -> f32 {
 @compute
 @workgroup_size(64)
 fn build_diag_and_pressure(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(num_workgroups) num_workgroups: vec3<u32>) {
-    let cell = global_id.y * num_workgroups.x * 64u + global_id.x;
+    let cell = global_id.y * (num_workgroups.x * 64u) + global_id.x;
     if (cell >= params.num_cells) {
         return;
     }

@@ -1,7 +1,11 @@
-# Compressible explicit RK4 at acoustic amplitudes: diagnosis and precision plan
+# Compressible explicit RK4 at acoustic amplitudes: diagnosis and gauge storage
 
-Status, 2026-07-12. Investigation of the "noisy solution + unexpected startup
-wave" report against the GUI compressible + RK4 + GPU obstacle case.
+Status, 2026-07-13: the gauge-storage reformulation described at the bottom is
+SHIPPED (see "Gauge storage: shipped design" for the as-built details and
+acceptance results). The diagnosis below is retained as the motivating record.
+
+Investigation of the "noisy solution + unexpected startup wave" report against
+the GUI compressible + RK4 + GPU obstacle case (2026-07-12).
 
 ## What the user sees, and why
 
@@ -145,3 +149,81 @@ the measurements above:
 
 This is a focused arc of its own (touches the shared flux lowering + shader
 re-bless); it was deliberately not rushed into this change set.
+
+## Gauge storage: shipped design (2026-07-13)
+
+The reformulation above landed for the whole density-based compressible
+family (`compressible` / `compressible_structured`), BOTH stepping modes,
+all backends.
+
+As-built decisions:
+
+- Four runtime constants, zero by default (absolute storage is bit-preserved):
+  `eos_gauge_rho_ref`, `eos_gauge_p_ref`, `eos_gauge_e_ref`,
+  `eos_gauge_p_bias` (GpuConstants words 21-24; the layout-pin test bumped to
+  28 words). They are deliberately SEPARATE from the linear-EOS references
+  `eos_p_ref`/`eos_rho_ref`, which every autonomous-route certification gate
+  requires to stay zero for ideal gas.
+- `EosSpec::runtime_params_gauged(rho0)` computes the references and the
+  f64-cancelled pressure-closure bias
+  (`gauge_p_bias = gm1*e_ref + p_ref - p_ref_gauge`, exactly `p_ref` when the
+  gauge is off and exactly zero when on). The driver activates the gauge for
+  every driver-built compressible run; the structured GUI path activates it in
+  `apply_structured_compressible_runtime`.
+- STATE-form pressure closure everywhere (decl, primitives, implicit p row):
+  `p' = gm1*(rho_e' - |rho_u|^2/(2*(rho'+G))) + dp_drho*(rho' + (G - rho_ref))
+  + gauge_p_bias`, with the reference constants grouped FIRST — exact
+  constant-constant arithmetic, so a gauge-stored liquid density never
+  round-trips through its large absolute value. The WGSL printer now preserves
+  right-hand grouping of +,-,*,/ (it used to flatten `a + (b - c)` into
+  left-associated re-evaluation; the CPU Rust emitter was already fully
+  parenthesized, so this also removes a latent CPU/GPU grouping divergence).
+- KT flux regrouping in `derive_central_upwind`: the analytic weight sum
+  `aphiv_sum = a_pos*phiv_pos + a_neg*phiv_neg` (the +/- a_sf dissipation
+  cancelled symbolically) advects the constant references
+  (`G*aphiv_sum` in continuity, `(e_ref+p_ref)*aphiv_sum` in energy); the
+  momentum pressure term consumes the gauge face pressure, dropping
+  `p_ref*Sf` over each closed cell analytically. Dissipation terms see only
+  state differences and are gauge-invariant as written.
+- Algebraic recovery rows: `(rho'+G)*u = rho_u` and `(rho'+G)*R*T = p' + P`
+  distribute into two target-linear products; the lowering now MERGES multiple
+  target products into one implicit source term with a summed coefficient
+  (new `Coefficient::Sum` variant). T and u stay absolute fields.
+- Consumers converted (all keep ABSOLUTE-value host APIs and convert through
+  the solver's cached references): driver IC/BC helpers
+  (`set_uniform_state`, `set_state_fields`,
+  `set_compressible_inlet_isothermal_x`, `evaluate_inlet_declarations`), the
+  host CFL sampler, both autonomous health/audit kernels (unstructured
+  `compressible_explicit_control` words 21/23; structured autonomous `Params`
+  + audit WGSL), the implicit positivity/retry gate, the structured GUI
+  seeds/BCs, and the GUI matrix positivity checks. The BC expression
+  declarations reconstruct the absolute state inside the model
+  (`bc(rho)+G`, outlet density floor applied to the absolute value).
+- TRAP (cost one debugging round): the structured GPU solver has its OWN
+  `set_eos` mirror; missing the gauge fields there left the audit kernel
+  reconstructing `rho' + 0`, rejecting every cell — the GUI symptom is
+  "GPU explicit health check halted after 0 accepted batch steps (N invalid
+  cells)". Pinned by
+  `gpu_structured_obstacle_direct_autonomous_accepts_all_steps`.
+
+Semantics changes visible to users/tests:
+
+- Readbacks and the GUI plot/legend now show GAUGE pressure (zero at the
+  quiescent reference, like the all-Mach models) and gauge rho/rho_e.
+  Absolute-bound assertions shift by the references
+  (`gui_default_convergence_test`).
+
+Acceptance (all green):
+
+- `compressible_explicit_acoustics_test`: the 200 Pa gates reproduce the
+  pre-gauge metrics bit-for-bit-close on all four topology/backend
+  combinations, and the new 0.5 Pa gates (a signal spanning ~64 f32 quanta
+  under absolute storage) are exactly as clean in relative terms
+  (rms roughness ~0.4-1.8% of amplitude, transit speed +1.6/+2.3% of c) —
+  the precision recovery this arc exists for.
+- GUI matrix (CPU x3 backends + GPU Direct/Plot autonomous parity), implicit
+  GUI defaults (backstep + obstacle), compressible MMS orders, OpenFOAM
+  acoustic reference, full lib suite, WGSL snapshot re-blessed.
+- The GUI obstacle soak (1500 steps, from rest): smooth reverberant acoustic
+  field, no speckle; roughness floor is now discretization content, not
+  representation quanta.

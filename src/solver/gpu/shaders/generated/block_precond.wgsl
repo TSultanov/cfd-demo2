@@ -161,7 +161,7 @@ fn build_block_inv(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin
             inv[r][r] = safe_inverse(diag_orig[r]);
         }
     }
-    let offset = cell * b * b;
+    let offset = cell * (b * b);
     for (var r = 0u; r < b; r = r + 1u) {
         for (var c = 0u; c < b; c = c + 1u) {
             block_inv[offset + r * b + c] = inv[r][c];
@@ -185,7 +185,7 @@ fn apply_block_precond(@builtin(global_invocation_id) global_id: vec3<u32>, @bui
         return;
     }
     let base = cell * b;
-    let offset = cell * b * b;
+    let offset = cell * (b * b);
     for (var r = 0u; r < b; r = r + 1u) {
         var sum = 0.0;
         for (var c = 0u; c < b; c = c + 1u) {

@@ -257,6 +257,11 @@ struct StructuredAutonomousParams {
     eos_p_ref: f32,
     eos_theta_ref: f32,
     eos_rho_ref: f32,
+    // Gauge-storage references: the conserved-state audit reconstructs the
+    // ABSOLUTE thermodynamic state as rho + gauge_rho_ref / rho_e + gauge_e_ref
+    // (zero = absolute storage).
+    eos_gauge_rho_ref: f32,
+    eos_gauge_e_ref: f32,
 }
 
 #[repr(u32)]
@@ -445,6 +450,10 @@ fn write_kernel_constants_bytes(c: &GpuConstants, eos_fields: &[String], bytes: 
             "eos_p_ref" => c.eos_p_ref,
             "eos_theta_ref" => c.eos_theta_ref,
             "eos_rho_ref" => c.eos_rho_ref,
+            "eos_gauge_rho_ref" => c.eos_gauge_rho_ref,
+            "eos_gauge_p_ref" => c.eos_gauge_p_ref,
+            "eos_gauge_e_ref" => c.eos_gauge_e_ref,
+            "eos_gauge_p_bias" => c.eos_gauge_p_bias,
             "buoyant_beta_g" => c.buoyant_beta_g,
             "buoyant_t0" => c.buoyant_t0,
             "buoyant_k_over_cp" => c.buoyant_k_over_cp,
@@ -853,10 +862,12 @@ fn structured_autonomous_wgsl(
     // The acceptance contract is defined entirely on the conserved state.
     // Primitive u/p/T fields are stage-local caches and may be stale here, so
     // none of them participate in the thermodynamic-domain decision.
-    let density = state.data[base + {rho}u];
+    // Gauge storage: the packed state holds deviations from the constant
+    // reference; the thermodynamic-domain audit runs on ABSOLUTE values.
+    let density = state.data[base + {rho}u] + params.eos_gauge_rho_ref;
     let momentum_x = state.data[base + {rho_u}u];
     let momentum_y = state.data[base + {rho_u_y}u];
-    let total_energy_density = state.data[base + {rho_e}u];
+    let total_energy_density = state.data[base + {rho_e}u] + params.eos_gauge_e_ref;
     if (!(density > 0.0)) {{
         atomicAdd(&control.invalid_cells, 1u);
         return;
@@ -913,10 +924,10 @@ fn structured_autonomous_wgsl(
     if (cell == 0u && params.inject_negative_energy_after != 0xffffffffu
         && accepted_total_at_least_u32(params.inject_negative_energy_after)) {{
         let base = cell * params.state_stride;
-        state.data[base + {rho}u] = 1.0;
+        state.data[base + {rho}u] = 1.0 - params.eos_gauge_rho_ref;
         state.data[base + {rho_u}u] = 0.0;
         state.data[base + {rho_u_y}u] = 0.0;
-        state.data[base + {rho_e}u] = -1.0;
+        state.data[base + {rho_e}u] = -1.0 - params.eos_gauge_e_ref;
     }}
 "#,
             rho_u_y = rho_u + 1,
@@ -1019,6 +1030,7 @@ struct Params {{
     adaptive_policy: u32, has_ibm_penalty: u32,
     inlet_velocity: f32, eos_gamma: f32, eos_gm1: f32, eos_r: f32,
     eos_dp_drho: f32, eos_p_ref: f32, eos_theta_ref: f32, eos_rho_ref: f32,
+    eos_gauge_rho_ref: f32, eos_gauge_e_ref: f32,
 }};
 struct F32Buffer {{ data: array<f32> }};
 struct U32Buffer {{ data: array<u32> }};
@@ -1605,6 +1617,8 @@ impl StructuredAutonomousControl {
             eos_p_ref: 0.0,
             eos_theta_ref: 1.0,
             eos_rho_ref: 0.0,
+            eos_gauge_rho_ref: 0.0,
+            eos_gauge_e_ref: 0.0,
         };
         let control = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("structured:autonomous-status"),
@@ -2483,6 +2497,10 @@ impl StructuredGpuSolver {
         self.constants.eos_p_ref = params.p_ref;
         self.constants.eos_theta_ref = params.theta_ref;
         self.constants.eos_rho_ref = params.rho_ref;
+        self.constants.eos_gauge_rho_ref = params.gauge_rho_ref;
+        self.constants.eos_gauge_p_ref = params.gauge_p_ref;
+        self.constants.eos_gauge_e_ref = params.gauge_e_ref;
+        self.constants.eos_gauge_p_bias = params.gauge_p_bias;
         self.write_kernel_constants();
         // A live EOS switch changes the conserved-domain oracle and its first
         // stable dt. Force the next autonomous entry to seed both from the
@@ -3023,6 +3041,8 @@ impl StructuredGpuSolver {
             eos_p_ref: self.constants.eos_p_ref,
             eos_theta_ref: self.constants.eos_theta_ref,
             eos_rho_ref: self.constants.eos_rho_ref,
+            eos_gauge_rho_ref: self.constants.eos_gauge_rho_ref,
+            eos_gauge_e_ref: self.constants.eos_gauge_e_ref,
         };
         self.ctx
             .queue
@@ -3525,6 +3545,10 @@ impl StructuredGpuSolver {
             p_ref: self.constants.eos_p_ref,
             theta_ref: self.constants.eos_theta_ref,
             rho_ref: self.constants.eos_rho_ref,
+            gauge_rho_ref: self.constants.eos_gauge_rho_ref,
+            gauge_p_ref: self.constants.eos_gauge_p_ref,
+            gauge_e_ref: self.constants.eos_gauge_e_ref,
+            gauge_p_bias: self.constants.eos_gauge_p_bias,
         }
     }
 

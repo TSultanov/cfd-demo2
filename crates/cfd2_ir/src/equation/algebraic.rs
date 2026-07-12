@@ -440,26 +440,33 @@ pub fn lower_algebraic_equation(
         .iter()
         .filter(|s| s.linear == Some(target))
         .count();
-    if target_terms != 1 {
+    if target_terms == 0 {
         return Err(format!(
             "algebraic equation for '{}' must contain its target as a plain linear factor in \
-             exactly one product (found {})",
-            target.name(),
-            target_terms
+             at least one product",
+            target.name()
         ));
     }
 
     let mut terms: Vec<Term> = Vec::new();
-    // Target term first.
-    for summand in classified.iter().filter(|s| s.linear == Some(target)) {
-        terms.push(Term::new(
-            TermOp::Source,
-            Discretization::Implicit,
-            target,
-            None,
-            Some(summand_coefficient(summand, true)),
-        ));
-    }
+    // Target term first. Multiple target-linear products merge into ONE
+    // implicit source term whose coefficient is the SUM of the individual
+    // product coefficients (e.g. the gauge-storage velocity recovery
+    // `(rho + gauge_rho_ref) * u = rho_u` distributes into `rho*u + G*u`),
+    // preserving the downstream invariant of a single target diagonal term.
+    let merged_target = classified
+        .iter()
+        .filter(|s| s.linear == Some(target))
+        .map(|summand| summand_coefficient(summand, true))
+        .reduce(|acc, next| Coefficient::Sum(Box::new(acc), Box::new(next)))
+        .expect("at least one target-linear product");
+    terms.push(Term::new(
+        TermOp::Source,
+        Discretization::Implicit,
+        target,
+        None,
+        Some(merged_target),
+    ));
     // Other implicit terms in declaration order.
     for summand in &classified {
         if let Some(linear) = summand.linear {
@@ -888,7 +895,50 @@ mod tests {
             rhs: AlgExpr::Field(vol_scalar_dim::<Pressure>("b")),
         };
         let err = lower_algebraic_equation(&bad, &[]).unwrap_err();
-        assert!(err.contains("exactly one product (found 0)"), "{err}");
+        assert!(err.contains("at least one product"), "{err}");
+    }
+
+    #[test]
+    fn merges_multiple_target_products_into_one_summed_coefficient() {
+        // Gauge-storage velocity recovery shape: (rho + G) * u = rho_u
+        // distributes into rho*u + G*u; both target-linear products must merge
+        // into a single implicit source term with a summed coefficient.
+        let rho = vol_scalar_dim::<Density>("rho");
+        let g = ParamRef::new("eos_gauge_rho_ref", Density::UNIT);
+        let u = vol_scalar_dim::<Velocity>("u");
+        let rho_u = vol_scalar_dim::<MomentumDensity>("rho_u");
+        let eq = AlgebraicEquation {
+            target: u,
+            lhs: AlgExpr::Field(rho_u),
+            rhs: AlgExpr::Mul(
+                Box::new(AlgExpr::Add(
+                    Box::new(AlgExpr::Field(rho)),
+                    Box::new(AlgExpr::Param(g)),
+                )),
+                Box::new(AlgExpr::Field(u)),
+            ),
+        };
+        let lowered = lower_algebraic_equation(&eq, &[rho]).unwrap();
+        let target_terms: Vec<_> = lowered
+            .terms()
+            .iter()
+            .filter(|t| {
+                t.discretization == Discretization::Implicit && t.field.name() == "u"
+            })
+            .collect();
+        assert_eq!(
+            target_terms.len(),
+            1,
+            "target products must merge into one diagonal term"
+        );
+        assert!(
+            matches!(
+                target_terms[0].coeff.as_ref(),
+                Some(Coefficient::Sum(_, _))
+            ),
+            "merged target coefficient must be a Sum: {:?}",
+            target_terms[0].coeff
+        );
     }
 
     #[test]

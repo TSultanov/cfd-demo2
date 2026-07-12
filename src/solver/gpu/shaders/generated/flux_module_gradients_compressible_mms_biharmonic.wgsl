@@ -87,33 +87,33 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             lambda = d_neigh / total_dist;
         }
         let lambda_other = 1.0 - lambda;
-        grad_acc_rho_u_x += normal_vec * (state[idx * 31u + 1u] * lambda + select(select(state[other_idx * 31u + 1u], select(select(state[idx * 31u + 1u], bc_value[face_idx * 12u + 1u], bc_kind[face_idx * 12u + 1u] == 1u), state[idx * 31u + 1u] + bc_value[face_idx * 12u + 1u] * d_own, bc_kind[face_idx * 12u + 1u] == 2u), is_boundary), state[idx * 31u + 1u] - (state[idx * 31u + 1u] * normal_vec.x + state[idx * 31u + 2u] * normal_vec.y) * normal_vec.x, is_boundary && boundary_type == 4u) * lambda_other) * area;
-        grad_acc_rho_u_y += normal_vec * (state[idx * 31u + 2u] * lambda + select(select(state[other_idx * 31u + 2u], select(select(state[idx * 31u + 2u], bc_value[face_idx * 12u + 2u], bc_kind[face_idx * 12u + 2u] == 1u), state[idx * 31u + 2u] + bc_value[face_idx * 12u + 2u] * d_own, bc_kind[face_idx * 12u + 2u] == 2u), is_boundary), state[idx * 31u + 2u] - (state[idx * 31u + 1u] * normal_vec.x + state[idx * 31u + 2u] * normal_vec.y) * normal_vec.y, is_boundary && boundary_type == 4u) * lambda_other) * area;
-        grad_acc_rho += normal_vec * (state[idx * 31u + 0u] * lambda + select(state[other_idx * 31u + 0u], select(select(state[idx * 31u + 0u], bc_value[face_idx * 12u + 0u], bc_kind[face_idx * 12u + 0u] == 1u), state[idx * 31u + 0u] + bc_value[face_idx * 12u + 0u] * d_own, bc_kind[face_idx * 12u + 0u] == 2u), is_boundary) * lambda_other) * area;
-        grad_acc_rho_e += normal_vec * (state[idx * 31u + 7u] * lambda + select(state[other_idx * 31u + 7u], select(select(state[idx * 31u + 7u], bc_value[face_idx * 12u + 3u], bc_kind[face_idx * 12u + 3u] == 1u), state[idx * 31u + 7u] + bc_value[face_idx * 12u + 3u] * d_own, bc_kind[face_idx * 12u + 3u] == 2u), is_boundary) * lambda_other) * area;
-        grad_acc_T += normal_vec * (state[idx * 31u + 9u] * lambda + select(state[other_idx * 31u + 9u], select(select(state[idx * 31u + 9u], bc_value[face_idx * 12u + 7u], bc_kind[face_idx * 12u + 7u] == 1u), state[idx * 31u + 9u] + bc_value[face_idx * 12u + 7u] * d_own, bc_kind[face_idx * 12u + 7u] == 2u), is_boundary) * lambda_other) * area;
-        grad_acc_u_x += normal_vec * (state[idx * 31u + 10u] * lambda + select(select(state[other_idx * 31u + 10u], select(select(state[idx * 31u + 10u], bc_value[face_idx * 12u + 4u], bc_kind[face_idx * 12u + 4u] == 1u), state[idx * 31u + 10u] + bc_value[face_idx * 12u + 4u] * d_own, bc_kind[face_idx * 12u + 4u] == 2u), is_boundary), state[idx * 31u + 10u] - (state[idx * 31u + 10u] * normal_vec.x + state[idx * 31u + 11u] * normal_vec.y) * normal_vec.x, is_boundary && boundary_type == 4u) * lambda_other) * area;
-        grad_acc_u_y += normal_vec * (state[idx * 31u + 11u] * lambda + select(select(state[other_idx * 31u + 11u], select(select(state[idx * 31u + 11u], bc_value[face_idx * 12u + 5u], bc_kind[face_idx * 12u + 5u] == 1u), state[idx * 31u + 11u] + bc_value[face_idx * 12u + 5u] * d_own, bc_kind[face_idx * 12u + 5u] == 2u), is_boundary), state[idx * 31u + 11u] - (state[idx * 31u + 10u] * normal_vec.x + state[idx * 31u + 11u] * normal_vec.y) * normal_vec.y, is_boundary && boundary_type == 4u) * lambda_other) * area;
+        grad_acc_rho_u_x += normal_vec * ((state[idx * 31u + 1u] * lambda + select(select(state[other_idx * 31u + 1u], select(select(state[idx * 31u + 1u], bc_value[face_idx * 12u + 1u], bc_kind[face_idx * 12u + 1u] == 1u), state[idx * 31u + 1u] + bc_value[face_idx * 12u + 1u] * d_own, bc_kind[face_idx * 12u + 1u] == 2u), is_boundary), state[idx * 31u + 1u] - (state[idx * 31u + 1u] * normal_vec.x + state[idx * 31u + 2u] * normal_vec.y) * normal_vec.x, is_boundary && boundary_type == 4u) * lambda_other) * area);
+        grad_acc_rho_u_y += normal_vec * ((state[idx * 31u + 2u] * lambda + select(select(state[other_idx * 31u + 2u], select(select(state[idx * 31u + 2u], bc_value[face_idx * 12u + 2u], bc_kind[face_idx * 12u + 2u] == 1u), state[idx * 31u + 2u] + bc_value[face_idx * 12u + 2u] * d_own, bc_kind[face_idx * 12u + 2u] == 2u), is_boundary), state[idx * 31u + 2u] - (state[idx * 31u + 1u] * normal_vec.x + state[idx * 31u + 2u] * normal_vec.y) * normal_vec.y, is_boundary && boundary_type == 4u) * lambda_other) * area);
+        grad_acc_rho += normal_vec * ((state[idx * 31u + 0u] * lambda + select(state[other_idx * 31u + 0u], select(select(state[idx * 31u + 0u], bc_value[face_idx * 12u + 0u], bc_kind[face_idx * 12u + 0u] == 1u), state[idx * 31u + 0u] + bc_value[face_idx * 12u + 0u] * d_own, bc_kind[face_idx * 12u + 0u] == 2u), is_boundary) * lambda_other) * area);
+        grad_acc_rho_e += normal_vec * ((state[idx * 31u + 7u] * lambda + select(state[other_idx * 31u + 7u], select(select(state[idx * 31u + 7u], bc_value[face_idx * 12u + 3u], bc_kind[face_idx * 12u + 3u] == 1u), state[idx * 31u + 7u] + bc_value[face_idx * 12u + 3u] * d_own, bc_kind[face_idx * 12u + 3u] == 2u), is_boundary) * lambda_other) * area);
+        grad_acc_T += normal_vec * ((state[idx * 31u + 9u] * lambda + select(state[other_idx * 31u + 9u], select(select(state[idx * 31u + 9u], bc_value[face_idx * 12u + 7u], bc_kind[face_idx * 12u + 7u] == 1u), state[idx * 31u + 9u] + bc_value[face_idx * 12u + 7u] * d_own, bc_kind[face_idx * 12u + 7u] == 2u), is_boundary) * lambda_other) * area);
+        grad_acc_u_x += normal_vec * ((state[idx * 31u + 10u] * lambda + select(select(state[other_idx * 31u + 10u], select(select(state[idx * 31u + 10u], bc_value[face_idx * 12u + 4u], bc_kind[face_idx * 12u + 4u] == 1u), state[idx * 31u + 10u] + bc_value[face_idx * 12u + 4u] * d_own, bc_kind[face_idx * 12u + 4u] == 2u), is_boundary), state[idx * 31u + 10u] - (state[idx * 31u + 10u] * normal_vec.x + state[idx * 31u + 11u] * normal_vec.y) * normal_vec.x, is_boundary && boundary_type == 4u) * lambda_other) * area);
+        grad_acc_u_y += normal_vec * ((state[idx * 31u + 11u] * lambda + select(select(state[other_idx * 31u + 11u], select(select(state[idx * 31u + 11u], bc_value[face_idx * 12u + 5u], bc_kind[face_idx * 12u + 5u] == 1u), state[idx * 31u + 11u] + bc_value[face_idx * 12u + 5u] * d_own, bc_kind[face_idx * 12u + 5u] == 2u), is_boundary), state[idx * 31u + 11u] - (state[idx * 31u + 10u] * normal_vec.x + state[idx * 31u + 11u] * normal_vec.y) * normal_vec.y, is_boundary && boundary_type == 4u) * lambda_other) * area);
     }
-    let grad_out_rho_u_x: vec2<f32> = grad_acc_rho_u_x * 1.0 / max(vol, 0.000000000001);
+    let grad_out_rho_u_x: vec2<f32> = grad_acc_rho_u_x * (1.0 / max(vol, 0.000000000001));
     state[idx * 31u + 3u] = grad_out_rho_u_x.x;
     state[idx * 31u + 4u] = grad_out_rho_u_x.y;
-    let grad_out_rho_u_y: vec2<f32> = grad_acc_rho_u_y * 1.0 / max(vol, 0.000000000001);
+    let grad_out_rho_u_y: vec2<f32> = grad_acc_rho_u_y * (1.0 / max(vol, 0.000000000001));
     state[idx * 31u + 5u] = grad_out_rho_u_y.x;
     state[idx * 31u + 6u] = grad_out_rho_u_y.y;
-    let grad_out_rho: vec2<f32> = grad_acc_rho * 1.0 / max(vol, 0.000000000001);
+    let grad_out_rho: vec2<f32> = grad_acc_rho * (1.0 / max(vol, 0.000000000001));
     state[idx * 31u + 12u] = grad_out_rho.x;
     state[idx * 31u + 13u] = grad_out_rho.y;
-    let grad_out_rho_e: vec2<f32> = grad_acc_rho_e * 1.0 / max(vol, 0.000000000001);
+    let grad_out_rho_e: vec2<f32> = grad_acc_rho_e * (1.0 / max(vol, 0.000000000001));
     state[idx * 31u + 14u] = grad_out_rho_e.x;
     state[idx * 31u + 15u] = grad_out_rho_e.y;
-    let grad_out_T: vec2<f32> = grad_acc_T * 1.0 / max(vol, 0.000000000001);
+    let grad_out_T: vec2<f32> = grad_acc_T * (1.0 / max(vol, 0.000000000001));
     state[idx * 31u + 16u] = grad_out_T.x;
     state[idx * 31u + 17u] = grad_out_T.y;
-    let grad_out_u_x: vec2<f32> = grad_acc_u_x * 1.0 / max(vol, 0.000000000001);
+    let grad_out_u_x: vec2<f32> = grad_acc_u_x * (1.0 / max(vol, 0.000000000001));
     state[idx * 31u + 18u] = grad_out_u_x.x;
     state[idx * 31u + 19u] = grad_out_u_x.y;
-    let grad_out_u_y: vec2<f32> = grad_acc_u_y * 1.0 / max(vol, 0.000000000001);
+    let grad_out_u_y: vec2<f32> = grad_acc_u_y * (1.0 / max(vol, 0.000000000001));
     state[idx * 31u + 20u] = grad_out_u_y.x;
     state[idx * 31u + 21u] = grad_out_u_y.y;
 }

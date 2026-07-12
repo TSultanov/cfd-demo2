@@ -2,7 +2,7 @@ use crate::solver::gpu::enums::{GpuBoundaryType, GpuLowMachPrecondModel};
 use crate::solver::gpu::program::plan_instance::PlanParamValue;
 use crate::solver::gpu::structs::LinearSolverStats;
 use crate::solver::gpu::GpuUnifiedSolver;
-use crate::solver::model::eos::EosSpec;
+use crate::solver::model::eos::{EosRuntimeParams, EosSpec};
 use crate::solver::model::linear_solver::FgmresSolutionUpdateStrategy;
 use crate::solver::model::ports::PortRegistry;
 use std::future::Future;
@@ -259,6 +259,9 @@ pub trait SolverRuntimeParamsExt {
     ) -> Result<(), String>;
     /// Set the equation of state parameters from an [`EosSpec`].
     fn set_eos(&mut self, eos: &EosSpec) -> Result<(), String>;
+    /// Set the equation of state from precomputed runtime parameters (e.g.
+    /// [`EosSpec::runtime_params_gauged`] for gauge-storage runs).
+    fn set_eos_runtime(&mut self, params: &EosRuntimeParams) -> Result<(), String>;
 }
 
 impl SolverRuntimeParamsExt for GpuUnifiedSolver {
@@ -370,7 +373,15 @@ impl SolverRuntimeParamsExt for GpuUnifiedSolver {
     }
 
     fn set_eos(&mut self, eos: &EosSpec) -> Result<(), String> {
-        let params = eos.runtime_params();
+        self.set_eos_runtime(&eos.runtime_params())
+    }
+
+    fn set_eos_runtime(&mut self, params: &EosRuntimeParams) -> Result<(), String> {
+        self.cache_eos_gauge_refs([
+            params.gauge_rho_ref,
+            params.gauge_p_ref,
+            params.gauge_e_ref,
+        ]);
         self.set_named_param("eos.gamma", PlanParamValue::F32(params.gamma))?;
         self.set_named_param("eos.gm1", PlanParamValue::F32(params.gm1))?;
         self.set_named_param("eos.r", PlanParamValue::F32(params.r))?;
@@ -378,6 +389,16 @@ impl SolverRuntimeParamsExt for GpuUnifiedSolver {
         self.set_named_param("eos.p_ref", PlanParamValue::F32(params.p_ref))?;
         self.set_named_param("eos.theta_ref", PlanParamValue::F32(params.theta_ref))?;
         self.set_named_param("eos.rho_ref", PlanParamValue::F32(params.rho_ref))?;
+        self.set_named_param(
+            "eos.gauge_rho_ref",
+            PlanParamValue::F32(params.gauge_rho_ref),
+        )?;
+        self.set_named_param("eos.gauge_p_ref", PlanParamValue::F32(params.gauge_p_ref))?;
+        self.set_named_param("eos.gauge_e_ref", PlanParamValue::F32(params.gauge_e_ref))?;
+        self.set_named_param(
+            "eos.gauge_p_bias",
+            PlanParamValue::F32(params.gauge_p_bias),
+        )?;
         Ok(())
     }
 }
@@ -420,7 +441,17 @@ impl SolverCompressibleInletExt for GpuUnifiedSolver {
         u_x: f32,
         eos: &EosSpec,
     ) -> Result<(), String> {
-        let eos_params = eos.runtime_params();
+        // Gauge storage: BC tables hold STORED (gauge) values. The caller
+        // still passes the ABSOLUTE inlet state; the solver's active gauge
+        // references convert (zero when the gauge is off).
+        let mut eos_params = eos.runtime_params();
+        let [gauge_rho, gauge_p, gauge_e] = self.eos_gauge_refs();
+        eos_params.gauge_rho_ref = gauge_rho;
+        eos_params.gauge_p_ref = gauge_p;
+        eos_params.gauge_e_ref = gauge_e;
+        eos_params.gauge_p_bias = (f64::from(eos_params.gm1) * f64::from(gauge_e)
+            + f64::from(eos_params.p_ref)
+            - f64::from(gauge_p)) as f32;
 
         // Inlet pressure policy: the thermodynamically consistent reference
         // pressure for the prescribed (rho, theta_ref) state. This stands in
@@ -437,18 +468,19 @@ impl SolverCompressibleInletExt for GpuUnifiedSolver {
 
         // Seed the dependent entries (rho_u, rho_e, T) by evaluating the
         // model's DECLARED inlet expressions, so this helper cannot drift
-        // from the GPU-side boundary math.
+        // from the GPU-side boundary math. The declared expressions consume
+        // and produce STORED (gauge) values.
         let seeded = evaluate_inlet_declarations(self.model(), rho, u, p0, &eos_params)?;
 
-        self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_RHO, rho)?;
+        self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_RHO, rho - gauge_rho)?;
         self.set_boundary_vec2(GpuBoundaryType::Inlet, FIELD_U_LOWER, u)?;
         self.set_boundary_vec2(GpuBoundaryType::Inlet, FIELD_RHO_U, seeded.rho_u)?;
         self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_RHO_E, seeded.rho_e)?;
-        let _ = self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_P, p0);
+        let _ = self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_P, p0 - gauge_p);
         if let Some(t0) = seeded.t {
             let _ = self.set_boundary_scalar(GpuBoundaryType::Inlet, FIELD_T, t0);
         }
-        let _ = self.set_boundary_scalar(GpuBoundaryType::Outlet, FIELD_P, p0);
+        let _ = self.set_boundary_scalar(GpuBoundaryType::Outlet, FIELD_P, p0 - gauge_p);
         Ok(())
     }
 }
@@ -506,10 +538,15 @@ fn evaluate_inlet_declarations(
     use crate::solver::model::backend::ast::FieldRef;
     use crate::solver::model::backend::boundary::eval_boundary_expr_f32;
 
+    // Gauge storage: the declared boundary expressions consume STORED (gauge)
+    // table values and the interior's stored pressure, exactly like the
+    // generated bc_expr kernel. Callers pass ABSOLUTE (rho, p0).
+    let gauge_rho_ref = eos_params.gauge_rho_ref;
+    let gauge_p_ref = eos_params.gauge_p_ref;
     let interior = move |f: &FieldRef, _c: u32| -> Result<f32, String> {
         match f.name() {
             // The reference pressure stands in for the interior pressure.
-            "p" => Ok(p0),
+            "p" => Ok(p0 - gauge_p_ref),
             other => Err(format!(
                 "inlet seeding: interior({other}) is not available host-side"
             )),
@@ -517,7 +554,7 @@ fn evaluate_inlet_declarations(
     };
     let bc = move |f: &FieldRef, c: u32| -> Result<f32, String> {
         match (f.name(), c) {
-            (FIELD_RHO, 0) => Ok(rho),
+            (FIELD_RHO, 0) => Ok(rho - gauge_rho_ref),
             (FIELD_U_LOWER, 0 | 1) => Ok(u[c as usize]),
             other => Err(format!("inlet seeding: bc({other:?}) is not prescribed")),
         }
@@ -532,6 +569,10 @@ fn evaluate_inlet_declarations(
             "eos_p_ref" => eos.p_ref,
             "eos_theta_ref" => eos.theta_ref,
             "eos_rho_ref" => eos.rho_ref,
+            "eos_gauge_rho_ref" => eos.gauge_rho_ref,
+            "eos_gauge_p_ref" => eos.gauge_p_ref,
+            "eos_gauge_e_ref" => eos.gauge_e_ref,
+            "eos_gauge_p_bias" => eos.gauge_p_bias,
             other => return Err(format!("inlet seeding: unknown param '{other}'")),
         })
     };
@@ -552,9 +593,10 @@ fn evaluate_inlet_declarations(
         eval_boundary_expr_f32(expr, &interior, &bc, &param).map(Some)
     };
 
-    // Closed-form fallback for undeclared entries.
+    // Closed-form fallback for undeclared entries (ABSOLUTE thermodynamics,
+    // stored-gauge conversion where the entry is a gauge-stored field).
     let eos_spec = model.eos();
-    let legacy_rho_e = seeded_total_energy_density(&eos_spec, rho, u, p0);
+    let legacy_rho_e = seeded_total_energy_density(&eos_spec, rho, u, p0) - eos_params.gauge_e_ref;
     let legacy_t = if eos_params.r.abs() > 1e-12 {
         Some(p0 / (rho.max(1e-12) * eos_params.r))
     } else {
@@ -606,6 +648,10 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         let eos = self.model().eos();
         let eos_params = eos.runtime_params();
         let r_gas = eos_params.r;
+        // Gauge storage: callers pass ABSOLUTE primitives; the stored state
+        // holds deviations from the solver's active references (zero when the
+        // gauge is off, so the historical seeding is bit-identical).
+        let [gauge_rho, gauge_p, gauge_e] = self.eos_gauge_refs();
 
         let stride = self.model().state_layout.stride() as usize;
 
@@ -616,11 +662,11 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
             let n = self.num_cells() as usize;
             let rho_e = seeded_total_energy_density(&eos, rho, u, p);
             let t = if r_gas > 0.0 { p / (rho.max(1e-12) * r_gas) } else { 0.0 };
-            let _ = self.set_field_scalar(FIELD_RHO, &vec![rho as f64; n]);
+            let _ = self.set_field_scalar(FIELD_RHO, &vec![(rho - gauge_rho) as f64; n]);
             let _ = self
                 .set_field_vec2("rho_u", &vec![((rho * u[0]) as f64, (rho * u[1]) as f64); n]);
-            let _ = self.set_field_scalar("rho_e", &vec![rho_e as f64; n]);
-            let _ = self.set_field_scalar(FIELD_P, &vec![p as f64; n]);
+            let _ = self.set_field_scalar("rho_e", &vec![(rho_e - gauge_e) as f64; n]);
+            let _ = self.set_field_scalar(FIELD_P, &vec![(p - gauge_p) as f64; n]);
             let _ = self.set_field_scalar("T", &vec![t as f64; n]);
             let _ = self
                 .set_field_vec2(FIELD_U_UPPER, &vec![(u[0] as f64, u[1] as f64); n])
@@ -646,12 +692,12 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         }
         for cell in 0..self.num_cells() as usize {
             let base = cell * stride;
-            state[base + offsets.rho] = rho;
+            state[base + offsets.rho] = rho - gauge_rho;
             state[base + offsets.rho_u_x] = rho * u[0];
             state[base + offsets.rho_u_y] = rho * u[1];
-            state[base + offsets.rho_e] = rho_e;
+            state[base + offsets.rho_e] = rho_e - gauge_e;
             if let Some(off_p) = offsets.p {
-                state[base + off_p] = p;
+                state[base + off_p] = p - gauge_p;
             }
             if let Some(off_t) = offsets.t {
                 state[base + off_t] = if r_gas > 0.0 {
@@ -679,6 +725,8 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         let eos = self.model().eos();
         let eos_params = eos.runtime_params();
         let r_gas = eos_params.r;
+        // Gauge storage: callers pass ABSOLUTE primitives (see set_uniform_state).
+        let [gauge_rho, gauge_p, gauge_e] = self.eos_gauge_refs();
 
         let stride = self.model().state_layout.stride() as usize;
 
@@ -686,16 +734,16 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         // GPU-only).
         if self.is_cpu() {
             let n = self.num_cells() as usize;
-            let rho_f: Vec<f64> = rho.iter().map(|&v| v as f64).collect();
+            let rho_f: Vec<f64> = rho.iter().map(|&v| (v - gauge_rho) as f64).collect();
             let rho_u: Vec<(f64, f64)> = (0..n)
                 .map(|i| ((rho[i] * u[i][0]) as f64, (rho[i] * u[i][1]) as f64))
                 .collect();
             let rho_e: Vec<f64> = (0..n)
                 .map(|i| {
-                    seeded_total_energy_density(&eos, rho[i], u[i], p[i]) as f64
+                    (seeded_total_energy_density(&eos, rho[i], u[i], p[i]) - gauge_e) as f64
                 })
                 .collect();
-            let p_f: Vec<f64> = p.iter().map(|&v| v as f64).collect();
+            let p_f: Vec<f64> = p.iter().map(|&v| (v - gauge_p) as f64).collect();
             let t_f: Vec<f64> = (0..n)
                 .map(|i| if r_gas > 0.0 { (p[i] / (rho[i].max(1e-12) * r_gas)) as f64 } else { 0.0 })
                 .collect();
@@ -731,12 +779,12 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
             let p_val = p[cell];
             let rho_e = seeded_total_energy_density(&eos, rho_val, u_val, p_val);
 
-            state[base + offsets.rho] = rho_val;
+            state[base + offsets.rho] = rho_val - gauge_rho;
             state[base + offsets.rho_u_x] = rho_val * u_val[0];
             state[base + offsets.rho_u_y] = rho_val * u_val[1];
-            state[base + offsets.rho_e] = rho_e;
+            state[base + offsets.rho_e] = rho_e - gauge_e;
             if let Some(off_p) = offsets.p {
-                state[base + off_p] = p_val;
+                state[base + off_p] = p_val - gauge_p;
             }
             if let Some(off_t) = offsets.t {
                 state[base + off_t] = if r_gas > 0.0 {
@@ -967,6 +1015,10 @@ mod tests {
                     "eos_p_ref" => params.p_ref,
                     "eos_theta_ref" => params.theta_ref,
                     "eos_rho_ref" => params.rho_ref,
+                    "eos_gauge_rho_ref" => params.gauge_rho_ref,
+                    "eos_gauge_p_ref" => params.gauge_p_ref,
+                    "eos_gauge_e_ref" => params.gauge_e_ref,
+                    "eos_gauge_p_bias" => params.gauge_p_bias,
                     other => return Err(format!("unexpected EOS param '{other}'")),
                 })
             };

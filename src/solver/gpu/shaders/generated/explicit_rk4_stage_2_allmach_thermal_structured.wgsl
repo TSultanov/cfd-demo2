@@ -35,6 +35,10 @@ struct Constants {
     eos_p_ref: f32,
     eos_theta_ref: f32,
     eos_rho_ref: f32,
+    eos_gauge_rho_ref: f32,
+    eos_gauge_p_ref: f32,
+    eos_gauge_e_ref: f32,
+    eos_gauge_p_bias: f32,
 }
 
 
@@ -161,7 +165,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     state[idx * 22u + 8u] = max(state[idx * 22u + 18u] * state[idx * 22u + 17u] / state[idx * 22u + 12u], state[idx * 22u + 18u]);
     state[idx * 22u + 9u] = state[idx * 22u + 20u] * (0.4 * state[idx * 22u + 18u] * state[idx * 22u + 17u] / state[idx * 22u + 12u] + max(state[idx * 22u + 8u], 1.0 / max(max(state[idx * 22u + 0u] * state[idx * 22u + 0u] + state[idx * 22u + 1u] * state[idx * 22u + 1u], state[idx * 22u + 19u] * state[idx * 22u + 19u]), 0.000000000001)));
     state[idx * 22u + 11u] = max(state[idx * 22u + 13u] / state[idx * 22u + 12u] + 1.4 * state[idx * 22u + 18u] * state[idx * 22u + 17u] * state[idx * 22u + 2u] / state[idx * 22u + 12u], state[idx * 22u + 16u]);
-    state[idx * 22u + 3u] = max(state[idx * 22u + 10u], 0.0) / max(state[idx * 22u + 11u], 0.000000000001) / (1.0 + abs(state[idx * 22u + 21u]) * max(state[idx * 22u + 10u], 0.0) / max(state[idx * 22u + 11u], 0.000000000001));
+    state[idx * 22u + 3u] = max(state[idx * 22u + 10u], 0.0) / max(state[idx * 22u + 11u], 0.000000000001) / (1.0 + abs(state[idx * 22u + 21u]) * (max(state[idx * 22u + 10u], 0.0) / max(state[idx * 22u + 11u], 0.000000000001)));
     state[idx * 22u + 14u] = -((state[idx * 22u + 13u] + 1.4 * state[idx * 22u + 18u] * state[idx * 22u + 17u] * state[idx * 22u + 2u]) / (state[idx * 22u + 12u] * state[idx * 22u + 12u]));
     state[idx * 22u + 15u] = state[idx * 22u + 0u] * state[idx * 22u + 4u] + state[idx * 22u + 1u] * state[idx * 22u + 5u];
     state[idx * 22u + 0u] = select(state[idx * 22u + 0u], 0.0, state[idx * 22u + 21u] < 0.0);

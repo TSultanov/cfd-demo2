@@ -28,6 +28,10 @@ struct Constants {
     eos_p_ref: f32,
     eos_theta_ref: f32,
     eos_rho_ref: f32,
+    eos_gauge_rho_ref: f32,
+    eos_gauge_p_ref: f32,
+    eos_gauge_e_ref: f32,
+    eos_gauge_p_bias: f32,
 }
 
 
@@ -226,18 +230,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     rhs_1 += state[idx * 26u + 23u] * vol;
     rhs_2 += state[idx * 26u + 24u] * vol;
     rhs_3 += state[idx * 26u + 25u] * vol;
-    diag_4 -= -(state[idx * 26u + 0u] * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol;
-    diag_5 -= -(state[idx * 26u + 0u] * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol;
+    diag_4 -= (-(state[idx * 26u + 0u] * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0))) + -(constants.eos_gauge_rho_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)))) * vol;
+    diag_5 -= (-(state[idx * 26u + 0u] * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0))) + -(constants.eos_gauge_rho_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)))) * vol;
     matrix_values[start_row_4 + diag_rank * 8u + 1u] -= 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
     matrix_values[start_row_5 + diag_rank * 8u + 2u] -= 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
     diag_6 -= 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
-    matrix_values[start_row_6 + diag_rank * 8u + 3u] -= -constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
-    matrix_values[start_row_6 + diag_rank * 8u + 0u] -= 0.5 * constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * dot(vec2<f32>(state[idx * 26u + 10u], state[idx * 26u + 11u]), vec2<f32>(state[idx * 26u + 10u], state[idx * 26u + 11u])) * vol;
-    matrix_values[start_row_6 + diag_rank * 8u + 0u] -= -constants.eos_dp_drho * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
-    rhs_6 += constants.eos_dp_drho * constants.eos_rho_ref * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
-    rhs_6 += -constants.eos_p_ref * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
-    diag_7 -= state[idx * 26u + 0u] * constants.eos_r * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
+    matrix_values[start_row_6 + diag_rank * 8u + 3u] -= -constants.eos_gm1 * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol;
+    matrix_values[start_row_6 + diag_rank * 8u + 0u] -= 0.5 * constants.eos_gm1 * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * dot(vec2<f32>(state[idx * 26u + 10u], state[idx * 26u + 11u]), vec2<f32>(state[idx * 26u + 10u], state[idx * 26u + 11u])) * vol;
+    matrix_values[start_row_6 + diag_rank * 8u + 0u] -= -constants.eos_dp_drho * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol;
+    rhs_6 += 0.5 * constants.eos_gm1 * constants.eos_gauge_rho_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * dot(vec2<f32>(state[idx * 26u + 10u], state[idx * 26u + 11u]), vec2<f32>(state[idx * 26u + 10u], state[idx * 26u + 11u])) * vol;
+    rhs_6 += -constants.eos_dp_drho * constants.eos_gauge_rho_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol;
+    rhs_6 += constants.eos_dp_drho * constants.eos_rho_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol;
+    rhs_6 += -constants.eos_gauge_p_bias * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol;
+    diag_7 -= (state[idx * 26u + 0u] * constants.eos_r * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) + constants.eos_gauge_rho_ref * constants.eos_r * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0))) * vol;
     matrix_values[start_row_7 + diag_rank * 8u + 6u] -= -(1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol;
+    rhs_7 += -constants.eos_gauge_p_ref * (1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol;
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];
         let owner = face_owner[face_idx];
@@ -342,7 +349,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             phi_2 -= phi_2 * 2.0;
         }
         rhs_2 -= phi_2;
-        let diff_coeff_rho_e = select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * lambda_f + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * (1.0 - lambda_f), !is_boundary) * area / dist;
+        let diff_coeff_rho_e = select(constants.viscosity * (constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001)) / 0.71, constants.viscosity * (constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001)) / 0.71 * lambda_f + constants.viscosity * (constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001)) / 0.71 * (1.0 - lambda_f), !is_boundary) * area / dist;
         if (!is_boundary) {
             matrix_values[start_row_3 + diag_rank * 8u + 7u] += diff_coeff_rho_e;
             matrix_values[start_row_3 + neighbor_rank * 8u + 7u] -= diff_coeff_rho_e;
@@ -352,7 +359,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 rhs_3 += diff_coeff_rho_e * bc_value[face_idx * 8u + 7u];
             } else {
                 if (bc_kind[face_idx * 8u + 7u] == 2u) {
-                    rhs_3 += select(constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71, constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * lambda_f + constants.viscosity * constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001) / 0.71 * (1.0 - lambda_f), !is_boundary) * area * bc_value[face_idx * 8u + 7u];
+                    rhs_3 += select(constants.viscosity * (constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001)) / 0.71, constants.viscosity * (constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001)) / 0.71 * lambda_f + constants.viscosity * (constants.eos_gamma * constants.eos_r / max(constants.eos_gm1, 0.000000000001)) / 0.71 * (1.0 - lambda_f), !is_boundary) * area * bc_value[face_idx * 8u + 7u];
                 }
             }
         }

@@ -592,7 +592,17 @@ fn gui_default_compressible_backstep_bounded_and_smooth() {
     let res = run_compressible(&d, &air, &mesh);
     print_trace("compressible/backstep", &res);
     let p0 = air.eos.pressure_for_density(air.density);
-    assert_bounded("compressible/backstep", &res, 0.5 * p0, 4.0 * p0, 0.1 * air.density, 10.0 * air.density);
+    // GAUGE STORAGE: the driver-built compressible state (and its readback
+    // stats) hold deviations from the quiescent reference (p0, rho0), so the
+    // absolute physical bounds shift by the references.
+    assert_bounded(
+        "compressible/backstep",
+        &res,
+        0.5 * p0 - p0,
+        4.0 * p0 - p0,
+        0.1 * air.density - air.density,
+        10.0 * air.density - air.density,
+    );
 }
 
 /// The compressible model is also selectable on the channel-with-obstacle geometry,
@@ -612,7 +622,15 @@ fn gui_default_compressible_obstacle_bounded_and_smooth() {
     let res = run_compressible(&d, &air, &mesh);
     print_trace("compressible/obstacle", &res);
     let p0 = air.eos.pressure_for_density(air.density);
-    assert_bounded("compressible/obstacle", &res, 0.5 * p0, 4.0 * p0, 0.1 * air.density, 10.0 * air.density);
+    // GAUGE STORAGE: bounds shifted by the quiescent references (see backstep).
+    assert_bounded(
+        "compressible/obstacle",
+        &res,
+        0.5 * p0 - p0,
+        4.0 * p0 - p0,
+        0.1 * air.density - air.density,
+        10.0 * air.density - air.density,
+    );
 }
 
 /// The GPU State-Redistribution pass must match the CPU operator exactly (to

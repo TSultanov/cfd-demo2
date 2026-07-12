@@ -35,6 +35,10 @@ struct Constants {
     eos_p_ref: f32,
     eos_theta_ref: f32,
     eos_rho_ref: f32,
+    eos_gauge_rho_ref: f32,
+    eos_gauge_p_ref: f32,
+    eos_gauge_e_ref: f32,
+    eos_gauge_p_bias: f32,
 }
 
 
@@ -49,8 +53,8 @@ struct Constants {
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.y * constants.stride_x + global_id.x;
     if (idx >= grid.nx * grid.ny) { return; }
-    state[idx * 23u + 8u] = constants.eos_gm1 * (state[idx * 23u + 7u] - 0.5 * (state[idx * 23u + 1u] * state[idx * 23u + 1u] + state[idx * 23u + 2u] * state[idx * 23u + 2u]) / max(state[idx * 23u + 0u], 0.00000001)) + constants.eos_dp_drho * (state[idx * 23u + 0u] - constants.eos_rho_ref) + constants.eos_p_ref;
-    state[idx * 23u + 9u] = state[idx * 23u + 8u] / (max(state[idx * 23u + 0u], 0.00000001) * max(constants.eos_r, 0.000000000001));
-    state[idx * 23u + 10u] = state[idx * 23u + 1u] / max(state[idx * 23u + 0u], 0.00000001);
-    state[idx * 23u + 11u] = state[idx * 23u + 2u] / max(state[idx * 23u + 0u], 0.00000001);
+    state[idx * 23u + 8u] = constants.eos_gm1 * (state[idx * 23u + 7u] - 0.5 * (state[idx * 23u + 1u] * state[idx * 23u + 1u] + state[idx * 23u + 2u] * state[idx * 23u + 2u]) / max(state[idx * 23u + 0u] + constants.eos_gauge_rho_ref, 0.00000001)) + constants.eos_dp_drho * (state[idx * 23u + 0u] + (constants.eos_gauge_rho_ref - constants.eos_rho_ref)) + constants.eos_gauge_p_bias;
+    state[idx * 23u + 9u] = (state[idx * 23u + 8u] + constants.eos_gauge_p_ref) / (max(state[idx * 23u + 0u] + constants.eos_gauge_rho_ref, 0.00000001) * max(constants.eos_r, 0.000000000001));
+    state[idx * 23u + 10u] = state[idx * 23u + 1u] / max(state[idx * 23u + 0u] + constants.eos_gauge_rho_ref, 0.00000001);
+    state[idx * 23u + 11u] = state[idx * 23u + 2u] / max(state[idx * 23u + 0u] + constants.eos_gauge_rho_ref, 0.00000001);
 }

@@ -104,6 +104,10 @@ fn derive_rhie_chow_flux(
                 collect_coeff_fields(lhs, out);
                 collect_coeff_fields(rhs, out);
             }
+            BackendCoeff::Sum(lhs, rhs) => {
+                collect_coeff_fields(lhs, out);
+                collect_coeff_fields(rhs, out);
+            }
         }
     }
 

@@ -105,6 +105,28 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
             DslType::f32(),
             Density::UNIT,
         )),
+        // Gauge-storage references (state stores deviations from a constant
+        // reference; zero = absolute storage).
+        "eos_gauge_rho_ref" => Some(DynExpr::new(
+            Expr::ident("constants").field("eos_gauge_rho_ref"),
+            DslType::f32(),
+            Density::UNIT,
+        )),
+        "eos_gauge_p_ref" => Some(DynExpr::new(
+            Expr::ident("constants").field("eos_gauge_p_ref"),
+            DslType::f32(),
+            Pressure::UNIT,
+        )),
+        "eos_gauge_e_ref" => Some(DynExpr::new(
+            Expr::ident("constants").field("eos_gauge_e_ref"),
+            DslType::f32(),
+            Pressure::UNIT,
+        )),
+        "eos_gauge_p_bias" => Some(DynExpr::new(
+            Expr::ident("constants").field("eos_gauge_p_bias"),
+            DslType::f32(),
+            Pressure::UNIT,
+        )),
         // Buoyant Boussinesq runtime params. beta*g: acceleration per kelvin.
         "buoyant_beta_g" => Some(DynExpr::new(
             Expr::ident("constants").field("buoyant_beta_g"),
@@ -223,6 +245,11 @@ fn coeff_expr_dyn(
             let lhs_expr = coeff_expr_dyn(slots, lhs, sample.clone());
             let rhs_expr = coeff_expr_dyn(slots, rhs, sample);
             lhs_expr * rhs_expr
+        }
+        Coefficient::Sum(lhs, rhs) => {
+            let lhs_expr = coeff_expr_dyn(slots, lhs, sample.clone());
+            let rhs_expr = coeff_expr_dyn(slots, rhs, sample);
+            lhs_expr + rhs_expr
         }
     }
 }

@@ -1,10 +1,18 @@
 //! Acoustics-level gates for the explicit RK4 compressible solver.
 //!
-//! An isentropic 200 Pa Gaussian pulse (~2.6e4 f32 quanta on the 105 kPa Air
-//! base state, i.e. comfortably representable) is released on each topology
-//! and must propagate as a clean cylindrical wave: transit speed between two
+//! An isentropic Gaussian pressure pulse is released on each topology and
+//! must propagate as a clean cylindrical wave: transit speed between two
 //! monitors within a few percent of c = sqrt(gamma R T), physical 2D decay,
 //! bounded neighbor-mean roughness, and positive rho/p throughout.
+//!
+//! Two amplitudes gate two different failure classes:
+//! - 200 Pa: the spatial discretization (KT flux, BCs, RK4) on both
+//!   topologies and backends;
+//! - 0.5 Pa: the GAUGE-STORAGE precision contract. On the 105 kPa Air base
+//!   state one f32 ULP is ~0.0078 Pa, so an absolute-stored 0.5 Pa pulse
+//!   would sit on ~64 representable levels; the gauge-stored state must
+//!   resolve it as cleanly as the 200 Pa pulse (relative thresholds are
+//!   amplitude-invariant for linear acoustics).
 //!
 //! GPU gates skip without an adapter. Set CFD2_PROBE_OUT=<dir> to also dump
 //! PPM snapshots of (p - P0) for visual inspection; CFD2_PROBE_REFINE=<n>
@@ -26,9 +34,19 @@ const R_GAS: f64 = 287.0;
 const T0: f64 = 300.0;
 const RHO0: f64 = 1.225;
 const P0: f64 = RHO0 * R_GAS * T0; // 105472.5
-const PULSE_AMP: f64 = 200.0;
 const PULSE_SIGMA: f64 = 0.08;
 const DT: f64 = 5.0e-6;
+
+/// Gauge-storage references for the Air base state at RHO0 (`[rho, p, e]`),
+/// matching what the driver/GUI paths activate for the compressible family.
+fn gauge_refs() -> [f64; 3] {
+    let gauged = air_eos().runtime_params_gauged(RHO0);
+    [
+        f64::from(gauged.gauge_rho_ref),
+        f64::from(gauged.gauge_p_ref),
+        f64::from(gauged.gauge_e_ref),
+    ]
+}
 
 fn air_eos() -> EosSpec {
     EosSpec::IdealGas {
@@ -43,9 +61,9 @@ fn sound_speed() -> f64 {
 }
 
 /// Isentropic pulse: p = P0 + A exp(-r^2 / 2 sigma^2), rho = RHO0 (p/P0)^(1/gamma).
-fn pulse_p(x: f64, y: f64, cx: f64, cy: f64) -> f64 {
+fn pulse_p(amp: f64, x: f64, y: f64, cx: f64, cy: f64) -> f64 {
     let r2 = (x - cx).powi(2) + (y - cy).powi(2);
-    P0 + PULSE_AMP * (-r2 / (2.0 * PULSE_SIGMA * PULSE_SIGMA)).exp()
+    P0 + amp * (-r2 / (2.0 * PULSE_SIGMA * PULSE_SIGMA)).exp()
 }
 
 struct Snapshot {
@@ -166,7 +184,14 @@ fn report_arrival(
 /// and adapter variation yet tight enough that a broken KT dissipation
 /// (checkerboard), a preconditioning leak into the time-accurate flux, or a
 /// stage/dt bookkeeping error fails immediately.
-fn assert_clean_pulse(kind: &str, speed: f64, a1: f64, a2: f64, snaps: &[Snapshot]) {
+fn assert_clean_pulse(
+    kind: &str,
+    amp: f64,
+    speed: f64,
+    a1: f64,
+    a2: f64,
+    snaps: &[Snapshot],
+) {
     let c = sound_speed();
     let rel = speed / c - 1.0;
     assert!(
@@ -175,8 +200,8 @@ fn assert_clean_pulse(kind: &str, speed: f64, a1: f64, a2: f64, snaps: &[Snapsho
         rel * 100.0
     );
     assert!(
-        a1 > 0.1 * PULSE_AMP,
-        "[{kind}] first-monitor peak {a1:.2} Pa lost against the {PULSE_AMP} Pa pulse"
+        a1 > 0.1 * amp,
+        "[{kind}] first-monitor peak {a1:.2} Pa lost against the {amp} Pa pulse"
     );
     assert!(
         a2 > 0.3 * a1 && a2 < a1,
@@ -281,7 +306,7 @@ fn unstructured_neighbor_means(mesh: &Mesh) -> impl Fn(&[f64]) -> Vec<Option<f64
     }
 }
 
-fn unstructured_pulse(backend: &str) {
+fn unstructured_pulse(backend: &str, amp: f64) {
     let geo = ChannelWithObstacle {
         length: 3.0,
         height: 1.0,
@@ -333,7 +358,11 @@ fn unstructured_pulse(backend: &str) {
     };
     build.driver.apply_params(&params);
 
-    // Overwrite the uniform IC with the isentropic pulse (away from the obstacle).
+    // Overwrite the uniform IC with the isentropic pulse (away from the
+    // obstacle). Driver-built compressible runs use GAUGE STORAGE, and
+    // set_field_scalar is a raw state writer, so the seeds subtract the
+    // gauge references explicitly.
+    let [g_rho, g_p, g_e] = gauge_refs();
     let center = (2.2, 0.5);
     let n = mesh.num_cells();
     let mut rho = vec![0.0; n];
@@ -341,11 +370,11 @@ fn unstructured_pulse(backend: &str) {
     let mut p_ic = vec![0.0; n];
     let mut t_ic = vec![0.0; n];
     for i in 0..n {
-        let p = pulse_p(mesh.cell_cx[i], mesh.cell_cy[i], center.0, center.1);
+        let p = pulse_p(amp, mesh.cell_cx[i], mesh.cell_cy[i], center.0, center.1);
         let r = RHO0 * (p / P0).powf(1.0 / GAMMA);
-        rho[i] = r;
-        rho_e[i] = p / (GAMMA - 1.0);
-        p_ic[i] = p;
+        rho[i] = r - g_rho;
+        rho_e[i] = p / (GAMMA - 1.0) - g_e;
+        p_ic[i] = p - g_p;
         t_ic[i] = p / (r * R_GAS);
     }
     let solver = build.driver.solver_mut();
@@ -390,14 +419,14 @@ fn unstructured_pulse(backend: &str) {
             if done % 2 == 0 {
                 let state = pollster::block_on(build.driver.solver().read_state_f32());
                 let time = build.driver.solver().time() as f64;
-                h1.push((time, state[m1 * stride + p_off] as f64));
-                h2.push((time, state[m2 * stride + p_off] as f64));
+                h1.push((time, f64::from(state[m1 * stride + p_off]) + g_p));
+                h2.push((time, f64::from(state[m2 * stride + p_off]) + g_p));
             }
         }
         let state = pollster::block_on(build.driver.solver().read_state_f32());
         let p: Vec<f64> = state
             .chunks_exact(stride)
-            .map(|row| row[p_off] as f64)
+            .map(|row| f64::from(row[p_off]) + g_p)
             .collect();
         snaps.push(analyze(
             &centers,
@@ -422,20 +451,34 @@ fn unstructured_pulse(backend: &str) {
         radius(m2),
         &h2,
     );
-    assert_clean_pulse(&format!("unstructured-{backend}"), speed, a1, a2, &snaps);
+    assert_clean_pulse(
+        &format!("unstructured-{backend}"),
+        amp,
+        speed,
+        a1,
+        a2,
+        &snaps,
+    );
 }
 
 #[test]
 fn unstructured_gpu_pulse_is_clean_acoustics() {
-    unstructured_pulse("gpu");
+    unstructured_pulse("gpu", 200.0);
 }
 
 #[test]
 fn unstructured_cpu_pulse_is_clean_acoustics() {
-    unstructured_pulse("cpu");
+    unstructured_pulse("cpu", 200.0);
 }
 
-fn structured_pulse(backend: &str) {
+/// GAUGE-STORAGE acceptance: a 0.5 Pa pulse (~64 f32 quanta if the state were
+/// stored absolute on the 105 kPa base) must be as clean as the 200 Pa one.
+#[test]
+fn unstructured_gpu_sub_ulp_scale_pulse_is_clean_acoustics() {
+    unstructured_pulse("gpu", 0.5);
+}
+
+fn structured_pulse(backend: &str, amp: f64) {
     let model =
         cfd2::solver::model::compressible_structured_model().expect("structured compressible");
     let refine: usize = std::env::var("CFD2_PROBE_REFINE")
@@ -446,16 +489,21 @@ fn structured_pulse(backend: &str) {
     let grid = StructuredGrid::new(nx, ny, lx, ly);
     let center = (1.5, 0.5);
 
-    let seed = |set_named: &mut dyn FnMut(&str, &dyn Fn(f64, f64) -> f64)| {
-        set_named("rho", &|x, y| {
-            RHO0 * (pulse_p(x, y, center.0, center.1) / P0).powf(1.0 / GAMMA)
+    // GAUGE STORAGE (matching the GUI structured path): rho/rho_e/p store
+    // deviations from the quiescent reference at RHO0.
+    let [g_rho, g_p, g_e] = gauge_refs();
+    let seed = move |set_named: &mut dyn FnMut(&str, &dyn Fn(f64, f64) -> f64)| {
+        set_named("rho", &move |x, y| {
+            RHO0 * (pulse_p(amp, x, y, center.0, center.1) / P0).powf(1.0 / GAMMA) - g_rho
         });
-        set_named("rho_e", &|x, y| {
-            pulse_p(x, y, center.0, center.1) / (GAMMA - 1.0)
+        set_named("rho_e", &move |x, y| {
+            pulse_p(amp, x, y, center.0, center.1) / (GAMMA - 1.0) - g_e
         });
-        set_named("p", &|x, y| pulse_p(x, y, center.0, center.1));
-        set_named("T", &|x, y| {
-            let p = pulse_p(x, y, center.0, center.1);
+        set_named("p", &move |x, y| {
+            pulse_p(amp, x, y, center.0, center.1) - g_p
+        });
+        set_named("T", &move |x, y| {
+            let p = pulse_p(amp, x, y, center.0, center.1);
             p / (RHO0 * (p / P0).powf(1.0 / GAMMA) * R_GAS)
         });
     };
@@ -523,7 +571,7 @@ fn structured_pulse(backend: &str) {
         for (k, (state, time)) in packed.iter().zip(&times).enumerate() {
             let p: Vec<f64> = state
                 .chunks_exact(stride)
-                .map(|row| row[p_off] as f64)
+                .map(|row| f64::from(row[p_off]) + g_p)
                 .collect();
             snaps.push(analyze(&centers, &means, &p, center, *time));
             if let Some(out_dir) = &out_dir {
@@ -559,7 +607,7 @@ fn structured_pulse(backend: &str) {
         )
         .expect("structured gpu solver");
         solver.set_fluid(RHO0, 1.81e-5);
-        solver.set_eos(air_eos().runtime_params());
+        solver.set_eos(air_eos().runtime_params_gauged(RHO0));
         let unknowns = solver.unknowns();
         solver.set_boundaries(bc(unknowns));
         let mut set_named = |name: &str, f: &dyn Fn(f64, f64) -> f64| {
@@ -581,8 +629,8 @@ fn structured_pulse(backend: &str) {
                 done += 1;
                 if done % 2 == 0 {
                     let state = solver.packed_state_f32();
-                    h1.push((solver.time(), state[m1 * stride + p_off] as f64));
-                    h2.push((solver.time(), state[m2 * stride + p_off] as f64));
+                    h1.push((solver.time(), f64::from(state[m1 * stride + p_off]) + g_p));
+                    h2.push((solver.time(), f64::from(state[m2 * stride + p_off]) + g_p));
                 }
             }
             packed.push(solver.packed_state_f32());
@@ -592,7 +640,7 @@ fn structured_pulse(backend: &str) {
         report("structured-gpu", &snaps);
         let (speed, a1, a2) =
             report_arrival("structured-gpu", radius(m1), &h1, radius(m2), &h2);
-        assert_clean_pulse("structured-gpu", speed, a1, a2, &snaps);
+        assert_clean_pulse("structured-gpu", amp, speed, a1, a2, &snaps);
     } else {
         let mut solver = cfd2::solver::cpu::structured::StructuredModelSolver::with_config(
             grid,
@@ -605,7 +653,7 @@ fn structured_pulse(backend: &str) {
         .expect("structured cpu solver");
         solver.set_engine(cfd2::solver::cpu::CpuEngine::Transpiled, 4);
         solver.set_fluid(RHO0, 1.81e-5);
-        solver.set_eos(air_eos().runtime_params());
+        solver.set_eos(air_eos().runtime_params_gauged(RHO0));
         let unknowns = solver.unknowns();
         solver.set_boundaries(bc(unknowns));
         let mut set_named = |name: &str, f: &dyn Fn(f64, f64) -> f64| {
@@ -627,8 +675,8 @@ fn structured_pulse(backend: &str) {
                 done += 1;
                 if done % 2 == 0 {
                     let state = solver.packed_state_f32();
-                    h1.push((solver.time(), state[m1 * stride + p_off] as f64));
-                    h2.push((solver.time(), state[m2 * stride + p_off] as f64));
+                    h1.push((solver.time(), f64::from(state[m1 * stride + p_off]) + g_p));
+                    h2.push((solver.time(), f64::from(state[m2 * stride + p_off]) + g_p));
                 }
             }
             packed.push(solver.packed_state_f32());
@@ -638,16 +686,23 @@ fn structured_pulse(backend: &str) {
         report("structured-cpu", &snaps);
         let (speed, a1, a2) =
             report_arrival("structured-cpu", radius(m1), &h1, radius(m2), &h2);
-        assert_clean_pulse("structured-cpu", speed, a1, a2, &snaps);
+        assert_clean_pulse("structured-cpu", amp, speed, a1, a2, &snaps);
     }
 }
 
 #[test]
 fn structured_gpu_pulse_is_clean_acoustics() {
-    structured_pulse("gpu");
+    structured_pulse("gpu", 200.0);
 }
 
 #[test]
 fn structured_cpu_pulse_is_clean_acoustics() {
-    structured_pulse("cpu");
+    structured_pulse("cpu", 200.0);
+}
+
+/// GAUGE-STORAGE acceptance: a 0.5 Pa pulse (~64 f32 quanta if the state were
+/// stored absolute on the 105 kPa base) must be as clean as the 200 Pa one.
+#[test]
+fn structured_gpu_sub_ulp_scale_pulse_is_clean_acoustics() {
+    structured_pulse("gpu", 0.5);
 }

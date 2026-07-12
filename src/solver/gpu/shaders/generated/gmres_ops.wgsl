@@ -25,7 +25,7 @@ const SCALAR_STOP: u32 = 8u;
 const SCALAR_GUARD_FLAG: u32 = 17u;
 
 fn global_index(global_id: vec3<u32>, num_workgroups: vec3<u32>) -> u32 {
-    return global_id.y * num_workgroups.x * WORKGROUP_SIZE + global_id.x;
+    return global_id.y * (num_workgroups.x * WORKGROUP_SIZE) + global_id.x;
 }
 
 fn workgroup_index(group_id: vec3<u32>, num_workgroups: vec3<u32>) -> u32 {
@@ -190,7 +190,7 @@ fn dot_product_partial(@builtin(global_invocation_id) global_id: vec3<u32>, @bui
     }
     if (lid == 0u) {
         let wg_idx = workgroup_index(group_id, num_workgroups);
-        let num_groups_n = (params.n + WORKGROUP_SIZE - 1u) / WORKGROUP_SIZE;
+        let num_groups_n = (params.n + (WORKGROUP_SIZE - 1u)) / WORKGROUP_SIZE;
         if (wg_idx < num_groups_n) {
             vec_z[wg_idx] = partial_sums[0u];
         }
@@ -217,7 +217,7 @@ fn norm_sq_partial(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin
     }
     if (lid == 0u) {
         let wg_idx = workgroup_index(group_id, num_workgroups);
-        let num_groups_n = (params.n + WORKGROUP_SIZE - 1u) / WORKGROUP_SIZE;
+        let num_groups_n = (params.n + (WORKGROUP_SIZE - 1u)) / WORKGROUP_SIZE;
         if (wg_idx < num_groups_n) {
             vec_z[wg_idx] = partial_sums[0u];
         }

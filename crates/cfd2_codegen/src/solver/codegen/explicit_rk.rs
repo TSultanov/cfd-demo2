@@ -229,6 +229,11 @@ fn coefficient_may_be_nonzero(coefficient: Option<&Coefficient>) -> bool {
         Some(Coefficient::Product(lhs, rhs)) => {
             coefficient_may_be_nonzero(Some(lhs)) && coefficient_may_be_nonzero(Some(rhs))
         }
+        // A sum can be nonzero when either summand can (a sum of two possibly
+        // nonzero values is conservatively live).
+        Some(Coefficient::Sum(lhs, rhs)) => {
+            coefficient_may_be_nonzero(Some(lhs)) || coefficient_may_be_nonzero(Some(rhs))
+        }
         Some(Coefficient::Field(_) | Coefficient::MagSqr(_)) => true,
     }
 }

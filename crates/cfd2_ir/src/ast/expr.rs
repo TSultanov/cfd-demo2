@@ -636,9 +636,18 @@ fn render_expr(expr: &Expr, f: &mut fmt::Formatter<'_>, parent_prec: Precedence)
             }
             render_expr(left, f, prec)?;
             write!(f, " {} ", op)?;
-            // Subtraction and division are not associative; preserve RHS grouping.
+            // Preserve RHS grouping for every floating-point arithmetic op:
+            // `a + (b - c)` re-printed as `a + b - c` would left-associate to
+            // `(a + b) - c`, which is a DIFFERENT f32 value. Deliberate
+            // right-grouping is load-bearing (e.g. the gauge-storage pressure
+            // closure groups `rho + (gauge_rho_ref - rho_ref)` so a
+            // gauge-stored liquid density never round-trips through its large
+            // absolute value). The CPU Rust emitter is fully parenthesized, so
+            // this also keeps CPU/GPU evaluation trees identical.
             let right_prec = match op {
-                BinaryOp::Sub | BinaryOp::Div => next_precedence(prec),
+                BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Div => {
+                    next_precedence(prec)
+                }
                 _ => prec,
             };
             render_expr(right, f, right_prec)?;

@@ -35,6 +35,10 @@ struct Constants {
     eos_p_ref: f32,
     eos_theta_ref: f32,
     eos_rho_ref: f32,
+    eos_gauge_rho_ref: f32,
+    eos_gauge_p_ref: f32,
+    eos_gauge_e_ref: f32,
+    eos_gauge_p_bias: f32,
 }
 
 
@@ -95,7 +99,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (lam_total > 0.000001) {
             lambda_f = lam_d_neigh / lam_total;
         }
-        let diff_coeff_exp_phi_phi = select(1.0, lambda_f + 1.0 - lambda_f, !is_boundary) * area / dist;
+        let diff_coeff_exp_phi_phi = select(1.0, lambda_f + (1.0 - lambda_f), !is_boundary) * area / dist;
         if (!is_boundary) {
             rhs_0 += diff_coeff_exp_phi_phi * (state[other_idx * 2u + 0u] - state[idx * 2u + 0u]);
         } else {

@@ -19,6 +19,8 @@ fn constant_field_unit(name: &str) -> Option<UnitDim> {
         "eos_dp_drho" | "eos_theta_ref" => Some(CompressibilitySlope::UNIT),
         "eos_p_ref" => Some(Pressure::UNIT),
         "eos_rho_ref" => Some(Density::UNIT),
+        "eos_gauge_rho_ref" => Some(Density::UNIT),
+        "eos_gauge_p_ref" | "eos_gauge_e_ref" | "eos_gauge_p_bias" => Some(Pressure::UNIT),
         "eos_gamma" | "eos_gm1" | "component" | "alpha_p" | "scheme"
         | "alpha_u" | "stride_x" | "time_scheme" => Some(UnitDim::dimensionless()),
         _ => None,

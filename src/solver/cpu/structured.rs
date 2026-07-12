@@ -830,6 +830,26 @@ impl StructuredModelSolver {
             .with_constant("constants", "eos_p_ref", Value::F32(c.eos_p_ref))
             .with_constant("constants", "eos_theta_ref", Value::F32(c.eos_theta_ref))
             .with_constant("constants", "eos_rho_ref", Value::F32(c.eos_rho_ref))
+            .with_constant(
+                "constants",
+                "eos_gauge_rho_ref",
+                Value::F32(c.eos_gauge_rho_ref),
+            )
+            .with_constant(
+                "constants",
+                "eos_gauge_p_ref",
+                Value::F32(c.eos_gauge_p_ref),
+            )
+            .with_constant(
+                "constants",
+                "eos_gauge_e_ref",
+                Value::F32(c.eos_gauge_e_ref),
+            )
+            .with_constant(
+                "constants",
+                "eos_gauge_p_bias",
+                Value::F32(c.eos_gauge_p_bias),
+            )
             .with_constant("constants", "buoyant_beta_g", Value::F32(c.buoyant_beta_g))
             .with_constant("constants", "buoyant_t0", Value::F32(c.buoyant_t0))
             .with_constant(
@@ -1381,6 +1401,10 @@ impl StructuredModelSolver {
         self.constants.eos_p_ref = params.p_ref;
         self.constants.eos_theta_ref = params.theta_ref;
         self.constants.eos_rho_ref = params.rho_ref;
+        self.constants.eos_gauge_rho_ref = params.gauge_rho_ref;
+        self.constants.eos_gauge_p_ref = params.gauge_p_ref;
+        self.constants.eos_gauge_e_ref = params.gauge_e_ref;
+        self.constants.eos_gauge_p_bias = params.gauge_p_bias;
     }
 
     #[cfg(test)]
@@ -1393,6 +1417,10 @@ impl StructuredModelSolver {
             p_ref: self.constants.eos_p_ref,
             theta_ref: self.constants.eos_theta_ref,
             rho_ref: self.constants.eos_rho_ref,
+            gauge_rho_ref: self.constants.eos_gauge_rho_ref,
+            gauge_p_ref: self.constants.eos_gauge_p_ref,
+            gauge_e_ref: self.constants.eos_gauge_e_ref,
+            gauge_p_bias: self.constants.eos_gauge_p_bias,
         }
     }
 

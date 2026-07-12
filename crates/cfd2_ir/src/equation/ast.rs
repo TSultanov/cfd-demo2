@@ -92,6 +92,9 @@ pub enum Coefficient {
     /// Magnitude-squared of a field (scalar: φ²; vector: |u|²).
     MagSqr(FieldRef),
     Product(Box<Coefficient>, Box<Coefficient>),
+    /// Sum of two coefficients with identical units (e.g. a gauge-stored field
+    /// plus its constant reference, `rho + gauge_rho_ref`).
+    Sum(Box<Coefficient>, Box<Coefficient>),
 }
 
 impl Coefficient {
@@ -127,6 +130,12 @@ impl Coefficient {
         Ok(Self::Product(Box::new(lhs), Box::new(rhs)))
     }
 
+    pub fn sum(lhs: Coefficient, rhs: Coefficient) -> Result<Self, CodegenError> {
+        lhs.ensure_scalar()?;
+        rhs.ensure_scalar()?;
+        Ok(Self::Sum(Box::new(lhs), Box::new(rhs)))
+    }
+
     fn ensure_scalar(&self) -> Result<(), CodegenError> {
         match self {
             Coefficient::Constant { .. } => Ok(()),
@@ -141,7 +150,7 @@ impl Coefficient {
                 }
             }
             Coefficient::MagSqr(_) => Ok(()),
-            Coefficient::Product(lhs, rhs) => {
+            Coefficient::Product(lhs, rhs) | Coefficient::Sum(lhs, rhs) => {
                 lhs.ensure_scalar()?;
                 rhs.ensure_scalar()
             }
@@ -154,6 +163,9 @@ impl Coefficient {
             Coefficient::Field(field) => field.unit(),
             Coefficient::MagSqr(field) => field.unit() * field.unit(),
             Coefficient::Product(lhs, rhs) => lhs.unit() * rhs.unit(),
+            // Summands are unit-identical by construction (asserted where the
+            // lowering merges same-unknown products).
+            Coefficient::Sum(lhs, _) => lhs.unit(),
         }
     }
 }

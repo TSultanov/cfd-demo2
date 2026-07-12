@@ -3636,12 +3636,21 @@ fn evaluate_step_positivity(plan: &GpuProgramPlan) -> Option<StepPositivityRepor
         ..Default::default()
     };
 
+    // Gauge storage: positivity is a property of the ABSOLUTE state; the
+    // stored fields hold deviations from the constant references (zero when
+    // the gauge is off).
+    let (gauge_rho_ref, gauge_p_ref) = {
+        let values = res(plan).fields.constants.values();
+        (values.eos_gauge_rho_ref, values.eos_gauge_p_ref)
+    };
+
     for cell in 0..num_cells {
         let base = cell * stride;
         let rho_idx = (base + offsets.rho) * 4;
         let p_idx = (base + offsets.p) * 4;
-        let rho = f32::from_ne_bytes(raw[rho_idx..rho_idx + 4].try_into().ok()?);
-        let p = f32::from_ne_bytes(raw[p_idx..p_idx + 4].try_into().ok()?);
+        let rho = f32::from_ne_bytes(raw[rho_idx..rho_idx + 4].try_into().ok()?)
+            + gauge_rho_ref;
+        let p = f32::from_ne_bytes(raw[p_idx..p_idx + 4].try_into().ok()?) + gauge_p_ref;
 
         if rho.is_finite() {
             report.min_rho = report.min_rho.min(rho);
@@ -4899,6 +4908,74 @@ pub(crate) fn param_eos_rho_ref(
     {
         let values = r.fields.constants.values_mut();
         values.eos_rho_ref = rho_ref;
+    }
+    r.fields.constants.write(&queue);
+    Ok(())
+}
+
+pub(crate) fn param_eos_gauge_rho_ref(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(v) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.eos_gauge_rho_ref = v;
+    }
+    r.fields.constants.write(&queue);
+    Ok(())
+}
+
+pub(crate) fn param_eos_gauge_p_ref(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(v) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.eos_gauge_p_ref = v;
+    }
+    r.fields.constants.write(&queue);
+    Ok(())
+}
+
+pub(crate) fn param_eos_gauge_e_ref(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(v) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.eos_gauge_e_ref = v;
+    }
+    r.fields.constants.write(&queue);
+    Ok(())
+}
+
+pub(crate) fn param_eos_gauge_p_bias(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(v) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.eos_gauge_p_bias = v;
     }
     r.fields.constants.write(&queue);
     Ok(())

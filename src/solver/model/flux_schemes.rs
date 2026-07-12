@@ -395,7 +395,13 @@ fn derive_central_upwind(
     };
 
     let u_vec = |side: FaceSide| {
-        let inv_rho = S::Div(Box::new(S::lit(1.0)), Box::new(rho(side)));
+        // Gauge storage: rho(side) is the STORED (gauge) reconstruction; the
+        // velocity divides by the ABSOLUTE density (reference zero when off).
+        let rho_abs = S::Add(
+            Box::new(rho(side)),
+            Box::new(S::constant("eos_gauge_rho_ref")),
+        );
+        let inv_rho = S::Div(Box::new(S::lit(1.0)), Box::new(rho_abs));
         V::MulScalar(Box::new(rho_u(side)), Box::new(inv_rho))
     };
 
@@ -946,6 +952,23 @@ fn derive_central_upwind(
         Box::new(a_sf.clone()),
     );
 
+    // Analytic `aphiv_pos + aphiv_neg`: the +/- a_sf dissipation parts cancel
+    // SYMBOLICALLY. This multiplies the constant gauge references in the
+    // regrouped integrated fluxes below, so the reference part of a
+    // gauge-stored conserved state contributes its exact advective flux
+    // without round-tripping through c-scale dissipation arithmetic in f32
+    // (and the whole term vanishes exactly at zero references).
+    let aphiv_sum = S::Add(
+        Box::new(S::Mul(
+            Box::new(phiv_pos.clone()),
+            Box::new(a_pos_sf.clone()),
+        )),
+        Box::new(S::Mul(
+            Box::new(phiv_neg.clone()),
+            Box::new(a_neg_sf.clone()),
+        )),
+    );
+
     // --- Low-Mach pressure coupling for mass flux ---
     // Add pressure perturbation contribution to prevent checkerboarding at low Mach numbers.
     // The coupling adds a term: alpha * (p_pos - p_neg) / c^2 * area
@@ -988,11 +1011,18 @@ fn derive_central_upwind(
     let phi = {
         let rho_pos = rho(FaceSide::Owner);
         let rho_neg = rho(FaceSide::Neighbor);
+        // Gauge storage: absolute mass flux = flux of the stored deviation
+        // plus the reference density advected by the analytic weight sum.
+        let deviation = S::Add(
+            Box::new(S::Mul(Box::new(aphiv_pos.clone()), Box::new(rho_pos))),
+            Box::new(S::Mul(Box::new(aphiv_neg.clone()), Box::new(rho_neg))),
+        );
+        let reference = S::Mul(
+            Box::new(S::constant("eos_gauge_rho_ref")),
+            Box::new(aphiv_sum.clone()),
+        );
         S::Add(
-            Box::new(S::Add(
-                Box::new(S::Mul(Box::new(aphiv_pos.clone()), Box::new(rho_pos))),
-                Box::new(S::Mul(Box::new(aphiv_neg.clone()), Box::new(rho_neg))),
-            )),
+            Box::new(S::Add(Box::new(deviation), Box::new(reference))),
             Box::new(phi_couple),
         )
     };
@@ -1054,9 +1084,24 @@ fn derive_central_upwind(
         let term_pos = S::Add(Box::new(rho_e_pos), Box::new(p_pos.clone()));
         let term_neg = S::Add(Box::new(rho_e_neg), Box::new(p_neg.clone()));
 
-        let conv = S::Add(
+        let deviation = S::Add(
             Box::new(S::Mul(Box::new(aphiv_pos), Box::new(term_pos))),
             Box::new(S::Mul(Box::new(aphiv_neg), Box::new(term_neg))),
+        );
+        // Gauge storage: the reference total enthalpy density
+        // (gauge_e_ref + gauge_p_ref) advects by the analytic weight sum;
+        // the a_sf pressure-jump dissipation below sees only differences and
+        // is gauge-invariant as-is.
+        let reference_enthalpy = S::Add(
+            Box::new(S::constant("eos_gauge_e_ref")),
+            Box::new(S::constant("eos_gauge_p_ref")),
+        );
+        let conv = S::Add(
+            Box::new(deviation),
+            Box::new(S::Mul(
+                Box::new(reference_enthalpy),
+                Box::new(aphiv_sum.clone()),
+            )),
         );
 
         let pressure_jump = S::Sub(Box::new(p_pos), Box::new(p_neg));
@@ -1328,6 +1373,10 @@ mod tests {
                 "eos_dp_drho" => dp_drho,
                 "eos_rho_ref" => rho_ref,
                 "eos_p_ref" => p_ref,
+                // Zero-gauge evaluation (absolute storage): the state-form
+                // closure's affine tail equals the historical `+ p_ref`.
+                "eos_gauge_rho_ref" | "eos_gauge_p_ref" | "eos_gauge_e_ref" => 0.0,
+                "eos_gauge_p_bias" => p_ref,
                 other => panic!("unexpected pressure parameter {other}"),
             },
             AlgExpr::Field(field) => match field.name() {
@@ -1395,12 +1444,21 @@ mod tests {
                 let is_dp = |e: &AlgExpr| {
                     matches!(e, AlgExpr::Param(param) if param.name() == "eos_dp_drho")
                 };
+                // Gauge-storage grouped form: rho + (gauge_rho_ref - rho_ref).
+                // The two reference constants subtract FIRST (exact constant
+                // arithmetic), so neither storage convention round-trips a
+                // liquid density through its large absolute value in f32.
                 let is_centered_density = |e: &AlgExpr| {
                     matches!(
                         e,
-                        AlgExpr::Sub(rho, rho_ref)
+                        AlgExpr::Add(rho, offset)
                             if matches!(rho.as_ref(), AlgExpr::Field(field) if field.name() == "rho")
-                                && matches!(rho_ref.as_ref(), AlgExpr::Param(param) if param.name() == "eos_rho_ref")
+                                && matches!(
+                                    offset.as_ref(),
+                                    AlgExpr::Sub(gauge, rho_ref)
+                                        if matches!(gauge.as_ref(), AlgExpr::Param(param) if param.name() == "eos_gauge_rho_ref")
+                                            && matches!(rho_ref.as_ref(), AlgExpr::Param(param) if param.name() == "eos_rho_ref")
+                                )
                     )
                 };
                 (is_dp(a) && is_centered_density(b))
@@ -1425,11 +1483,19 @@ mod tests {
     fn has_momentum_squared_over_density(expr: &AlgExpr) -> bool {
         match expr {
             AlgExpr::Div(numerator, denominator) => {
+                // Gauge storage: the kinetic-energy division runs on the
+                // ABSOLUTE density `rho + eos_gauge_rho_ref` (reference zero
+                // for absolute storage).
+                let is_absolute_density = |e: &AlgExpr| {
+                    matches!(
+                        e,
+                        AlgExpr::Add(rho, gauge)
+                            if matches!(rho.as_ref(), AlgExpr::Field(field) if field.name() == "rho")
+                                && matches!(gauge.as_ref(), AlgExpr::Param(param) if param.name() == "eos_gauge_rho_ref")
+                    )
+                };
                 let numerator_has_momentum = alg_contains_mag_sqr(numerator, "rho_u")
-                    && matches!(
-                        denominator.as_ref(),
-                        AlgExpr::Field(field) if field.name() == "rho"
-                    );
+                    && is_absolute_density(denominator);
                 numerator_has_momentum
                     || has_momentum_squared_over_density(numerator)
                     || has_momentum_squared_over_density(denominator)
@@ -1453,7 +1519,13 @@ mod tests {
         for field in ["rho", "rho_u", "rho_e"] {
             assert!(alg_contains_field(&pressure, field), "missing {field}");
         }
-        for parameter in ["eos_gm1", "eos_dp_drho", "eos_rho_ref", "eos_p_ref"] {
+        for parameter in [
+            "eos_gm1",
+            "eos_dp_drho",
+            "eos_rho_ref",
+            "eos_gauge_rho_ref",
+            "eos_gauge_p_bias",
+        ] {
             assert!(
                 alg_contains_param(&pressure, parameter),
                 "missing {parameter}"
@@ -1762,7 +1834,13 @@ mod tests {
                 contains_state(momentum_x, "rho_e"),
                 "{scheme:?}: pressure path does not read reconstructed rho_e"
             );
-            for constant in ["eos_gm1", "eos_dp_drho", "eos_rho_ref", "eos_p_ref"] {
+            for constant in [
+                "eos_gm1",
+                "eos_dp_drho",
+                "eos_rho_ref",
+                "eos_gauge_rho_ref",
+                "eos_gauge_p_bias",
+            ] {
                 assert!(
                     contains_constant(momentum_x, constant),
                     "{scheme:?}: pressure path lost {constant}"
@@ -1811,10 +1889,12 @@ mod tests {
                 "{name}: expected owner+neighbor closure for all seven schemes"
             );
             assert_eq!(
-                wgsl.matches(" - constants.eos_rho_ref) + constants.eos_p_ref")
-                    .count(),
+                wgsl.matches(
+                    "+ (constants.eos_gauge_rho_ref - constants.eos_rho_ref)) + constants.eos_gauge_p_bias"
+                )
+                .count(),
                 14,
-                "{name}: centered affine closure was expanded or omitted"
+                "{name}: gauge-grouped centered affine closure was expanded or omitted"
             );
             assert!(wgsl.contains("s_own_rho_e"));
             assert!(wgsl.contains("s_neigh_rho_e"));

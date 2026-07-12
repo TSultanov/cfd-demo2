@@ -42,7 +42,7 @@ struct SolverParams {
 var<uniform> params: SolverParams;
 
 fn global_index(global_id: vec3<u32>, num_workgroups: vec3<u32>) -> u32 {
-    return global_id.y * num_workgroups.x * 64u + global_id.x;
+    return global_id.y * (num_workgroups.x * 64u) + global_id.x;
 }
 
 @compute

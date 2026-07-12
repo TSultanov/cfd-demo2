@@ -701,6 +701,10 @@ fn sample_compressible_explicit_state(
     layout: &crate::solver::model::backend::state_layout::StateLayout,
     mesh: &Mesh,
     params: &RuntimeParams,
+    // Active gauge-storage references `[rho_ref, p_ref, e_ref]` of the state
+    // being sampled (all zero = absolute storage); the CFL/thermodynamic
+    // reconstruction below runs on the ABSOLUTE state.
+    gauge: [f32; 3],
 ) -> ExplicitStateSample {
     let stride = layout.stride() as usize;
     let offset = |name: &str| layout.offset_for(name).map(|value| value as usize);
@@ -739,10 +743,10 @@ fn sample_compressible_explicit_state(
             continue;
         }
 
-        let rho = f64::from(row[rho_off]);
+        let rho = f64::from(row[rho_off]) + f64::from(gauge[0]);
         let mx = f64::from(row[momentum_off]);
         let my = f64::from(row[momentum_off + 1]);
-        let total_energy = f64::from(row[energy_off]);
+        let total_energy = f64::from(row[energy_off]) + f64::from(gauge[2]);
         if !(rho.is_finite() && rho > 0.0) {
             sample.invalid += 1;
             continue;
@@ -1276,6 +1280,16 @@ impl SolverDriver {
         let (cached_u, cached_p) = if compressible {
             let p_ref = params.eos.pressure_for_density(params.density as f64);
             let _ = solver.set_density(params.density);
+            // GAUGE STORAGE: the density-based compressible family stores
+            // conserved deviations from the quiescent reference state at the
+            // fluid density (rho/rho_e/p gauge; rho_u/T/u absolute). This
+            // keeps sub-Pa acoustics representable in the f32 state against
+            // the ~1e5 Pa absolute base (one ULP of 105 kPa is ~0.0078 Pa).
+            // All host helpers below keep their ABSOLUTE-value APIs and
+            // convert through the solver's cached references. See
+            // docs/compressible-explicit-acoustics.md.
+            let _ = solver
+                .set_eos_runtime(&params.eos.runtime_params_gauged(params.density as f64));
             let _ = solver.set_compressible_inlet_isothermal_x(
                 params.density,
                 params.inlet_velocity,
@@ -1298,7 +1312,10 @@ impl SolverDriver {
                 params.inlet_velocity
             };
             solver.set_uniform_state(params.density, [u0, 0.0], p_ref as f32);
-            (vec![(u0 as f64, 0.0); n_cells], vec![p_ref; n_cells])
+            // The GUI plots the STORED pressure, which is now the gauge value
+            // (zero at the reference state) — matching the state readbacks.
+            let p_display = f64::from(p_ref as f32 - solver.eos_gauge_refs()[1]);
+            (vec![(u0 as f64, 0.0); n_cells], vec![p_display; n_cells])
         } else {
             let _ = solver.set_density(params.density);
             let _ = solver.set_alpha_u(params.alpha_u);
@@ -1427,6 +1444,7 @@ impl SolverDriver {
                     &solver.model().state_layout,
                     mesh,
                     params,
+                    solver.eos_gauge_refs(),
                 )
             };
             if sample.invalid > 0 || !(sample.max_rate > 0.0) {
@@ -1506,6 +1524,7 @@ impl SolverDriver {
                 &self.solver.model().state_layout,
                 &self.explicit_mesh,
                 &self.params,
+                self.solver.eos_gauge_refs(),
             )
         };
         if sample.invalid > 0 || !(sample.max_rate > 0.0) {
@@ -1566,7 +1585,14 @@ impl SolverDriver {
             let _ = solver.set_viscosity(params.viscosity);
         }
         if has_param("eos.gamma") {
-            let _ = solver.set_eos(&params.eos);
+            if self.compressible {
+                // Preserve the gauge-storage references across live EOS edits
+                // (a plain set_eos would silently zero them).
+                let _ = solver
+                    .set_eos_runtime(&params.eos.runtime_params_gauged(params.density as f64));
+            } else {
+                let _ = solver.set_eos(&params.eos);
+            }
         }
         if has_param("outer_iters") {
             let _ = solver.set_outer_iters(params.outer_iters as usize);
@@ -1900,6 +1926,7 @@ impl SolverDriver {
                     &self.solver.model().state_layout,
                     &self.explicit_mesh,
                     &self.params,
+                    self.solver.eos_gauge_refs(),
                 )
             };
             if sample.invalid > 0 || !(sample.max_rate > 0.0) {
@@ -2527,6 +2554,7 @@ mod tests {
             &model.state_layout,
             &mesh,
             &params,
+            [0.0; 3],
         );
         assert_eq!(sample.invalid, 0);
         let min_h = mesh

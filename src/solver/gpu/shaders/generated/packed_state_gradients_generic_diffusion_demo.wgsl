@@ -28,6 +28,10 @@ struct Constants {
     eos_p_ref: f32,
     eos_theta_ref: f32,
     eos_rho_ref: f32,
+    eos_gauge_rho_ref: f32,
+    eos_gauge_p_ref: f32,
+    eos_gauge_e_ref: f32,
+    eos_gauge_p_bias: f32,
 }
 
 
@@ -97,9 +101,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 lambda = d_neigh / total_dist;
             }
             let lambda_other = 1.0 - lambda;
-            grad_acc_0 += normal_vec * (state[idx * 1u + 0u] * lambda + select(state[other_idx * 1u + 0u], select(select(state[idx * 1u + 0u], bc_value[face_idx * 1u + 0u], bc_kind[face_idx * 1u + 0u] == 1u), state[idx * 1u + 0u] + bc_value[face_idx * 1u + 0u] * d_own, bc_kind[face_idx * 1u + 0u] == 2u), is_boundary) * lambda_other) * area;
+            grad_acc_0 += normal_vec * ((state[idx * 1u + 0u] * lambda + select(state[other_idx * 1u + 0u], select(select(state[idx * 1u + 0u], bc_value[face_idx * 1u + 0u], bc_kind[face_idx * 1u + 0u] == 1u), state[idx * 1u + 0u] + bc_value[face_idx * 1u + 0u] * d_own, bc_kind[face_idx * 1u + 0u] == 2u), is_boundary) * lambda_other) * area);
         }
-        let grad_out_0: vec2<f32> = grad_acc_0 * 1.0 / max(vol, 0.000000000001);
+        let grad_out_0: vec2<f32> = grad_acc_0 * (1.0 / max(vol, 0.000000000001));
         grad_state[idx * 1u + 0u].x = grad_out_0.x;
         grad_state[idx * 1u + 0u].y = grad_out_0.y;
     }

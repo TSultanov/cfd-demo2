@@ -122,32 +122,47 @@ impl PrimitiveDerivations {
     /// model math avoids any solver-side physics special case.
     pub fn compressible_runtime_eos() -> Self {
         let mut derivations = HashMap::new();
-        let safe_rho = Self::safe_rho_expr();
         let constants = Expr::ident("constants");
         let gm1 = constants.clone().field("eos_gm1");
         let dp_drho = constants.clone().field("eos_dp_drho");
-        let p_ref = constants.clone().field("eos_p_ref");
         let rho_ref = constants.clone().field("eos_rho_ref");
+        // Gauge storage: rho/rho_e/p hold deviations from a constant reference
+        // (zero references = absolute storage). Thermodynamics runs on the
+        // ABSOLUTE state; the recovered p is stored back in gauge form via the
+        // host-cancelled affine tail `eos_gauge_p_bias` (== eos_p_ref when the
+        // gauge is off). The barotropic term groups the two reference
+        // constants first so a gauge-stored liquid density never round-trips
+        // through its large absolute value.
+        let gauge_rho = constants.clone().field("eos_gauge_rho_ref");
+        let gauge_p = constants.clone().field("eos_gauge_p_ref");
+        let p_bias = constants.clone().field("eos_gauge_p_bias");
+        let safe_rho_abs = Expr::call_named(
+            "max",
+            vec![
+                Expr::ident("rho") + gauge_rho.clone(),
+                Expr::lit_f32(Self::RHO_RECOVERY_FLOOR),
+            ],
+        );
         let gas_r = Expr::call_named(
             "max",
             vec![constants.field("eos_r"), Expr::lit_f32(1.0e-12)],
         );
 
-        derivations.insert("u_x".into(), Expr::ident("rho_u_x") / safe_rho.clone());
-        derivations.insert("u_y".into(), Expr::ident("rho_u_y") / safe_rho.clone());
+        derivations.insert("u_x".into(), Expr::ident("rho_u_x") / safe_rho_abs.clone());
+        derivations.insert("u_y".into(), Expr::ident("rho_u_y") / safe_rho_abs.clone());
 
         let rho_u_sq = Expr::ident("rho_u_x") * Expr::ident("rho_u_x")
             + Expr::ident("rho_u_y") * Expr::ident("rho_u_y");
-        let kinetic = Expr::lit_f32(0.5) * rho_u_sq / safe_rho.clone();
+        let kinetic = Expr::lit_f32(0.5) * rho_u_sq / safe_rho_abs.clone();
         derivations.insert(
             "p".into(),
             gm1 * (Expr::ident("rho_e") - kinetic)
-                + dp_drho * (Expr::ident("rho") - rho_ref)
-                + p_ref,
+                + dp_drho * (Expr::ident("rho") + (gauge_rho - rho_ref))
+                + p_bias,
         );
         derivations.insert(
             "T".into(),
-            Expr::ident("p") / (safe_rho * gas_r),
+            (Expr::ident("p") + gauge_p) / (safe_rho_abs * gas_r),
         );
 
         Self { derivations }
@@ -384,6 +399,22 @@ mod tests {
         }
 
         fn contains_centered_product(expr: &Expr) -> bool {
+            // Gauge-storage grouped form: dp_drho * (rho + (gauge_rho_ref -
+            // rho_ref)). The reference constants subtract FIRST (exact
+            // constant-constant arithmetic), so neither an absolute-stored nor
+            // a gauge-stored liquid density round-trips through its large
+            // absolute value in f32.
+            fn is_reference_offset(expr: &Expr) -> bool {
+                matches!(
+                    expr.node(),
+                    ExprNode::Binary {
+                        left: gauge,
+                        op: cfd2_ir::ast::BinaryOp::Sub,
+                        right: rho_ref,
+                    } if is_constant_field(gauge, "eos_gauge_rho_ref")
+                        && is_constant_field(rho_ref, "eos_rho_ref")
+                )
+            }
             match expr.node() {
                 ExprNode::Binary { left, op, right } => {
                     let centered = *op == cfd2_ir::ast::BinaryOp::Mul
@@ -392,10 +423,9 @@ mod tests {
                             right.node(),
                             ExprNode::Binary {
                                 left: rho,
-                                op: cfd2_ir::ast::BinaryOp::Sub,
-                                right: rho_ref,
-                            } if is_ident(rho, "rho")
-                                && is_constant_field(rho_ref, "eos_rho_ref")
+                                op: cfd2_ir::ast::BinaryOp::Add,
+                                right: offset,
+                            } if is_ident(rho, "rho") && is_reference_offset(offset)
                         );
                     centered || contains_centered_product(left) || contains_centered_product(right)
                 }

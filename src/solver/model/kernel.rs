@@ -2486,7 +2486,7 @@ mod tests {
              as the flux module"
         );
         assert!(
-            asm.contains("ale_upwind_sgn * 0.5 * (state["),
+            asm.contains("ale_upwind_sgn * (0.5 * (state["),
             "thermal ALE assembly must hoist the flux module's upwind rho_f blend (ale_rho_f)"
         );
         // Every mesh-relative subtraction must multiply mesh_fluxes by the

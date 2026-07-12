@@ -109,6 +109,13 @@ pub struct GpuConstants {
     pub eos_p_ref: f32,
     pub eos_theta_ref: f32,
     pub eos_rho_ref: f32,
+    // GAUGE STORAGE references for the density-based compressible family
+    // (state stores deviations from a constant reference; all zero = absolute
+    // storage). See `EosRuntimeParams::gauge_rho_ref`.
+    pub eos_gauge_rho_ref: f32,
+    pub eos_gauge_p_ref: f32,
+    pub eos_gauge_e_ref: f32,
+    pub eos_gauge_p_bias: f32,
 
     // --- Buoyant Boussinesq model (runtime) ---
     // LAYOUT CONTRACT: tail fields must mirror the buoyant port manifest
@@ -145,6 +152,10 @@ impl Default for GpuConstants {
             eos_p_ref: 0.0,
             eos_theta_ref: 1.0,
             eos_rho_ref: 0.0,
+            eos_gauge_rho_ref: 0.0,
+            eos_gauge_p_ref: 0.0,
+            eos_gauge_e_ref: 0.0,
+            eos_gauge_p_bias: 0.0,
             buoyant_beta_g: crate::solver::model::BUOYANT_BETA_G as f32,
             buoyant_t0: crate::solver::model::BUOYANT_T0 as f32,
             buoyant_k_over_cp: crate::solver::model::BUOYANT_K_OVER_CP as f32,

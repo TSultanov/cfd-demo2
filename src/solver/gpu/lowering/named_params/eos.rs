@@ -11,6 +11,10 @@ pub(crate) fn handler_for_key(key: &'static str) -> Option<ProgramParamHandler> 
         "eos.p_ref" => Some(generic_coupled::param_eos_p_ref),
         "eos.theta_ref" => Some(generic_coupled::param_eos_theta_ref),
         "eos.rho_ref" => Some(generic_coupled::param_eos_rho_ref),
+        "eos.gauge_rho_ref" => Some(generic_coupled::param_eos_gauge_rho_ref),
+        "eos.gauge_p_ref" => Some(generic_coupled::param_eos_gauge_p_ref),
+        "eos.gauge_e_ref" => Some(generic_coupled::param_eos_gauge_e_ref),
+        "eos.gauge_p_bias" => Some(generic_coupled::param_eos_gauge_p_bias),
         "low_mach.model" => Some(generic_coupled::param_low_mach_model),
         "low_mach.theta_floor" => Some(generic_coupled::param_low_mach_theta_floor),
         "low_mach.pressure_coupling_alpha" => {

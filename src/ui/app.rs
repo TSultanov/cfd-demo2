@@ -7354,7 +7354,10 @@ fn apply_structured_compressible_runtime(
     s: &mut impl StructuredSeed,
     params: &RuntimeParams,
 ) {
-    s.sc_set_eos(params.eos.runtime_params());
+    // GAUGE STORAGE (matches the unstructured driver): the density-based
+    // compressible state stores deviations from the quiescent reference at
+    // the fluid density. See docs/compressible-explicit-acoustics.md.
+    s.sc_set_eos(params.eos.runtime_params_gauged(params.density as f64));
     s.sc_set_inlet_velocity(params.inlet_velocity);
 }
 
@@ -7365,6 +7368,12 @@ struct StructuredCompressibleReferenceState {
     total_energy_density: f64,
     pressure: f64,
     temperature: f64,
+    /// STORED (gauge) values of rho / rho_e / p for this state under the
+    /// gauge references at the fluid density (what the state buffer and BC
+    /// tables actually hold). `momentum_x`/`temperature` are stored absolute.
+    stored_rho: f64,
+    stored_total_energy_density: f64,
+    stored_pressure: f64,
 }
 
 /// Uniform conserved/primitive state implied by the selected physical EOS.
@@ -7376,6 +7385,18 @@ fn structured_compressible_reference_state(
     eos: EosSpec,
     rho: f64,
     velocity_x: f64,
+) -> StructuredCompressibleReferenceState {
+    structured_compressible_reference_state_gauged(eos, rho, velocity_x, rho)
+}
+
+/// [`structured_compressible_reference_state`] with the gauge base density made
+/// explicit (the stored values subtract the references of the quiescent state
+/// at `gauge_rho0`; the default takes the state's own density as the base).
+fn structured_compressible_reference_state_gauged(
+    eos: EosSpec,
+    rho: f64,
+    velocity_x: f64,
+    gauge_rho0: f64,
 ) -> StructuredCompressibleReferenceState {
     let pressure = eos.pressure_for_density(rho);
     let runtime = eos.runtime_params();
@@ -7394,12 +7415,17 @@ fn structured_compressible_reference_state(
     } else {
         0.0
     };
+    let gauged = eos.runtime_params_gauged(gauge_rho0);
+    let total_energy_density = internal + kinetic;
     StructuredCompressibleReferenceState {
         rho,
         momentum_x: rho * velocity_x,
-        total_energy_density: internal + kinetic,
+        total_energy_density,
         pressure,
         temperature,
+        stored_rho: rho - f64::from(gauged.gauge_rho_ref),
+        stored_total_energy_density: total_energy_density - f64::from(gauged.gauge_e_ref),
+        stored_pressure: pressure - f64::from(gauged.gauge_p_ref),
     }
 }
 
@@ -7525,14 +7551,16 @@ fn seed_structured_state(
             apply_structured_allmach_inlet_ramp(s, params);
         }
         "compressible_structured" => {
+            // GAUGE STORAGE: rho/rho_e/p store deviations from this very
+            // reference state, so the quiescent seed is exactly zero.
             let reference = structured_compressible_reference_state(
                 params.eos,
                 params.density as f64,
                 0.0,
             );
-            s.sc_set_named("rho", move |_, _| reference.rho);
-            s.sc_set_named("rho_e", move |_, _| reference.total_energy_density);
-            s.sc_set_named("p", move |_, _| reference.pressure);
+            s.sc_set_named("rho", move |_, _| reference.stored_rho);
+            s.sc_set_named("rho_e", move |_, _| reference.stored_total_energy_density);
+            s.sc_set_named("p", move |_, _| reference.stored_pressure);
             s.sc_set_named("T", move |_, _| reference.temperature);
             if s.sc_field_offset("mu").is_some() {
                 let mu = params.viscosity as f64;
@@ -7613,10 +7641,10 @@ fn seed_structured_freestream(
             s.sc_set_named("rho_u", move |_, _| reference.momentum_x);
         }
         if s.sc_field_offset("rho_e").is_some() {
-            s.sc_set_named("rho_e", move |_, _| reference.total_energy_density);
+            s.sc_set_named("rho_e", move |_, _| reference.stored_total_energy_density);
         }
         if s.sc_field_offset("p").is_some() {
-            s.sc_set_named("p", move |_, _| reference.pressure);
+            s.sc_set_named("p", move |_, _| reference.stored_pressure);
         }
         if s.sc_field_offset("T").is_some() {
             s.sc_set_named("T", move |_, _| reference.temperature);
@@ -7667,14 +7695,18 @@ fn setup_structured_bcs(
     params: &RuntimeParams,
 ) {
     if model_id == "compressible_structured" {
-        let reference = structured_compressible_reference_state(
+        // GAUGE STORAGE: BC tables hold STORED values; the gauge base is the
+        // fluid density (matching apply_structured_compressible_runtime), so
+        // inlet-state deviations from it survive in the stored form.
+        let reference = structured_compressible_reference_state_gauged(
             params.eos,
             f64::from(params.density.max(1.0e-6)),
             u_in,
+            params.density as f64,
         );
-        let rho0 = reference.rho as f32;
+        let rho0 = reference.stored_rho as f32;
         let momentum_x = reference.momentum_x as f32;
-        let e0 = reference.total_energy_density as f32;
+        let e0 = reference.stored_total_energy_density as f32;
         s.sc_set_boundaries(move |edge, _x, _y| {
             let d = |v: f32| StructBc { kind: 1, value: v };
             let n = || StructBc {
@@ -9607,6 +9639,9 @@ fn gui_matrix_state_minima(
     layout: &crate::solver::model::backend::state_layout::StateLayout,
     state: &[f32],
     eos: EosSpec,
+    // Gauge-storage references `[rho_ref, p_ref, e_ref]` active on the run
+    // (zero = absolute storage): positivity is checked on ABSOLUTE values.
+    gauge: [f32; 3],
 ) -> Result<
     (
         Option<f64>,
@@ -9638,7 +9673,7 @@ fn gui_matrix_state_minima(
     let rows = || state.chunks_exact(stride);
     let min_rho = offset("rho").map(|rho| {
         rows()
-            .map(|row| row[rho] as f64)
+            .map(|row| f64::from(row[rho] + gauge[0]))
             .fold(f64::INFINITY, f64::min)
     });
     if min_rho.is_some_and(|value| !(value > 0.0)) {
@@ -9664,7 +9699,7 @@ fn gui_matrix_state_minima(
     );
     let min_total_energy_density = conserved_offsets.2.map(|total_energy| {
         rows()
-            .map(|row| row[total_energy] as f64)
+            .map(|row| f64::from(row[total_energy] + gauge[2]))
             .fold(f64::INFINITY, f64::min)
     });
     if matches!(eos, EosSpec::IdealGas { .. })
@@ -9677,7 +9712,7 @@ fn gui_matrix_state_minima(
     let min_pressure = if conserved_offsets.2.is_some() {
         offset("p").map(|pressure| {
             rows()
-                .map(|row| row[pressure] as f64)
+                .map(|row| f64::from(row[pressure] + gauge[1]))
                 .fold(f64::INFINITY, f64::min)
         })
     } else {
@@ -9692,10 +9727,11 @@ fn gui_matrix_state_minima(
         (Some(rho), Some(momentum), Some(total_energy)) => Some(
             rows()
                 .map(|row| {
-                    let density = row[rho] as f64;
+                    let density = f64::from(row[rho] + gauge[0]);
                     let mx = row[momentum] as f64;
                     let my = row[momentum + 1] as f64;
-                    row[total_energy] as f64 - (mx * mx + my * my) / (2.0 * density)
+                    f64::from(row[total_energy] + gauge[2])
+                        - (mx * mx + my * my) / (2.0 * density)
                 })
                 .fold(f64::INFINITY, f64::min),
         ),
@@ -10195,7 +10231,18 @@ pub fn gui_explicit_rk4_smoke(
         min_pressure,
         min_total_energy_density,
         min_internal_energy_density,
-    ) = gui_matrix_state_minima(case.model_id, &layout, &packed_state, params.eos)?;
+    ) = gui_matrix_state_minima(
+        case.model_id,
+        &layout,
+        &packed_state,
+        params.eos,
+        if matches!(case.model_id, "compressible" | "compressible_structured") {
+            let gauged = params.eos.runtime_params_gauged(params.density as f64);
+            [gauged.gauge_rho_ref, gauged.gauge_p_ref, gauged.gauge_e_ref]
+        } else {
+            [0.0; 3]
+        },
+    )?;
     Ok(GuiExplicitRk4Smoke {
         topology: if structured { "structured" } else { "unstructured" },
         model_id: case.model_id.to_string(),

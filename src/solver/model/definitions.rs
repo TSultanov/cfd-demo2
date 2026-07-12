@@ -708,6 +708,17 @@ fn validate_explicit_source_term(
                 scalar_coefficient(state_layout, lhs)?;
                 scalar_coefficient(state_layout, rhs)?;
             }
+            Coefficient::Sum(lhs, rhs) => {
+                scalar_coefficient(state_layout, lhs)?;
+                scalar_coefficient(state_layout, rhs)?;
+                if lhs.unit() != rhs.unit() {
+                    return Err(format!(
+                        "coefficient sum has mismatched units: {} vs {}",
+                        lhs.unit(),
+                        rhs.unit()
+                    ));
+                }
+            }
         }
         Ok(())
     }
@@ -1284,6 +1295,12 @@ fn coefficient_mass_polynomial(
                 let left = lower(left, state_fields, primitive_values)?;
                 let right = lower(right, state_fields, primitive_values)?;
                 left.emitted_product(&right)
+            }
+            Coefficient::Sum(left, right) => {
+                let mut left = lower(left, state_fields, primitive_values)?;
+                let right = lower(right, state_fields, primitive_values)?;
+                left.add_emitted_term(&right)?;
+                Ok(left)
             }
         }
     }
@@ -2857,8 +2874,12 @@ mod tests {
         assert_eq!(model.system.equations()[1].terms().len(), 3);
         assert_eq!(model.system.equations()[2].terms().len(), 3);
         assert_eq!(model.system.equations()[3].terms().len(), 2);
-        assert_eq!(model.system.equations()[4].terms().len(), 5);
-        assert_eq!(model.system.equations()[5].terms().len(), 2);
+        // p row: target + rho_e + two implicit rho terms + the four explicit
+        // gauge/reference constants of the state-form closure (all zero-valued
+        // at zero gauge references).
+        assert_eq!(model.system.equations()[4].terms().len(), 8);
+        // T row: merged target + p + the explicit -gauge_p_ref constant.
+        assert_eq!(model.system.equations()[5].terms().len(), 3);
 
         // Compressible uses the generic-coupled pipeline with a model-defined flux module stage.
         let kernel_ids: Vec<_> = derive_kernel_specs_for_model(&model)

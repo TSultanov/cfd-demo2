@@ -28,6 +28,10 @@ struct Constants {
     eos_p_ref: f32,
     eos_theta_ref: f32,
     eos_rho_ref: f32,
+    eos_gauge_rho_ref: f32,
+    eos_gauge_p_ref: f32,
+    eos_gauge_e_ref: f32,
+    eos_gauge_p_bias: f32,
 }
 
 
@@ -144,14 +148,14 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         let scalar_mat_idx = cell_face_matrix_indices[k];
         let neighbor_rank = scalar_mat_idx - scalar_offset;
-        let diff_coeff_phi = select(1.0, lambda_f + 1.0 - lambda_f, !is_boundary) * area / dist;
+        let diff_coeff_phi = select(1.0, lambda_f + (1.0 - lambda_f), !is_boundary) * area / dist;
         if (!is_boundary) {
         } else {
             if (bc_kind[face_idx * 1u + 0u] == 1u) {
                 rhs_0 += diff_coeff_phi * bc_value[face_idx * 1u + 0u];
             } else {
                 if (bc_kind[face_idx * 1u + 0u] == 2u) {
-                    rhs_0 += select(1.0, lambda_f + 1.0 - lambda_f, !is_boundary) * area * bc_value[face_idx * 1u + 0u];
+                    rhs_0 += select(1.0, lambda_f + (1.0 - lambda_f), !is_boundary) * area * bc_value[face_idx * 1u + 0u];
                 }
             }
         }

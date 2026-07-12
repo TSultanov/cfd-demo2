@@ -28,6 +28,10 @@ struct Constants {
     eos_p_ref: f32,
     eos_theta_ref: f32,
     eos_rho_ref: f32,
+    eos_gauge_rho_ref: f32,
+    eos_gauge_p_ref: f32,
+    eos_gauge_e_ref: f32,
+    eos_gauge_p_bias: f32,
     buoyant_beta_g: f32,
     buoyant_t0: f32,
     buoyant_k_over_cp: f32,
@@ -102,21 +106,21 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
             lambda = d_neigh / total_dist;
         }
         let lambda_other = 1.0 - lambda;
-        grad_acc_0 += normal_vec * (state[idx * 12u + 0u] * lambda + select(state[other_idx * 12u + 0u], select(select(state[idx * 12u + 0u], bc_value[face_idx * 4u + 0u], bc_kind[face_idx * 4u + 0u] == 1u), state[idx * 12u + 0u] + bc_value[face_idx * 4u + 0u] * d_own, bc_kind[face_idx * 4u + 0u] == 2u), is_boundary) * lambda_other) * area;
-        grad_acc_1 += normal_vec * (state[idx * 12u + 1u] * lambda + select(state[other_idx * 12u + 1u], select(select(state[idx * 12u + 1u], bc_value[face_idx * 4u + 1u], bc_kind[face_idx * 4u + 1u] == 1u), state[idx * 12u + 1u] + bc_value[face_idx * 4u + 1u] * d_own, bc_kind[face_idx * 4u + 1u] == 2u), is_boundary) * lambda_other) * area;
-        grad_acc_2 += normal_vec * (state[idx * 12u + 2u] * lambda + select(state[other_idx * 12u + 2u], select(select(state[idx * 12u + 2u], bc_value[face_idx * 4u + 2u], bc_kind[face_idx * 4u + 2u] == 1u), state[idx * 12u + 2u] + bc_value[face_idx * 4u + 2u] * d_own, bc_kind[face_idx * 4u + 2u] == 2u), is_boundary) * lambda_other) * area;
-        grad_acc_3 += normal_vec * (state[idx * 12u + 8u] * lambda + select(state[other_idx * 12u + 8u], select(select(state[idx * 12u + 8u], bc_value[face_idx * 4u + 3u], bc_kind[face_idx * 4u + 3u] == 1u), state[idx * 12u + 8u] + bc_value[face_idx * 4u + 3u] * d_own, bc_kind[face_idx * 4u + 3u] == 2u), is_boundary) * lambda_other) * area;
+        grad_acc_0 += normal_vec * ((state[idx * 12u + 0u] * lambda + select(state[other_idx * 12u + 0u], select(select(state[idx * 12u + 0u], bc_value[face_idx * 4u + 0u], bc_kind[face_idx * 4u + 0u] == 1u), state[idx * 12u + 0u] + bc_value[face_idx * 4u + 0u] * d_own, bc_kind[face_idx * 4u + 0u] == 2u), is_boundary) * lambda_other) * area);
+        grad_acc_1 += normal_vec * ((state[idx * 12u + 1u] * lambda + select(state[other_idx * 12u + 1u], select(select(state[idx * 12u + 1u], bc_value[face_idx * 4u + 1u], bc_kind[face_idx * 4u + 1u] == 1u), state[idx * 12u + 1u] + bc_value[face_idx * 4u + 1u] * d_own, bc_kind[face_idx * 4u + 1u] == 2u), is_boundary) * lambda_other) * area);
+        grad_acc_2 += normal_vec * ((state[idx * 12u + 2u] * lambda + select(state[other_idx * 12u + 2u], select(select(state[idx * 12u + 2u], bc_value[face_idx * 4u + 2u], bc_kind[face_idx * 4u + 2u] == 1u), state[idx * 12u + 2u] + bc_value[face_idx * 4u + 2u] * d_own, bc_kind[face_idx * 4u + 2u] == 2u), is_boundary) * lambda_other) * area);
+        grad_acc_3 += normal_vec * ((state[idx * 12u + 8u] * lambda + select(state[other_idx * 12u + 8u], select(select(state[idx * 12u + 8u], bc_value[face_idx * 4u + 3u], bc_kind[face_idx * 4u + 3u] == 1u), state[idx * 12u + 8u] + bc_value[face_idx * 4u + 3u] * d_own, bc_kind[face_idx * 4u + 3u] == 2u), is_boundary) * lambda_other) * area);
     }
-    let grad_out_0: vec2<f32> = grad_acc_0 * 1.0 / max(vol, 0.000000000001);
+    let grad_out_0: vec2<f32> = grad_acc_0 * (1.0 / max(vol, 0.000000000001));
     grad_state[idx * 12u + 0u].x = grad_out_0.x;
     grad_state[idx * 12u + 0u].y = grad_out_0.y;
-    let grad_out_1: vec2<f32> = grad_acc_1 * 1.0 / max(vol, 0.000000000001);
+    let grad_out_1: vec2<f32> = grad_acc_1 * (1.0 / max(vol, 0.000000000001));
     grad_state[idx * 12u + 1u].x = grad_out_1.x;
     grad_state[idx * 12u + 1u].y = grad_out_1.y;
-    let grad_out_2: vec2<f32> = grad_acc_2 * 1.0 / max(vol, 0.000000000001);
+    let grad_out_2: vec2<f32> = grad_acc_2 * (1.0 / max(vol, 0.000000000001));
     grad_state[idx * 12u + 2u].x = grad_out_2.x;
     grad_state[idx * 12u + 2u].y = grad_out_2.y;
-    let grad_out_3: vec2<f32> = grad_acc_3 * 1.0 / max(vol, 0.000000000001);
+    let grad_out_3: vec2<f32> = grad_acc_3 * (1.0 / max(vol, 0.000000000001));
     grad_state[idx * 12u + 8u].x = grad_out_3.x;
     grad_state[idx * 12u + 8u].y = grad_out_3.y;
 }

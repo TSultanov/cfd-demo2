@@ -412,6 +412,36 @@ fn gpu_direct_autonomous_and_plot_ordinary_are_stable_for_every_model_and_dt_pol
     }
 }
 
+/// The GUI structured obstacle case on the autonomous Direct route — the
+/// gauge-storage regression class: a missing gauge reference anywhere in the
+/// structured constants plumbing makes the conserved-state health audit
+/// reconstruct absolute density as `rho' + 0` and reject EVERY cell ("halted
+/// after 0 accepted batch steps"), which this pins out.
+#[test]
+fn gpu_structured_obstacle_direct_autonomous_accepts_all_steps() {
+    if let Err(error) = gui_explicit_rk4_gpu_available() {
+        eprintln!("skipping structured obstacle Direct gate: {error}");
+        return;
+    }
+    for adaptive in [false, true] {
+        let direct = gui_explicit_rk4_smoke(case(
+            "compressible_structured",
+            "obstacle",
+            "structured",
+            "gpu",
+            adaptive,
+            "direct",
+            3,
+        ))
+        .unwrap_or_else(|error| panic!("structured obstacle Direct (adaptive={adaptive}): {error}"));
+        assert_stable(&direct);
+        assert_eq!(
+            direct.route, "autonomous",
+            "structured obstacle Direct fell back to the ordinary route"
+        );
+    }
+}
+
 #[test]
 fn gpu_linear_eos_presets_use_one_finite_ordinary_route_for_plot_and_direct() {
     if let Err(error) = gui_explicit_rk4_gpu_available() {

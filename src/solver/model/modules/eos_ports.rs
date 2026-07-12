@@ -54,6 +54,33 @@ pub fn eos_uniform_port_manifest() -> ModulePortManifest {
                 wgsl_type: "f32",
                 unit: Density::UNIT,
             },
+            // Gauge-storage references (state stores deviations from a constant
+            // reference; zero = absolute storage). `e_ref`/`p_bias` share the
+            // Pressure unit dimension (J/m^3 == Pa).
+            ParamSpec {
+                key: "eos.gauge_rho_ref",
+                wgsl_field: "eos_gauge_rho_ref",
+                wgsl_type: "f32",
+                unit: Density::UNIT,
+            },
+            ParamSpec {
+                key: "eos.gauge_p_ref",
+                wgsl_field: "eos_gauge_p_ref",
+                wgsl_type: "f32",
+                unit: Pressure::UNIT,
+            },
+            ParamSpec {
+                key: "eos.gauge_e_ref",
+                wgsl_field: "eos_gauge_e_ref",
+                wgsl_type: "f32",
+                unit: Pressure::UNIT,
+            },
+            ParamSpec {
+                key: "eos.gauge_p_bias",
+                wgsl_field: "eos_gauge_p_bias",
+                wgsl_type: "f32",
+                unit: Pressure::UNIT,
+            },
         ],
         fields: vec![],
         buffers: vec![],

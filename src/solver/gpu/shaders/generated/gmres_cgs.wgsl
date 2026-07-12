@@ -45,7 +45,7 @@ fn calc_dots_cgs(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(l
     }
     let j = params.num_iters;
     let n = params.n;
-    let num_groups_n = (n + WORKGROUP_SIZE - 1u) / WORKGROUP_SIZE;
+    let num_groups_n = (n + (WORKGROUP_SIZE - 1u)) / WORKGROUP_SIZE;
     let stride_x = num_workgroups.x * WORKGROUP_SIZE;
     let idx = global_id.y * stride_x + global_id.x;
     let group_flat = group_id.y * num_workgroups.x + group_id.x;
@@ -187,17 +187,17 @@ fn update_w_cgs(@builtin(global_invocation_id) global_id: vec3<u32>, @builtin(nu
             correction += h_val * v_val;
         }
         if (i + 1u <= j) {
-            let h_val = b_hessenberg[j * (max_restart + 1u) + i + 1u];
+            let h_val = b_hessenberg[j * (max_restart + 1u) + (i + 1u)];
             let v_val = b_basis[(i + 1u) * stride_words + idx];
             correction += h_val * v_val;
         }
         if (i + 2u <= j) {
-            let h_val = b_hessenberg[j * (max_restart + 1u) + i + 2u];
+            let h_val = b_hessenberg[j * (max_restart + 1u) + (i + 2u)];
             let v_val = b_basis[(i + 2u) * stride_words + idx];
             correction += h_val * v_val;
         }
         if (i + 3u <= j) {
-            let h_val = b_hessenberg[j * (max_restart + 1u) + i + 3u];
+            let h_val = b_hessenberg[j * (max_restart + 1u) + (i + 3u)];
             let v_val = b_basis[(i + 3u) * stride_words + idx];
             correction += h_val * v_val;
         }

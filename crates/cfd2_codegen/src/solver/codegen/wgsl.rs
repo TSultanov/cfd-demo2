@@ -792,6 +792,9 @@ fn format_coeff(coeff: &Coefficient) -> String {
         Coefficient::Product(lhs, rhs) => {
             format!("product({}, {})", format_coeff(lhs), format_coeff(rhs))
         }
+        Coefficient::Sum(lhs, rhs) => {
+            format!("sum({}, {})", format_coeff(lhs), format_coeff(rhs))
+        }
     }
 }
 

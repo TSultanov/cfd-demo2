@@ -100,6 +100,16 @@ const EOS_R: TypedParamRef<DivDim<Pressure, MulDim<Density, Temperature>>> =
 const EOS_DP_DRHO: TypedParamRef<DivDim<Pressure, Density>> = TypedParamRef::new("eos_dp_drho");
 const EOS_P_REF: TypedParamRef<Pressure> = TypedParamRef::new("eos_p_ref");
 const EOS_RHO_REF: TypedParamRef<Density> = TypedParamRef::new("eos_rho_ref");
+// Gauge-storage references: the conserved state fields store deviations from a
+// constant reference state (`rho_state = rho_abs - gauge_rho_ref`,
+// `rho_e_state = rho_e_abs - gauge_e_ref`, `p_state = p_abs - gauge_p_ref`);
+// all-zero references recover the historical absolute storage bit-for-bit.
+// `gauge_p_bias = gm1*gauge_e_ref + p_ref - gauge_p_ref` is precomputed on the
+// host in f64 so the affine constants of the STATE-form pressure closure
+// cancel exactly (zero for a self-consistent gauge, `p_ref` when gauge is off).
+const EOS_GAUGE_RHO_REF: TypedParamRef<Density> = TypedParamRef::new("eos_gauge_rho_ref");
+const EOS_GAUGE_P_REF: TypedParamRef<Pressure> = TypedParamRef::new("eos_gauge_p_ref");
+const EOS_GAUGE_P_BIAS: TypedParamRef<Pressure> = TypedParamRef::new("eos_gauge_p_bias");
 
 /// Declared squared sound speed of the runtime EOS:
 /// `c^2 = gamma * R * T + dp_drho`.
@@ -123,8 +133,11 @@ pub fn compressible_wave_speed_sq() -> TypedAlgExpr<MulDim<Velocity, Velocity>, 
 pub fn compressible_generalized_wave_speed_sq() -> TypedAlgExpr<DivDim<Pressure, Density>, Scalar> {
     let p_typed = TypedFieldRef::<Pressure, Scalar>::new("p");
     let rho_typed = TypedFieldRef::<Density, Scalar>::new("rho");
-    ((typed_alg::param(EOS_GAMMA) * typed_alg::field(p_typed)) / typed_alg::field(rho_typed))
-        .cast_to::<DivDim<Pressure, Density>>()
+    // Gauge storage: the acoustic speed is a property of the ABSOLUTE state.
+    ((typed_alg::param(EOS_GAMMA)
+        * (typed_alg::field(p_typed) + typed_alg::param(EOS_GAUGE_P_REF)))
+        / (typed_alg::field(rho_typed) + typed_alg::param(EOS_GAUGE_RHO_REF)))
+    .cast_to::<DivDim<Pressure, Density>>()
         + typed_alg::param(EOS_DP_DRHO)
 }
 
@@ -144,14 +157,22 @@ pub fn compressible_central_upwind_decl() -> crate::solver::model::flux_schemes:
     let rho_typed = TypedFieldRef::<Density, Scalar>::new("rho");
     let rho_u_typed = TypedFieldRef::<MomentumDensity, Vector2>::new("rho_u");
     let rho_e_typed = TypedFieldRef::<EnergyDensity, Scalar>::new("rho_e");
+    // STATE-form closure: yields the STORED (gauge) pressure from the STORED
+    // conserved state, in both conventions. The kinetic-energy division uses
+    // the ABSOLUTE density; the barotropic term groups the two reference
+    // constants first (exact constant-constant arithmetic) so a gauge-stored
+    // liquid density never round-trips through its large absolute value; and
+    // `gauge_p_bias` carries the host-cancelled affine tail (`p_ref` when the
+    // gauge is off, exactly zero when it is on).
     let kinetic_energy = (typed_alg::constant(0.5) * typed_alg::mag_sqr(rho_u_typed)
-        / typed_alg::field(rho_typed))
+        / (typed_alg::field(rho_typed) + typed_alg::param(EOS_GAUGE_RHO_REF)))
     .cast_to::<EnergyDensity>();
     let ideal_pressure = (typed_alg::param(EOS_GM1)
         * (typed_alg::field(rho_e_typed) - kinetic_energy))
         .cast_to::<Pressure>();
     let barotropic_pressure = (typed_alg::param(EOS_DP_DRHO)
-        * (typed_alg::field(rho_typed) - typed_alg::param(EOS_RHO_REF)))
+        * (typed_alg::field(rho_typed)
+            + (typed_alg::param(EOS_GAUGE_RHO_REF) - typed_alg::param(EOS_RHO_REF))))
     .cast_to::<Pressure>();
     crate::solver::model::flux_schemes::CentralUpwindDecl {
         density: "rho",
@@ -160,7 +181,7 @@ pub fn compressible_central_upwind_decl() -> crate::solver::model::flux_schemes:
         temperature: "T",
         velocity: "u",
         pressure_field: "p",
-        pressure: (ideal_pressure + barotropic_pressure + typed_alg::param(EOS_P_REF))
+        pressure: (ideal_pressure + barotropic_pressure + typed_alg::param(EOS_GAUGE_P_BIAS))
             .to_untyped(),
         wave_speed_sq: compressible_wave_speed_sq().to_untyped(),
         generalized_wave_speed_sq: compressible_generalized_wave_speed_sq().to_untyped(),
@@ -289,11 +310,16 @@ fn build_compressible_system_impl(
     // of each product (e.g. rho in `rho * u`) are frozen at the current state
     // (Picard linearization).
 
-    // Velocity recovery: rho * u = rho_u.
+    // Velocity recovery: rho_abs * u = rho_u, with the ABSOLUTE density
+    // reconstructed from the gauge-stored state (`rho + gauge_rho_ref`; the
+    // reference is zero for absolute storage). The lowering distributes the
+    // sum and merges both target-linear products into one summed coefficient.
     let u_recovery = typed_alg::equation(
         u_typed,
         typed_alg::field(rho_u_typed),
-        (typed_alg::field(rho_typed) * typed_alg::field(u_typed)).cast_to::<MomentumDensity>(),
+        ((typed_alg::field(rho_typed) + typed_alg::param(EOS_GAUGE_RHO_REF))
+            * typed_alg::field(u_typed))
+        .cast_to::<MomentumDensity>(),
     );
 
     // Linearized EOS: p = (gamma-1)*rho_e - (gamma-1)/2*|u|^2*rho
@@ -308,20 +334,24 @@ fn build_compressible_system_impl(
             - (typed_alg::constant(0.5)
                 * typed_alg::param(EOS_GM1)
                 * typed_alg::mag_sqr(u_typed)
-                * typed_alg::field(rho_typed))
+                * (typed_alg::field(rho_typed) + typed_alg::param(EOS_GAUGE_RHO_REF)))
             .cast_to::<Pressure>()
             + (typed_alg::param(EOS_DP_DRHO)
-                * (typed_alg::field(rho_typed) - typed_alg::param(EOS_RHO_REF)))
+                * (typed_alg::field(rho_typed)
+                    + (typed_alg::param(EOS_GAUGE_RHO_REF) - typed_alg::param(EOS_RHO_REF))))
             .cast_to::<Pressure>()
-            + typed_alg::param(EOS_P_REF),
+            + typed_alg::param(EOS_GAUGE_P_BIAS),
     );
 
-    // Temperature recovery: rho * R * T = p.
+    // Temperature recovery: rho_abs * R * T = p_abs (temperature stays an
+    // ABSOLUTE field; both sides reconstruct absolutes from the gauge state).
     let temperature_recovery = typed_alg::equation(
         t_typed,
-        (typed_alg::field(rho_typed) * typed_alg::param(EOS_R) * typed_alg::field(t_typed))
-            .cast_to::<Pressure>(),
-        typed_alg::field(p_typed),
+        ((typed_alg::field(rho_typed) + typed_alg::param(EOS_GAUGE_RHO_REF))
+            * typed_alg::param(EOS_R)
+            * typed_alg::field(t_typed))
+        .cast_to::<Pressure>(),
+        typed_alg::field(p_typed) + typed_alg::param(EOS_GAUGE_P_REF),
     );
 
     let mut system = EquationSystem::new();
@@ -544,14 +574,21 @@ fn compressible_model_impl_topo(
     // the interior pressure for an ideal gas, while a barotropic EOS preserves
     // the thermodynamically compatible conserved-energy value seeded by the
     // host EOS oracle.
+    // Gauge storage: BC tables hold STORED (gauge) values; thermodynamic
+    // reconstructions inside these expressions use the ABSOLUTE state
+    // (`+ eos_gauge_rho_ref` / `+ eos_gauge_p_ref`, zero when gauge is off).
+    let gauge_rho = || B::param(EOS_GAUGE_RHO_REF.to_untyped());
+    let gauge_p = || B::param(EOS_GAUGE_P_REF.to_untyped());
+    let inlet_rho_abs = || B::bc(fields.rho) + gauge_rho();
     let inlet_ke = || {
         B::lit(0.5)
-            * B::bc(fields.rho)
+            * inlet_rho_abs()
             * (B::bc_comp(fields.u, 0) * B::bc_comp(fields.u, 0)
                 + B::bc_comp(fields.u, 1) * B::bc_comp(fields.u, 1))
     };
     let inlet_p = p_owner();
-    let inlet_t = p_owner() / (B::bc(fields.rho).max(B::lit(1.0e-6)) * r_safe());
+    let inlet_t =
+        (p_owner() + gauge_p()) / (inlet_rho_abs().max(B::lit(1.0e-6)) * r_safe());
     let inlet_rho_e = gm1().select_gt(
         B::lit(0.0),
         p_owner() / gm1_safe() + inlet_ke(),
@@ -560,21 +597,25 @@ fn compressible_model_impl_topo(
         // bc_expr kernel's snapshot semantics instead of overwriting it with KE.
         B::bc(fields.rho_e),
     );
-    let inlet_rho_u = |component: u32| B::bc(fields.rho) * B::bc_comp(fields.u, component);
+    let inlet_rho_u = |component: u32| inlet_rho_abs() * B::bc_comp(fields.u, component);
 
-    // Outlet: extrapolate the non-pressure state from the interior.
-    let outlet_rho = || B::interior(fields.rho).max(B::lit(1.0e-6));
+    // Outlet: extrapolate the non-pressure state from the interior. The
+    // positivity floor applies to the ABSOLUTE density; the stored ghost value
+    // subtracts the gauge reference back out.
+    let outlet_rho_abs = || (B::interior(fields.rho) + gauge_rho()).max(B::lit(1.0e-6));
+    let outlet_rho = || outlet_rho_abs() - gauge_rho();
     let outlet_u = |component: u32| B::interior_comp(fields.u, component);
-    let outlet_ke =
-        || B::lit(0.5) * outlet_rho() * (outlet_u(0) * outlet_u(0) + outlet_u(1) * outlet_u(1));
+    let outlet_ke = || {
+        B::lit(0.5) * outlet_rho_abs() * (outlet_u(0) * outlet_u(0) + outlet_u(1) * outlet_u(1))
+    };
     let outlet_p = || B::bc(fields.p);
-    let outlet_t = outlet_p() / (outlet_rho() * r_safe());
+    let outlet_t = (outlet_p() + gauge_p()) / (outlet_rho_abs() * r_safe());
     let outlet_rho_e = gm1().select_gt(
         B::lit(0.0),
         outlet_p() / gm1_safe() + outlet_ke(),
         outlet_ke(),
     );
-    let outlet_rho_u = |component: u32| outlet_rho() * outlet_u(component);
+    let outlet_rho_u = |component: u32| outlet_rho_abs() * outlet_u(component);
 
     let mut boundaries = BoundarySpec::default();
     boundaries.set_field(
@@ -949,82 +990,160 @@ mod tests {
         let p_typed = TypedFieldRef::<Pressure, Scalar>::new("p");
         let t_typed = TypedFieldRef::<Temperature, Scalar>::new("T");
 
-        // Primitive velocity recovery: u = rho_u / rho
-        // Implemented as: (rho/dt) * u = (1/dt) * rho_u
-        let inv_dt_typed = TypedFieldRef::<InvTime, Scalar>::new("inv_dt");
-        let inv_dt_coeff = TypedCoeff::from_field(inv_dt_typed);
-        let rho_coeff = TypedCoeff::from_field(rho_typed);
-        let minus_one_coeff: TypedCoeff<Dimensionless> = TypedCoeff::constant(-1.0);
+        // Raw coefficient atoms mirroring the lowering rule (sign, then
+        // non-mag_sqr frozen factors in declaration order, then inv_dt, then
+        // mag_sqr; the target term wraps its sign around the whole product;
+        // multiple target-linear products merge into one summed coefficient).
+        use crate::solver::model::backend::ast::{Coefficient, Discretization, Term, TermOp};
+        use cfd2_ir::dimensions::InvTime as InvTimeDim;
+        let minus_one = || Coefficient::constant(-1.0);
+        let field = |name: &'static str, unit: cfd2_ir::units::UnitDim| {
+            Coefficient::Field(crate::solver::model::backend::ast::FieldRef::new(
+                name,
+                cfd2_ir::equation::FieldKind::Scalar,
+                unit,
+            ))
+        };
+        let inv_dt = || field("inv_dt", InvTimeDim::UNIT);
+        let rho_c = || field("rho", Density::UNIT);
+        let gauge_rho = || field("eos_gauge_rho_ref", Density::UNIT);
+        let gauge_p = || field("eos_gauge_p_ref", Pressure::UNIT);
+        let gauge_p_bias = || field("eos_gauge_p_bias", Pressure::UNIT);
+        let gm1 = || field("eos_gm1", Dimensionless::UNIT);
+        let dp_drho = || {
+            field(
+                "eos_dp_drho",
+                <cfd2_ir::dimensions::DivDim<Pressure, Density> as UnitDimension>::UNIT,
+            )
+        };
+        let rho_ref = || field("eos_rho_ref", Density::UNIT);
+        let r_gas = || {
+            field(
+                "eos_r",
+                <cfd2_ir::dimensions::DivDim<Pressure, MulDim<Density, Temperature>> as UnitDimension>::UNIT,
+            )
+        };
+        let half = || Coefficient::constant(0.5);
+        let u2 = || Coefficient::MagSqr(u_typed.to_untyped());
+        let prod = |a: Coefficient, b: Coefficient| Coefficient::Product(Box::new(a), Box::new(b));
+        let sum = |a: Coefficient, b: Coefficient| Coefficient::Sum(Box::new(a), Box::new(b));
+        // Velocity recovery: (rho + gauge_rho_ref) * u = rho_u.
+        // Both target products carry the RHS sign (-1) wrapped whole.
+        let mut u_eqn = Equation::new(u_typed.to_untyped());
+        u_eqn.add_term(Term::new(
+            TermOp::Source,
+            Discretization::Implicit,
+            u_typed.to_untyped(),
+            None,
+            Some(sum(
+                prod(minus_one(), prod(rho_c(), inv_dt())),
+                prod(minus_one(), prod(gauge_rho(), inv_dt())),
+            )),
+        ));
+        u_eqn.add_term(Term::new(
+            TermOp::Source,
+            Discretization::Implicit,
+            rho_u_typed.to_untyped(),
+            None,
+            Some(inv_dt()),
+        ));
 
-        let rho_over_dt = rho_coeff.clone().multiply(inv_dt_coeff.clone());
-        let minus_rho_over_dt = minus_one_coeff.clone().multiply(rho_over_dt);
+        // Pressure EOS (state form): p = gm1*rho_e - 0.5*gm1*|u|^2*(rho + G)
+        //   + dp_drho*(rho + (G - rho_ref)) + gauge_p_bias.
+        let mut p_eqn = Equation::new(p_typed.to_untyped());
+        // Target term first: +p.
+        p_eqn.add_term(Term::new(
+            TermOp::Source,
+            Discretization::Implicit,
+            p_typed.to_untyped(),
+            None,
+            Some(inv_dt()),
+        ));
+        // -gm1*rho_e (implicit in rho_e).
+        p_eqn.add_term(Term::new(
+            TermOp::Source,
+            Discretization::Implicit,
+            rho_e_typed.to_untyped(),
+            None,
+            Some(prod(prod(minus_one(), gm1()), inv_dt())),
+        ));
+        // +0.5*gm1*|u|^2*rho (implicit in rho; u frozen through mag_sqr).
+        p_eqn.add_term(Term::new(
+            TermOp::Source,
+            Discretization::Implicit,
+            rho_typed.to_untyped(),
+            None,
+            Some(prod(prod(prod(half(), gm1()), inv_dt()), u2())),
+        ));
+        // -dp_drho*rho (implicit in rho).
+        p_eqn.add_term(Term::new(
+            TermOp::Source,
+            Discretization::Implicit,
+            rho_typed.to_untyped(),
+            None,
+            Some(prod(prod(minus_one(), dp_drho()), inv_dt())),
+        ));
+        // Explicit (unknown-free) tail, declaration order:
+        // +0.5*gm1*|u|^2*gauge_rho_ref.
+        p_eqn.add_term(Term::new(
+            TermOp::Source,
+            Discretization::Explicit,
+            p_typed.to_untyped(),
+            None,
+            Some(prod(prod(prod(prod(half(), gm1()), gauge_rho()), inv_dt()), u2())),
+        ));
+        // -dp_drho*gauge_rho_ref.
+        p_eqn.add_term(Term::new(
+            TermOp::Source,
+            Discretization::Explicit,
+            p_typed.to_untyped(),
+            None,
+            Some(prod(prod(prod(minus_one(), dp_drho()), gauge_rho()), inv_dt())),
+        ));
+        // +dp_drho*rho_ref.
+        p_eqn.add_term(Term::new(
+            TermOp::Source,
+            Discretization::Explicit,
+            p_typed.to_untyped(),
+            None,
+            Some(prod(prod(dp_drho(), rho_ref()), inv_dt())),
+        ));
+        // -gauge_p_bias.
+        p_eqn.add_term(Term::new(
+            TermOp::Source,
+            Discretization::Explicit,
+            p_typed.to_untyped(),
+            None,
+            Some(prod(prod(minus_one(), gauge_p_bias()), inv_dt())),
+        ));
 
-        let u_source_1 = typed_fvm::source_coeff(minus_rho_over_dt, u_typed);
-        let u_source_2 = typed_fvm::source_coeff(inv_dt_coeff.clone(), rho_u_typed);
-
-        let u_eqn = (u_source_1.cast_to::<Force>() + u_source_2.cast_to::<Force>()).eqn(u_typed);
-
-        // Primitive pressure recovery (algebraic constraint)
-        let gm1_typed =
-            TypedCoeff::from_field(TypedFieldRef::<Dimensionless, Scalar>::new("eos_gm1"));
-        let dp_drho_typed = TypedCoeff::from_field(TypedFieldRef::<
-            cfd2_ir::dimensions::DivDim<Pressure, Density>,
-            Scalar,
-        >::new("eos_dp_drho"));
-        let p_ref_typed =
-            TypedCoeff::from_field(TypedFieldRef::<Pressure, Scalar>::new("eos_p_ref"));
-        let rho_ref_typed =
-            TypedCoeff::from_field(TypedFieldRef::<Density, Scalar>::new("eos_rho_ref"));
-        let half_coeff: TypedCoeff<Dimensionless> = TypedCoeff::constant(0.5);
-
-        let minus_gm1 = minus_one_coeff.clone().multiply(gm1_typed.clone());
-        let minus_gm1_over_dt = minus_gm1.multiply(inv_dt_coeff.clone());
-
-        let u2 = TypedCoeff::mag_sqr(u_typed);
-        let half_gm1_over_dt = half_coeff
-            .multiply(gm1_typed)
-            .multiply(inv_dt_coeff.clone());
-        let rho_coeff_term = half_gm1_over_dt.multiply(u2);
-
-        let dp_drho_rho_ref_over_dt = dp_drho_typed
-            .clone()
-            .multiply(rho_ref_typed)
-            .multiply(inv_dt_coeff.clone());
-        let minus_dp_drho = minus_one_coeff.clone().multiply(dp_drho_typed);
-        let minus_dp_drho_over_dt = minus_dp_drho.multiply(inv_dt_coeff.clone());
-
-        let minus_p_ref = minus_one_coeff.clone().multiply(p_ref_typed);
-        let minus_p_ref_over_dt = minus_p_ref.multiply(inv_dt_coeff.clone());
-
-        let p_source_1 = typed_fvm::source_coeff(inv_dt_coeff.clone(), p_typed);
-        let p_source_2 = typed_fvm::source_coeff(minus_gm1_over_dt, rho_e_typed);
-        let p_source_3 = typed_fvm::source_coeff(rho_coeff_term, rho_typed);
-        let p_source_4 = typed_fvm::source_coeff(minus_dp_drho_over_dt, rho_typed);
-        let p_source_5 = typed_fvc::source_coeff(dp_drho_rho_ref_over_dt, p_typed);
-        let p_source_6 = typed_fvc::source_coeff(minus_p_ref_over_dt, p_typed);
-
-        let p_eqn = (p_source_1.cast_to::<Power>()
-            + p_source_2.cast_to::<Power>()
-            + p_source_3.cast_to::<Power>()
-            + p_source_4.cast_to::<Power>()
-            + p_source_5.cast_to::<Power>()
-            + p_source_6.cast_to::<Power>())
-        .eqn(p_typed);
-
-        // Temperature recovery: T = p / (rho * R)
-        // Implemented as: (rho*R/dt) * T = (1/dt) * p
-        let r_typed = TypedCoeff::from_field(TypedFieldRef::<
-            cfd2_ir::dimensions::DivDim<Pressure, MulDim<Density, Temperature>>,
-            Scalar,
-        >::new("eos_r"));
-
-        let rho_r_over_dt = rho_coeff.multiply(r_typed).multiply(inv_dt_coeff.clone());
-        let minus_inv_dt = minus_one_coeff.multiply(inv_dt_coeff);
-
-        let t_source_1 = typed_fvm::source_coeff(rho_r_over_dt, t_typed);
-        let t_source_2 = typed_fvm::source_coeff(minus_inv_dt, p_typed);
-
-        let t_eqn = (t_source_1.cast_to::<Power>() + t_source_2.cast_to::<Power>()).eqn(t_typed);
+        // Temperature recovery: (rho + G) * R * T = p + gauge_p_ref.
+        let mut t_eqn = Equation::new(t_typed.to_untyped());
+        t_eqn.add_term(Term::new(
+            TermOp::Source,
+            Discretization::Implicit,
+            t_typed.to_untyped(),
+            None,
+            Some(sum(
+                prod(prod(rho_c(), r_gas()), inv_dt()),
+                prod(prod(gauge_rho(), r_gas()), inv_dt()),
+            )),
+        ));
+        t_eqn.add_term(Term::new(
+            TermOp::Source,
+            Discretization::Implicit,
+            p_typed.to_untyped(),
+            None,
+            Some(prod(minus_one(), inv_dt())),
+        ));
+        // -gauge_p_ref (explicit).
+        t_eqn.add_term(Term::new(
+            TermOp::Source,
+            Discretization::Explicit,
+            t_typed.to_untyped(),
+            None,
+            Some(prod(prod(minus_one(), gauge_p()), inv_dt())),
+        ));
 
         vec![u_eqn, p_eqn, t_eqn]
     }
@@ -1054,6 +1173,10 @@ mod tests {
             (EOS_DP_DRHO.name(), DivDim::<Pressure, Density>::UNIT),
             (EOS_P_REF.name(), Pressure::UNIT),
             (EOS_RHO_REF.name(), Density::UNIT),
+            (EOS_GAUGE_RHO_REF.name(), Density::UNIT),
+            (EOS_GAUGE_P_REF.name(), Pressure::UNIT),
+            ("eos_gauge_e_ref", Pressure::UNIT),
+            (EOS_GAUGE_P_BIAS.name(), Pressure::UNIT),
         ];
         for (name, unit) in declared {
             let spec = manifest

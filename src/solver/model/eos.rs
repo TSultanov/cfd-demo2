@@ -40,6 +40,29 @@ pub struct EosRuntimeParams {
     pub theta_ref: f32,
     /// Reference density for the centered barotropic pressure evaluation.
     pub rho_ref: f32,
+    /// GAUGE STORAGE references (all zero = absolute storage, the historical
+    /// semantics). When nonzero, the density-based compressible state fields
+    /// store deviations from a constant reference state:
+    /// `rho_state = rho_abs - gauge_rho_ref`,
+    /// `rho_e_state = rho_e_abs - gauge_e_ref`,
+    /// `p_state = p_abs - gauge_p_ref`
+    /// (`rho_u`, `T`, `u` remain absolute). This keeps sub-Pa acoustic
+    /// perturbations representable in f32 against a large absolute base state
+    /// (one f32 ULP of 105 kPa is ~0.0078 Pa). See
+    /// docs/compressible-explicit-acoustics.md.
+    pub gauge_rho_ref: f32,
+    /// Absolute pressure of the gauge reference state (see `gauge_rho_ref`).
+    pub gauge_p_ref: f32,
+    /// Absolute internal-energy density of the gauge reference state.
+    pub gauge_e_ref: f32,
+    /// Affine tail of the STATE-form pressure closure, computed in f64 so the
+    /// reference constants cancel exactly:
+    /// `gauge_p_bias = gm1*gauge_e_ref + p_ref - gauge_p_ref`
+    /// (`p_ref` here is the EOS affine reference). Equals `p_ref` when the
+    /// gauge is off and exactly zero for a self-consistent gauge, so
+    /// `p_state = gm1*(rho_e_state - ke) + dp_drho*(rho_state + (gauge_rho_ref
+    /// - rho_ref)) + gauge_p_bias` holds in BOTH conventions.
+    pub gauge_p_bias: f32,
 }
 
 impl EosSpec {
@@ -180,6 +203,10 @@ impl EosSpec {
                 p_ref: 0.0,
                 theta_ref: (gas_constant * temperature) as f32,
                 rho_ref: 0.0,
+                gauge_rho_ref: 0.0,
+                gauge_p_ref: 0.0,
+                gauge_e_ref: 0.0,
+                gauge_p_bias: 0.0,
             },
             EosSpec::LinearCompressibility {
                 bulk_modulus,
@@ -196,6 +223,12 @@ impl EosSpec {
                     p_ref: p_ref as f32,
                     theta_ref: 0.0,
                     rho_ref: rho_ref as f32,
+                    gauge_rho_ref: 0.0,
+                    gauge_p_ref: 0.0,
+                    gauge_e_ref: 0.0,
+                    // Gauge off: the state-form pressure closure reduces to the
+                    // historical absolute form only with bias == p_ref.
+                    gauge_p_bias: p_ref as f32,
                 }
             }
             EosSpec::Constant => EosRuntimeParams {
@@ -206,8 +239,52 @@ impl EosSpec {
                 p_ref: 0.0,
                 theta_ref: 0.0,
                 rho_ref: 0.0,
+                gauge_rho_ref: 0.0,
+                gauge_p_ref: 0.0,
+                gauge_e_ref: 0.0,
+                gauge_p_bias: 0.0,
             },
         }
+    }
+
+    /// Absolute internal-energy density of the quiescent reference state at
+    /// density `rho0`: `p(rho0)/(gamma-1)` for an ideal gas, the barotropic
+    /// internal-energy oracle (zero-gauged at the EOS reference) for a linear
+    /// EOS, and `0` for the constant EOS.
+    pub fn internal_energy_density(&self, rho0: f64) -> f64 {
+        match *self {
+            EosSpec::IdealGas { gamma, .. } => {
+                let gm1 = (gamma - 1.0).max(1.0e-12);
+                self.pressure_for_density(rho0) / gm1
+            }
+            EosSpec::LinearCompressibility { .. } => self
+                .barotropic_internal_energy_density(rho0, 0.0)
+                .unwrap_or(0.0),
+            EosSpec::Constant => 0.0,
+        }
+    }
+
+    /// [`Self::runtime_params`] with GAUGE STORAGE active around the quiescent
+    /// reference state at density `rho0` (see `EosRuntimeParams::gauge_rho_ref`).
+    ///
+    /// All reference values and the pressure-closure bias are computed in f64
+    /// so the affine constants of the state-form closure cancel exactly:
+    /// for an ideal gas `gauge_p_bias = gm1*e_ref - p_ref_gauge = 0` and for a
+    /// linear EOS at its own reference `gauge_p_bias = p_ref - p_ref_gauge = 0`.
+    pub fn runtime_params_gauged(&self, rho0: f64) -> EosRuntimeParams {
+        let mut params = self.runtime_params();
+        if matches!(self, EosSpec::Constant) {
+            return params;
+        }
+        let gauge_p = self.pressure_for_density(rho0);
+        let gauge_e = self.internal_energy_density(rho0);
+        params.gauge_rho_ref = rho0 as f32;
+        params.gauge_p_ref = gauge_p as f32;
+        params.gauge_e_ref = gauge_e as f32;
+        params.gauge_p_bias = (f64::from(params.gm1) * gauge_e
+            + f64::from(params.p_ref)
+            - gauge_p) as f32;
+        params
     }
 }
 

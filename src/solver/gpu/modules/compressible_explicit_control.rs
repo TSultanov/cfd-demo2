@@ -173,6 +173,12 @@ fn ideal_gas_constants_supported(eos: &GpuConstants) -> bool {
         && eos.eos_dp_drho == 0.0
         && eos.eos_p_ref == 0.0
         && eos.eos_rho_ref == 0.0
+        // Gauge-storage references are certified: the audit kernel adds them
+        // back before every thermodynamic-domain check.
+        && eos.eos_gauge_rho_ref.is_finite()
+        && eos.eos_gauge_rho_ref >= 0.0
+        && eos.eos_gauge_e_ref.is_finite()
+        && eos.eos_gauge_e_ref >= 0.0
 }
 
 fn observe_eos_support(
@@ -1256,19 +1262,26 @@ fn audit_cell(cell: u32, accepted: bool) {
     let p_ref = bitcast<f32>(constants_words[18]);
     let theta_ref = bitcast<f32>(constants_words[19]);
     let rho_ref = bitcast<f32>(constants_words[20]);
+    // Gauge-storage references (words 21/23): the audit reconstructs the
+    // ABSOLUTE thermodynamic state from the gauge-stored deviations. Zero
+    // references are the historical absolute storage.
+    let gauge_rho_ref = bitcast<f32>(constants_words[21]);
+    let gauge_e_ref = bitcast<f32>(constants_words[23]);
     if !finite(gamma) || !(gamma > 1.0)
         || !finite(gm1) || !(gm1 > 0.0)
         || !finite(gas_r) || !(gas_r > 0.0)
         || !finite(theta_ref) || !(theta_ref > 0.0)
-        || dp_drho != 0.0 || p_ref != 0.0 || rho_ref != 0.0 {
+        || dp_drho != 0.0 || p_ref != 0.0 || rho_ref != 0.0
+        || !finite(gauge_rho_ref) || !(gauge_rho_ref >= 0.0)
+        || !finite(gauge_e_ref) || !(gauge_e_ref >= 0.0) {
         atomicAdd(&control.invalid_count, 1u);
         return;
     }
 
-    let rho = state_value(cell, params.rho_off, accepted);
+    let rho = state_value(cell, params.rho_off, accepted) + gauge_rho_ref;
     let mx = state_value(cell, params.rho_u_off, accepted);
     let my = state_value(cell, params.rho_u_off + 1u, accepted);
-    let rho_e = state_value(cell, params.rho_e_off, accepted);
+    let rho_e = state_value(cell, params.rho_e_off, accepted) + gauge_e_ref;
     if !(rho > 0.0) {
         atomicAdd(&control.invalid_count, 1u);
         return;
@@ -1564,7 +1577,7 @@ mod tests {
 
     #[test]
     fn raw_eos_constant_word_indices_are_pinned() {
-        assert_eq!(std::mem::size_of::<GpuConstants>(), 24 * 4);
+        assert_eq!(std::mem::size_of::<GpuConstants>(), 28 * 4);
         assert_eq!(std::mem::offset_of!(GpuConstants, eos_gamma), 14 * 4);
         assert_eq!(std::mem::offset_of!(GpuConstants, eos_gm1), 15 * 4);
         assert_eq!(std::mem::offset_of!(GpuConstants, eos_r), 16 * 4);
@@ -1572,6 +1585,16 @@ mod tests {
         assert_eq!(std::mem::offset_of!(GpuConstants, eos_p_ref), 18 * 4);
         assert_eq!(std::mem::offset_of!(GpuConstants, eos_theta_ref), 19 * 4);
         assert_eq!(std::mem::offset_of!(GpuConstants, eos_rho_ref), 20 * 4);
+        assert_eq!(
+            std::mem::offset_of!(GpuConstants, eos_gauge_rho_ref),
+            21 * 4
+        );
+        assert_eq!(std::mem::offset_of!(GpuConstants, eos_gauge_p_ref), 22 * 4);
+        assert_eq!(std::mem::offset_of!(GpuConstants, eos_gauge_e_ref), 23 * 4);
+        assert_eq!(
+            std::mem::offset_of!(GpuConstants, eos_gauge_p_bias),
+            24 * 4
+        );
     }
 
     #[test]

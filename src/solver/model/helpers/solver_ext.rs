@@ -375,8 +375,9 @@ impl SolverRuntimeParamsExt for GpuUnifiedSolver {
         self.set_named_param("eos.gm1", PlanParamValue::F32(params.gm1))?;
         self.set_named_param("eos.r", PlanParamValue::F32(params.r))?;
         self.set_named_param("eos.dp_drho", PlanParamValue::F32(params.dp_drho))?;
-        self.set_named_param("eos.p_offset", PlanParamValue::F32(params.p_offset))?;
+        self.set_named_param("eos.p_ref", PlanParamValue::F32(params.p_ref))?;
         self.set_named_param("eos.theta_ref", PlanParamValue::F32(params.theta_ref))?;
+        self.set_named_param("eos.rho_ref", PlanParamValue::F32(params.rho_ref))?;
         Ok(())
     }
 }
@@ -429,7 +430,7 @@ impl SolverCompressibleInletExt for GpuUnifiedSolver {
         let p0 = if eos_params.gm1 > 0.0 {
             rho * eos_params.theta_ref
         } else {
-            eos_params.dp_drho * rho - eos_params.p_offset
+            eos_params.dp_drho * (rho - eos_params.rho_ref) + eos_params.p_ref
         };
 
         let u = [u_x, 0.0f32];
@@ -457,6 +458,36 @@ struct SeededInletValues {
     rho_u: [f32; 2],
     rho_e: f32,
     t: Option<f32>,
+}
+
+/// Density-linear energy gauge used by compressible host seeding.
+///
+/// A `C*rho` addition is exactly transported by continuity and only shifts
+/// specific energy by the constant `C`. Zero pins the linear-EOS internal
+/// energy to zero at its reference density without changing the ideal-gas
+/// branch's existing f32 arithmetic.
+const BAROTROPIC_ENERGY_GAUGE: f64 = 0.0;
+
+fn seeded_total_energy_density(
+    eos: &EosSpec,
+    rho: f32,
+    u: [f32; 2],
+    p: f32,
+) -> f32 {
+    let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
+    if let Some(internal) = eos.barotropic_internal_energy_density(
+        f64::from(rho),
+        BAROTROPIC_ENERGY_GAUGE,
+    ) {
+        return internal as f32 + ke;
+    }
+
+    let gm1 = eos.runtime_params().gm1;
+    if gm1 > 0.0 {
+        p / gm1 + ke
+    } else {
+        ke
+    }
 }
 
 /// Evaluate the model's declared inlet expressions for `rho_u`, `rho_e`,
@@ -498,8 +529,9 @@ fn evaluate_inlet_declarations(
             "eos_gm1" => eos.gm1,
             "eos_r" => eos.r,
             "eos_dp_drho" => eos.dp_drho,
-            "eos_p_offset" => eos.p_offset,
+            "eos_p_ref" => eos.p_ref,
             "eos_theta_ref" => eos.theta_ref,
+            "eos_rho_ref" => eos.rho_ref,
             other => return Err(format!("inlet seeding: unknown param '{other}'")),
         })
     };
@@ -521,12 +553,8 @@ fn evaluate_inlet_declarations(
     };
 
     // Closed-form fallback for undeclared entries.
-    let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
-    let legacy_rho_e = if eos_params.gm1 > 0.0 {
-        p0 / eos_params.gm1 + ke
-    } else {
-        ke
-    };
+    let eos_spec = model.eos();
+    let legacy_rho_e = seeded_total_energy_density(&eos_spec, rho, u, p0);
     let legacy_t = if eos_params.r.abs() > 1e-12 {
         Some(p0 / (rho.max(1e-12) * eos_params.r))
     } else {
@@ -537,7 +565,22 @@ fn evaluate_inlet_declarations(
         declared(FIELD_RHO_U, 0)?.unwrap_or(rho * u[0]),
         declared(FIELD_RHO_U, 1)?.unwrap_or(rho * u[1]),
     ];
-    let rho_e = declared(FIELD_RHO_E, 0)?.unwrap_or(legacy_rho_e);
+    let declared_rho_e = if matches!(eos_spec, EosSpec::LinearCompressibility { .. }) {
+        // The barotropic declaration deliberately preserves bc(rho_e); that
+        // snapshot value is the host oracle result being computed here.
+        None
+    } else {
+        declared(FIELD_RHO_E, 0)?
+    };
+    // The generic boundary declaration historically used kinetic energy for
+    // gm1=0. Override that host seed for a linear EOS with the EOS-owned
+    // barotropic energy; retain the declared expression bit-for-bit for ideal
+    // gas and hand-rolled non-barotropic models.
+    let rho_e = if matches!(eos_spec, EosSpec::LinearCompressibility { .. }) {
+        legacy_rho_e
+    } else {
+        declared_rho_e.unwrap_or(legacy_rho_e)
+    };
     let t = match declared(FIELD_T, 0)? {
         Some(v) => Some(v),
         None => legacy_t,
@@ -546,7 +589,7 @@ fn evaluate_inlet_declarations(
     Ok(SeededInletValues { rho_u, rho_e, t })
 }
 
-/// Initial-condition seeding for compressible ideal-gas models.
+/// Initial-condition seeding for density-based compressible models.
 ///
 /// These methods write conserved-variable state fields (`rho`, `rho_u`, `rho_e`)
 /// and derived fields (`p`, `T`, `u`) from primitive inputs.  Existing state data
@@ -562,7 +605,6 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
     fn set_uniform_state(&mut self, rho: f32, u: [f32; 2], p: f32) {
         let eos = self.model().eos();
         let eos_params = eos.runtime_params();
-        let gm1 = eos_params.gm1;
         let r_gas = eos_params.r;
 
         let stride = self.model().state_layout.stride() as usize;
@@ -572,8 +614,7 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
         // only the named fields, preserving mu/gradients like the GPU path.
         if self.is_cpu() {
             let n = self.num_cells() as usize;
-            let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
-            let rho_e = if gm1 > 0.0 { p / gm1 + ke } else { ke };
+            let rho_e = seeded_total_energy_density(&eos, rho, u, p);
             let t = if r_gas > 0.0 { p / (rho.max(1e-12) * r_gas) } else { 0.0 };
             let _ = self.set_field_scalar(FIELD_RHO, &vec![rho as f64; n]);
             let _ = self
@@ -595,8 +636,7 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
             return;
         };
 
-        let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
-        let rho_e = if gm1 > 0.0 { p / gm1 + ke } else { ke };
+        let rho_e = seeded_total_energy_density(&eos, rho, u, p);
 
         // Preserve unrelated state fields (e.g. mu, gradients) when seeding initial conditions.
         // Tests and callers often set runtime params (like viscosity) before initializing state.
@@ -638,7 +678,6 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
 
         let eos = self.model().eos();
         let eos_params = eos.runtime_params();
-        let gm1 = eos_params.gm1;
         let r_gas = eos_params.r;
 
         let stride = self.model().state_layout.stride() as usize;
@@ -653,8 +692,7 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
                 .collect();
             let rho_e: Vec<f64> = (0..n)
                 .map(|i| {
-                    let ke = 0.5 * rho[i] * (u[i][0] * u[i][0] + u[i][1] * u[i][1]);
-                    (if gm1 > 0.0 { p[i] / gm1 + ke } else { ke }) as f64
+                    seeded_total_energy_density(&eos, rho[i], u[i], p[i]) as f64
                 })
                 .collect();
             let p_f: Vec<f64> = p.iter().map(|&v| v as f64).collect();
@@ -691,8 +729,7 @@ impl SolverCompressibleIdealGasExt for GpuUnifiedSolver {
             let rho_val = rho[cell];
             let u_val = u[cell];
             let p_val = p[cell];
-            let ke = 0.5 * rho_val * (u_val[0] * u_val[0] + u_val[1] * u_val[1]);
-            let rho_e = if gm1 > 0.0 { p_val / gm1 + ke } else { ke };
+            let rho_e = seeded_total_energy_density(&eos, rho_val, u_val, p_val);
 
             state[base + offsets.rho] = rho_val;
             state[base + offsets.rho_u_x] = rho_val * u_val[0];
@@ -782,8 +819,9 @@ impl SolverIncompressibleControlsExt for GpuUnifiedSolver {
 mod tests {
     use super::*;
 
-    /// The declared inlet expressions must reproduce the closed-form seeding
-    /// math bit-for-bit (f32 evaluation matches the GPU kernel arithmetic).
+    /// Ideal-gas inlet energy remains bit-for-bit identical to the declared
+    /// expression, while linear-EOS host seeding uses the thermodynamic
+    /// barotropic energy rather than the historical kinetic-only fallback.
     #[test]
     fn inlet_seeding_matches_declared_expressions() {
         // Physically sensible prescribed states per EOS (the declared
@@ -816,23 +854,151 @@ mod tests {
             let p0 = if params.gm1 > 0.0 {
                 rho * params.theta_ref
             } else {
-                params.dp_drho * rho - params.p_offset
+                params.dp_drho * (rho - params.rho_ref) + params.p_ref
             };
 
             let seeded =
                 evaluate_inlet_declarations(&model, rho, u, p0, &params).expect("seeding");
 
             let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
-            let expected_rho_e = if params.gm1 > 0.0 {
-                p0 / params.gm1 + ke
-            } else {
-                ke
+            let expected_rho_e = match eos {
+                EosSpec::IdealGas { .. } => p0 / params.gm1 + ke,
+                EosSpec::LinearCompressibility { .. } => {
+                    eos.barotropic_internal_energy_density(
+                        f64::from(rho),
+                        BAROTROPIC_ENERGY_GAUGE,
+                    )
+                    .expect("linear EOS energy") as f32
+                        + ke
+                }
+                EosSpec::Constant => ke,
             };
             let expected_t = p0 / (rho.max(1e-12) * params.r);
 
             assert_eq!(seeded.rho_u, [rho * u[0], rho * u[1]], "{eos:?}");
             assert_eq!(seeded.rho_e, expected_rho_e, "{eos:?}");
+            if matches!(eos, EosSpec::LinearCompressibility { .. }) {
+                assert_ne!(
+                    seeded.rho_e.to_bits(),
+                    ke.to_bits(),
+                    "off-reference linear-EOS energy regressed to kinetic-only seeding"
+                );
+            }
             assert_eq!(seeded.t, Some(expected_t), "{eos:?}");
         }
+    }
+
+    #[test]
+    fn ideal_seeded_energy_keeps_legacy_f32_operation_order() {
+        let eos = EosSpec::IdealGas {
+            gamma: 1.4,
+            gas_constant: 287.0,
+            temperature: 300.0,
+        };
+        let params = eos.runtime_params();
+        let rho = 1.2345_f32;
+        let u = [31.25_f32, -2.5];
+        let p = rho * params.theta_ref;
+        let ke = 0.5 * rho * (u[0] * u[0] + u[1] * u[1]);
+        let legacy = p / params.gm1 + ke;
+        assert_eq!(
+            seeded_total_energy_density(&eos, rho, u, p).to_bits(),
+            legacy.to_bits()
+        );
+    }
+
+    #[test]
+    fn inlet_energy_boundary_preserves_barotropic_seed_and_ideal_numeric_branch() {
+        use crate::solver::model::backend::boundary::{
+            eval_boundary_expr_f32, BoundaryExpr,
+        };
+
+        let evaluate = |eos: EosSpec, prescribed_rho_e: f32| {
+            let model = crate::solver::model::compressible_model_with_eos(eos).expect("model");
+            let expression = model
+                .boundaries
+                .field(FIELD_RHO_E)
+                .and_then(|spec| spec.by_boundary.get(&GpuBoundaryType::Inlet))
+                .and_then(|conditions| conditions.first())
+                .and_then(|condition| condition.expr_value())
+                .expect("declared inlet rho_e expression");
+            let mut preserves_rho_e = false;
+            expression.visit(&mut |node| {
+                if matches!(
+                    node,
+                    BoundaryExpr::BcValue { field, component: 0 }
+                        if field.name() == FIELD_RHO_E
+                ) {
+                    preserves_rho_e = true;
+                }
+            });
+            assert!(
+                preserves_rho_e,
+                "inlet expression lost the prescribed barotropic energy branch"
+            );
+
+            let rho = 1000.5_f32;
+            let velocity = [2.0_f32, -0.25];
+            let interior_pressure = 125_000.0_f32;
+            let params = eos.runtime_params();
+            let interior = |field: &crate::solver::model::backend::ast::FieldRef,
+                            _component: u32| {
+                if field.name() == FIELD_P {
+                    Ok(interior_pressure)
+                } else {
+                    Err(format!("unexpected interior field '{}'", field.name()))
+                }
+            };
+            let bc = |field: &crate::solver::model::backend::ast::FieldRef,
+                      component: u32| {
+                match (field.name(), component) {
+                    (FIELD_RHO, 0) => Ok(rho),
+                    (FIELD_U_LOWER, 0 | 1) => Ok(velocity[component as usize]),
+                    (FIELD_RHO_E, 0) => Ok(prescribed_rho_e),
+                    other => Err(format!("unexpected boundary field {other:?}")),
+                }
+            };
+            let param = |parameter: &crate::solver::model::backend::algebraic::ParamRef| {
+                Ok(match parameter.name() {
+                    "eos_gamma" => params.gamma,
+                    "eos_gm1" => params.gm1,
+                    "eos_r" => params.r,
+                    "eos_dp_drho" => params.dp_drho,
+                    "eos_p_ref" => params.p_ref,
+                    "eos_theta_ref" => params.theta_ref,
+                    "eos_rho_ref" => params.rho_ref,
+                    other => return Err(format!("unexpected EOS param '{other}'")),
+                })
+            };
+            (
+                eval_boundary_expr_f32(expression, &interior, &bc, &param)
+                    .expect("evaluate inlet energy"),
+                rho,
+                velocity,
+                interior_pressure,
+                params,
+            )
+        };
+
+        let ideal = EosSpec::IdealGas {
+            gamma: 1.4,
+            gas_constant: 287.0,
+            temperature: 300.0,
+        };
+        let (ideal_value, rho, velocity, pressure, ideal_params) = evaluate(ideal, -9_999.0);
+        let ideal_ke = 0.5
+            * rho
+            * (velocity[0] * velocity[0] + velocity[1] * velocity[1]);
+        let ideal_expected = pressure / ideal_params.gm1.max(1.0e-6) + ideal_ke;
+        assert_eq!(ideal_value.to_bits(), ideal_expected.to_bits());
+
+        let linear = EosSpec::LinearCompressibility {
+            bulk_modulus: 2.2e9,
+            rho_ref: 1000.0,
+            p_ref: 1.0e5,
+        };
+        let prescribed = 12_345.25_f32;
+        let (linear_value, ..) = evaluate(linear, prescribed);
+        assert_eq!(linear_value.to_bits(), prescribed.to_bits());
     }
 }

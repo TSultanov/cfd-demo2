@@ -32,8 +32,9 @@ struct Constants {
     eos_gm1: f32,
     eos_r: f32,
     eos_dp_drho: f32,
-    eos_p_offset: f32,
+    eos_p_ref: f32,
     eos_theta_ref: f32,
+    eos_rho_ref: f32,
 }
 
 

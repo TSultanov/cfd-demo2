@@ -37,8 +37,8 @@ pub fn eos_uniform_port_manifest() -> ModulePortManifest {
                 unit: dp_drho_unit,
             },
             ParamSpec {
-                key: "eos.p_offset",
-                wgsl_field: "eos_p_offset",
+                key: "eos.p_ref",
+                wgsl_field: "eos_p_ref",
                 wgsl_type: "f32",
                 unit: Pressure::UNIT,
             },
@@ -47,6 +47,12 @@ pub fn eos_uniform_port_manifest() -> ModulePortManifest {
                 wgsl_field: "eos_theta_ref",
                 wgsl_type: "f32",
                 unit: dp_drho_unit, // theta = P/rho has units L²/T² (specific energy)
+            },
+            ParamSpec {
+                key: "eos.rho_ref",
+                wgsl_field: "eos_rho_ref",
+                wgsl_type: "f32",
+                unit: Density::UNIT,
             },
         ],
         fields: vec![],

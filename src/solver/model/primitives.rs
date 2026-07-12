@@ -126,7 +126,8 @@ impl PrimitiveDerivations {
         let constants = Expr::ident("constants");
         let gm1 = constants.clone().field("eos_gm1");
         let dp_drho = constants.clone().field("eos_dp_drho");
-        let p_offset = constants.clone().field("eos_p_offset");
+        let p_ref = constants.clone().field("eos_p_ref");
+        let rho_ref = constants.clone().field("eos_rho_ref");
         let gas_r = Expr::call_named(
             "max",
             vec![constants.field("eos_r"), Expr::lit_f32(1.0e-12)],
@@ -141,8 +142,8 @@ impl PrimitiveDerivations {
         derivations.insert(
             "p".into(),
             gm1 * (Expr::ident("rho_e") - kinetic)
-                + dp_drho * Expr::ident("rho")
-                + p_offset,
+                + dp_drho * (Expr::ident("rho") - rho_ref)
+                + p_ref,
         );
         derivations.insert(
             "T".into(),
@@ -366,6 +367,57 @@ mod tests {
             },
             other => panic!("expected Binary Div, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn runtime_pressure_keeps_reference_centered_product_grouped() {
+        fn is_ident(expr: &Expr, wanted: &str) -> bool {
+            matches!(expr.node(), ExprNode::Ident(name) if name == wanted)
+        }
+
+        fn is_constant_field(expr: &Expr, wanted: &str) -> bool {
+            matches!(
+                expr.node(),
+                ExprNode::Field { base, field }
+                    if field == wanted && is_ident(base, "constants")
+            )
+        }
+
+        fn contains_centered_product(expr: &Expr) -> bool {
+            match expr.node() {
+                ExprNode::Binary { left, op, right } => {
+                    let centered = *op == cfd2_ir::ast::BinaryOp::Mul
+                        && is_constant_field(left, "eos_dp_drho")
+                        && matches!(
+                            right.node(),
+                            ExprNode::Binary {
+                                left: rho,
+                                op: cfd2_ir::ast::BinaryOp::Sub,
+                                right: rho_ref,
+                            } if is_ident(rho, "rho")
+                                && is_constant_field(rho_ref, "eos_rho_ref")
+                        );
+                    centered || contains_centered_product(left) || contains_centered_product(right)
+                }
+                ExprNode::Unary { expr, .. } => contains_centered_product(expr),
+                ExprNode::Call { callee, args } => {
+                    contains_centered_product(callee)
+                        || args.iter().any(contains_centered_product)
+                }
+                ExprNode::Field { base, .. } => contains_centered_product(base),
+                ExprNode::Index { base, index } => {
+                    contains_centered_product(base) || contains_centered_product(index)
+                }
+                ExprNode::Literal(_) | ExprNode::Ident(_) => false,
+            }
+        }
+
+        let primitives = PrimitiveDerivations::compressible_runtime_eos();
+        let pressure = primitives.get("p").expect("runtime pressure primitive");
+        assert!(
+            contains_centered_product(pressure),
+            "primitive recovery expanded dp_drho*(rho-rho_ref) and reintroduced f32 cancellation"
+        );
     }
 
     #[test]

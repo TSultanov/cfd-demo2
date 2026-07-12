@@ -317,8 +317,9 @@ impl SolverRecipe {
             eos_gm1: eos_params.gm1,
             eos_r: eos_params.r,
             eos_dp_drho: eos_params.dp_drho,
-            eos_p_offset: eos_params.p_offset,
+            eos_p_ref: eos_params.p_ref,
             eos_theta_ref: eos_params.theta_ref,
+            eos_rho_ref: eos_params.rho_ref,
             scheme: advection_scheme.gpu_id(),
             time_scheme: time_scheme as u32,
             ..Default::default()
@@ -403,9 +404,19 @@ impl SolverRecipe {
         }
 
         let flux = if binds_fluxes {
-            let stride = model.system.unknowns_per_cell();
+            let discrete = cfd2_codegen::solver::codegen::lower_system_unchecked(
+                &model.system,
+                &SchemeRegistry::new(advection_scheme),
+            );
+            let stride = cfd2_codegen::solver::codegen::explicit_liveness::ExplicitFaceChannelLiveness::from_discrete_system(
+                &discrete,
+            )
+            .storage_stride();
             if stride == 0 {
-                return Err("model kernels bind fluxes but model has 0 unknowns per cell".into());
+                return Err(
+                    "model kernels bind fluxes but no equation consumes a face-flux channel"
+                        .into(),
+                );
             }
             Some(FluxSpec { stride })
         } else {
@@ -800,6 +811,31 @@ mod tests {
             SteppingMode::Explicit,
         )
         .expect("explicit recipe");
+
+        assert_eq!(
+            recipe.flux,
+            Some(FluxSpec { stride: 4 }),
+            "recipe allocation must use the same compact face stride as producer and residual"
+        );
+
+        for stepping in [
+            SteppingMode::Implicit { outer_iters: 2 },
+            SteppingMode::Coupled,
+        ] {
+            let implicit_recipe = SolverRecipe::from_model(
+                &model,
+                Scheme::Upwind,
+                TimeScheme::Euler,
+                PreconditionerType::Jacobi,
+                stepping,
+            )
+            .expect("implicit/coupled recipe");
+            assert_eq!(
+                implicit_recipe.flux,
+                Some(FluxSpec { stride: 4 }),
+                "all stepping modes must allocate the producer/consumer compact stride"
+            );
+        }
 
         for name in ["rk_base", "rk_accum"] {
             let workspace = recipe
@@ -1397,8 +1433,9 @@ mod tests {
         assert!((recipe.initial_constants.eos_gm1 - eos_params.gm1).abs() < 1e-6);
         assert!((recipe.initial_constants.eos_r - eos_params.r).abs() < 1e-6);
         assert!((recipe.initial_constants.eos_dp_drho - eos_params.dp_drho).abs() < 1e-6);
-        assert!((recipe.initial_constants.eos_p_offset - eos_params.p_offset).abs() < 1e-6);
+        assert!((recipe.initial_constants.eos_p_ref - eos_params.p_ref).abs() < 1e-6);
         assert!((recipe.initial_constants.eos_theta_ref - eos_params.theta_ref).abs() < 1e-6);
+        assert!((recipe.initial_constants.eos_rho_ref - eos_params.rho_ref).abs() < 1e-6);
         assert_eq!(recipe.initial_constants.scheme, Scheme::QUICK.gpu_id());
         assert_eq!(
             recipe.initial_constants.time_scheme,
@@ -1429,6 +1466,10 @@ mod tests {
         assert!(
             recipe.port_registry.lookup_param("eos.theta_ref").is_some(),
             "eos.theta_ref should be registered in port registry"
+        );
+        assert!(
+            recipe.port_registry.lookup_param("eos.rho_ref").is_some(),
+            "eos.rho_ref should be registered in port registry"
         );
 
         // Verify these are actual PortIds (not just Some(()))

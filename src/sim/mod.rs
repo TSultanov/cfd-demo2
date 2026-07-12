@@ -20,6 +20,8 @@ mod params;
 
 #[cfg(feature = "ui")]
 pub(crate) use driver::{explicit_allmach_inlet_ramp_time, explicit_pressure_gradients};
+#[cfg(test)]
+pub(crate) use driver::{explicit_cell_metrics, sample_allmach_explicit_state};
 pub use driver::{DriverBuild, SolverDriver};
 pub use moving_mesh_driver::{
     BoundaryMotionSpec, MeshMotionSpec, MovingMeshDriver, MovingMeshStats, OscAxis, RegenBackend,

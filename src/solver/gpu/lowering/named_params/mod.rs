@@ -91,6 +91,10 @@ mod tests {
             params.contains_key("eos.theta_ref"),
             "eos.theta_ref should be discoverable via port_manifest"
         );
+        assert!(
+            params.contains_key("eos.rho_ref"),
+            "eos.rho_ref should be discoverable via port_manifest"
+        );
 
         // low_mach params should still work (they remain in named_params)
         assert!(

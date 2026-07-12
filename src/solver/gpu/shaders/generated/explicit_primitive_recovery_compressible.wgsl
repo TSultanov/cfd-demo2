@@ -20,8 +20,9 @@ struct Constants {
     eos_gm1: f32,
     eos_r: f32,
     eos_dp_drho: f32,
-    eos_p_offset: f32,
+    eos_p_ref: f32,
     eos_theta_ref: f32,
+    eos_rho_ref: f32,
 }
 
 
@@ -36,7 +37,7 @@ struct Constants {
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let idx = global_id.y * constants.stride_x + global_id.x;
     if (idx >= arrayLength(&cell_vols)) { return; }
-    state[idx * 22u + 8u] = constants.eos_gm1 * (state[idx * 22u + 7u] - 0.5 * (state[idx * 22u + 1u] * state[idx * 22u + 1u] + state[idx * 22u + 2u] * state[idx * 22u + 2u]) / max(state[idx * 22u + 0u], 0.00000001)) + constants.eos_dp_drho * state[idx * 22u + 0u] + constants.eos_p_offset;
+    state[idx * 22u + 8u] = constants.eos_gm1 * (state[idx * 22u + 7u] - 0.5 * (state[idx * 22u + 1u] * state[idx * 22u + 1u] + state[idx * 22u + 2u] * state[idx * 22u + 2u]) / max(state[idx * 22u + 0u], 0.00000001)) + constants.eos_dp_drho * (state[idx * 22u + 0u] - constants.eos_rho_ref) + constants.eos_p_ref;
     state[idx * 22u + 9u] = state[idx * 22u + 8u] / (max(state[idx * 22u + 0u], 0.00000001) * max(constants.eos_r, 0.000000000001));
     state[idx * 22u + 10u] = state[idx * 22u + 1u] / max(state[idx * 22u + 0u], 0.00000001);
     state[idx * 22u + 11u] = state[idx * 22u + 2u] / max(state[idx * 22u + 0u], 0.00000001);

@@ -1,6 +1,13 @@
 use crate::solver::gpu::execution_plan::{run_module_graph, GraphDetail, GraphExecMode};
 use crate::solver::gpu::linear_solver::fgmres::FgmresWorkspace;
 use crate::solver::gpu::modules::coupled_schur::CoupledPressureSolveKind;
+use crate::solver::gpu::modules::compressible_explicit_control::{
+    CompressibleExplicitControl, CompressibleStatusStagingLease,
+};
+use crate::solver::gpu::modules::explicit_control::{
+    ExplicitAdaptiveControl, ExplicitControlCapabilities, ExplicitControlStatus,
+    ExplicitStatusStagingLease, CELLS_INDIRECT_OFFSET, FACES_INDIRECT_OFFSET,
+};
 use crate::solver::gpu::modules::generated_kernels::GeneratedKernelsModule;
 use crate::solver::gpu::modules::generic_coupled_schur::{
     GenericCoupledSchurPreconditioner, GenericCoupledSchurPreconditionerInputs,
@@ -33,7 +40,8 @@ use crate::solver::gpu::program::plan_instance::{
 use crate::solver::gpu::recipe::{KernelPhase, LinearSolverType, SolverRecipe, SteppingMode};
 use crate::solver::gpu::runtime::GpuCsrRuntime;
 use crate::solver::gpu::structs::{
-    GpuGenericCoupledSchurSetupParams, GpuSchurPrecondGenericParams, LinearSolverStats,
+    GpuConstants, GpuGenericCoupledSchurSetupParams, GpuSchurPrecondGenericParams,
+    LinearSolverStats,
 };
 use crate::solver::mesh::MeshRefreshReport;
 use crate::solver::model::backend::ast::FieldKind;
@@ -43,6 +51,7 @@ use bytemuck::bytes_of;
 use cfd2_codegen::solver::codegen::bc_table::{HostBcTable, BOUNDARY_TYPE_COUNT};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
 const RHO_POSITIVITY_FLOOR: f32 = 1.0e-8;
@@ -73,6 +82,315 @@ enum PositivityFallbackAction {
 struct PositivityFieldOffsets {
     rho: usize,
     p: usize,
+}
+
+#[derive(Clone, Copy)]
+enum AutonomousExplicitControlKind {
+    AllMach,
+    Compressible,
+}
+
+enum AutonomousStatusStagingLease {
+    AllMach(ExplicitStatusStagingLease),
+    Compressible(CompressibleStatusStagingLease),
+}
+
+impl AutonomousStatusStagingLease {
+    fn buffer(&self) -> &wgpu::Buffer {
+        match self {
+            Self::AllMach(lease) => lease.buffer(),
+            Self::Compressible(lease) => lease.buffer(),
+        }
+    }
+}
+
+enum AutonomousExplicitControl {
+    AllMach(ExplicitAdaptiveControl),
+    Compressible(CompressibleExplicitControl),
+}
+
+impl AutonomousExplicitControl {
+    fn new(
+        device: &wgpu::Device,
+        mesh: &crate::solver::gpu::init::mesh::MeshResources,
+        fields: &UnifiedFieldResources,
+        bc_kind: &wgpu::Buffer,
+        bc_value: &wgpu::Buffer,
+        model: &ModelSpec,
+    ) -> Result<Option<Self>, String> {
+        if let Some(control) =
+            ExplicitAdaptiveControl::new(device, mesh, fields, bc_kind, bc_value, model)?
+        {
+            return Ok(Some(Self::AllMach(control)));
+        }
+        Ok(CompressibleExplicitControl::new(
+            device, mesh, fields, bc_kind, bc_value, model,
+        )?
+        .map(Self::Compressible))
+    }
+
+    fn kind(&self) -> AutonomousExplicitControlKind {
+        match self {
+            Self::AllMach(_) => AutonomousExplicitControlKind::AllMach,
+            Self::Compressible(_) => AutonomousExplicitControlKind::Compressible,
+        }
+    }
+
+    fn indirect_args(&self) -> &Arc<wgpu::Buffer> {
+        match self {
+            Self::AllMach(control) => &control.b_indirect_args,
+            Self::Compressible(control) => &control.b_indirect_args,
+        }
+    }
+
+    fn supports_constants(&self, constants: &GpuConstants) -> bool {
+        match self {
+            Self::AllMach(_) => true,
+            Self::Compressible(control) => control.supports_constants(constants),
+        }
+    }
+
+    fn capabilities(&self, constants: &GpuConstants) -> Option<ExplicitControlCapabilities> {
+        match self {
+            Self::AllMach(control) => Some(control.capabilities()),
+            Self::Compressible(control) => control.capabilities_for_constants(constants),
+        }
+    }
+
+    fn invalidate(&self) {
+        match self {
+            Self::AllMach(control) => control.invalidate(),
+            Self::Compressible(control) => control.invalidate(),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn configure(
+        &mut self,
+        queue: &wgpu::Queue,
+        time: f64,
+        dt: f32,
+        dt_old: f32,
+        step_count: u64,
+        initial_phase: usize,
+        target_cfl: f32,
+        adaptive: bool,
+        dt_is_accepted_candidate: bool,
+    ) {
+        match self {
+            Self::AllMach(control) => control.configure(
+                queue,
+                time,
+                dt,
+                dt_old,
+                step_count,
+                initial_phase,
+                target_cfl,
+                adaptive,
+                dt_is_accepted_candidate,
+            ),
+            Self::Compressible(control) => control.configure(
+                queue,
+                time,
+                dt,
+                dt_old,
+                step_count,
+                initial_phase,
+                target_cfl,
+                adaptive,
+                dt_is_accepted_candidate,
+            ),
+        }
+    }
+
+    fn encode_stage(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        stage: usize,
+        phase: usize,
+    ) {
+        match self {
+            Self::AllMach(control) => control.encode_stage(encoder, stage, phase),
+            Self::Compressible(control) => control.encode_stage(encoder, stage, phase),
+        }
+    }
+
+    fn encode_batch_reset(&self, encoder: &mut wgpu::CommandEncoder, phase: usize) {
+        match self {
+            Self::AllMach(control) => control.encode_batch_reset(encoder, phase),
+            Self::Compressible(control) => control.encode_batch_reset(encoder, phase),
+        }
+    }
+
+    fn encode_history_prepare(&self, encoder: &mut wgpu::CommandEncoder, phase: usize) {
+        match self {
+            Self::AllMach(control) => control.encode_history_prepare(encoder, phase),
+            Self::Compressible(control) => control.encode_history_prepare(encoder, phase),
+        }
+    }
+
+    fn encode_health(&self, encoder: &mut wgpu::CommandEncoder, phase: usize) {
+        match self {
+            Self::AllMach(control) => control.encode_health(encoder, phase),
+            Self::Compressible(control) => control.encode_health(encoder, phase),
+        }
+    }
+
+    fn status_buffer(&self) -> &wgpu::Buffer {
+        match self {
+            Self::AllMach(control) => control.status_buffer(),
+            Self::Compressible(control) => control.status_buffer(),
+        }
+    }
+
+    fn ensure_status_recoverable(&self) -> Result<(), String> {
+        match self {
+            Self::AllMach(control) => control.ensure_status_recoverable(),
+            Self::Compressible(control) => control.ensure_status_recoverable(),
+        }
+    }
+
+    fn status_fault_flag(&self) -> Arc<AtomicBool> {
+        match self {
+            Self::AllMach(control) => control.status_fault_flag(),
+            Self::Compressible(control) => control.status_fault_flag(),
+        }
+    }
+
+    fn acquire_status_staging(&self) -> Result<AutonomousStatusStagingLease, String> {
+        match self {
+            Self::AllMach(control) => control
+                .acquire_status_staging()
+                .map(AutonomousStatusStagingLease::AllMach),
+            Self::Compressible(control) => control
+                .acquire_status_staging()
+                .map(AutonomousStatusStagingLease::Compressible),
+        }
+    }
+
+    fn encode_status_copy(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        destination: &wgpu::Buffer,
+    ) {
+        match self {
+            Self::AllMach(control) => control.encode_status_copy(encoder, destination),
+            Self::Compressible(control) => control.encode_status_copy(encoder, destination),
+        }
+    }
+
+    fn install_frame_copy_targets(
+        &mut self,
+        device: &wgpu::Device,
+        destinations: &[wgpu::Buffer; 3],
+    ) -> Result<(), String> {
+        match self {
+            Self::AllMach(control) => control.install_frame_copy_targets(device, destinations),
+            Self::Compressible(control) => {
+                control.install_frame_copy_targets(device, destinations)
+            }
+        }
+    }
+
+    fn frame_copy_targets(&self) -> Option<[wgpu::Buffer; 3]> {
+        match self {
+            Self::AllMach(control) => control.frame_copy_targets(),
+            Self::Compressible(control) => control.frame_copy_targets(),
+        }
+    }
+
+    fn encode_accepted_state_copy(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target_slot: usize,
+    ) -> Result<(), String> {
+        match self {
+            Self::AllMach(control) => control.encode_accepted_state_copy(encoder, target_slot),
+            Self::Compressible(control) => {
+                control.encode_accepted_state_copy(encoder, target_slot)
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn cached_frame_copy_bind_group_count(&self) -> usize {
+        match self {
+            Self::AllMach(control) => control.cached_frame_copy_bind_group_count(),
+            Self::Compressible(control) => control.cached_frame_copy_bind_group_count(),
+        }
+    }
+
+    fn decode_status(
+        kind: AutonomousExplicitControlKind,
+        bytes: &[u8],
+    ) -> Result<ExplicitControlStatus, String> {
+        match kind {
+            AutonomousExplicitControlKind::AllMach => ExplicitAdaptiveControl::decode_status(bytes),
+            AutonomousExplicitControlKind::Compressible => {
+                CompressibleExplicitControl::decode_status(bytes)
+            }
+        }
+    }
+
+    fn initial_step_count(&self) -> u64 {
+        match self {
+            Self::AllMach(control) => control.initial_step_count(),
+            Self::Compressible(control) => control.initial_step_count(),
+        }
+    }
+
+    fn accepted_phase(&self, accepted_total: u64) -> usize {
+        match self {
+            Self::AllMach(control) => control.accepted_phase(accepted_total),
+            Self::Compressible(control) => control.accepted_phase(accepted_total),
+        }
+    }
+
+    #[cfg(test)]
+    fn inject_failure_after(&self, accepted_total_threshold: u32) {
+        match self {
+            Self::AllMach(control) => control.inject_failure_after(accepted_total_threshold),
+            Self::Compressible(control) => {
+                control.inject_failure_after(accepted_total_threshold)
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn inject_accepted_total(&self, queue: &wgpu::Queue, accepted_total: u64) {
+        match self {
+            Self::AllMach(control) => control.inject_accepted_total(queue, accepted_total),
+            Self::Compressible(control) => control.inject_accepted_total(queue, accepted_total),
+        }
+    }
+
+    #[cfg(test)]
+    fn encode_time_accumulation_probe(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        phase: usize,
+    ) {
+        match self {
+            Self::AllMach(control) => control.encode_time_accumulation_probe(encoder, phase),
+            Self::Compressible(_) => {
+                panic!("Q64 accumulation probe is specific to the all-Mach test controller")
+            }
+        }
+    }
+
+    #[cfg(test)]
+    fn encode_time_random_sequence_probe(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        phase: usize,
+    ) {
+        match self {
+            Self::AllMach(control) => control.encode_time_random_sequence_probe(encoder, phase),
+            Self::Compressible(_) => {
+                panic!("Q64 random-sequence probe is specific to the all-Mach test controller")
+            }
+        }
+    }
 }
 
 /// Pre-resolved mapping from unknown indices to state layout slots.
@@ -192,6 +510,11 @@ pub(crate) struct GenericCoupledProgramResources {
     explicit_residual_graph: ModuleGraph<GeneratedKernelsModule>,
     /// Exactly one low-storage RK update per graph, ordered k1 through k4.
     explicit_stage_graphs: [ModuleGraph<GeneratedKernelsModule>; 4],
+    /// Indirect-dispatch twins used by the autonomous controller. Their cell
+    /// and face workgroup counts become zero after a health failure.
+    explicit_residual_graph_indirect: Option<ModuleGraph<GeneratedKernelsModule>>,
+    explicit_stage_graphs_indirect: Option<[ModuleGraph<GeneratedKernelsModule>; 4]>,
+    explicit_adaptive_control: Option<AutonomousExplicitControl>,
     outer_iters: usize,
     outer_tol: f32,
     outer_tol_abs: f32,
@@ -449,6 +772,37 @@ impl GenericCoupledProgramResources {
             other => return Err(format!("unknown time_scheme id {other}")),
         };
 
+        let explicit_adaptive_control = if matches!(recipe.stepping, SteppingMode::Explicit) {
+            AutonomousExplicitControl::new(
+                &runtime.common.context.device,
+                &runtime.common.mesh,
+                &fields,
+                &b_bc_kind,
+                &b_bc_value,
+                model,
+            )?
+        } else {
+            None
+        };
+        let explicit_residual_graph_indirect = explicit_adaptive_control.as_ref().map(|control| {
+            explicit_residual_graph.clone_with_indirect_dispatch(|kind| match kind {
+                DispatchKind::Faces => {
+                    (Arc::clone(control.indirect_args()), FACES_INDIRECT_OFFSET)
+                }
+                _ => (Arc::clone(control.indirect_args()), CELLS_INDIRECT_OFFSET),
+            })
+        });
+        let explicit_stage_graphs_indirect = explicit_adaptive_control.as_ref().map(|control| {
+            std::array::from_fn(|stage| {
+                explicit_stage_graphs[stage].clone_with_indirect_dispatch(|kind| match kind {
+                    DispatchKind::Faces => {
+                        (Arc::clone(control.indirect_args()), FACES_INDIRECT_OFFSET)
+                    }
+                    _ => (Arc::clone(control.indirect_args()), CELLS_INDIRECT_OFFSET),
+                })
+            })
+        });
+
         Ok(Self {
             nonconverged_relax: if model.id == "compressible" { 1.0 } else { 1.0 },
             nonconverged_dt_scale: if model.id == "compressible" { 0.5 } else { 1.0 },
@@ -472,6 +826,9 @@ impl GenericCoupledProgramResources {
             update_graph,
             explicit_residual_graph,
             explicit_stage_graphs,
+            explicit_residual_graph_indirect,
+            explicit_stage_graphs_indirect,
+            explicit_adaptive_control,
             outer_iters,
             outer_tol: 1e-3,
             outer_tol_abs: 1e-6,
@@ -727,6 +1084,55 @@ impl GenericCoupledProgramResources {
         self.kernels
             .rebuild_bind_groups(&device, self.model.id, &self.recipe, &registry)?;
         tick!(_t, "5.rebuild_bind_groups(generated)");
+
+        // The autonomous controller binds topology-sized mesh/BC buffers and
+        // phase-specific state resources. Rebuild its bind groups and the
+        // indirect graph twins after a topology refresh; pipelines are small
+        // and this seam is coarse-grained, never per-step.
+        let frame_copy_targets = self
+            .explicit_adaptive_control
+            .as_ref()
+            .and_then(AutonomousExplicitControl::frame_copy_targets);
+        self.explicit_adaptive_control = if matches!(self.recipe.stepping, SteppingMode::Explicit) {
+            AutonomousExplicitControl::new(
+                &device,
+                &self.runtime.common.mesh,
+                &self.fields,
+                &self._b_bc_kind,
+                &self._b_bc_value,
+                &self.model,
+            )?
+        } else {
+            None
+        };
+        if let (Some(control), Some(targets)) =
+            (self.explicit_adaptive_control.as_mut(), frame_copy_targets)
+        {
+            control.install_frame_copy_targets(&device, &targets)?;
+        }
+        self.explicit_residual_graph_indirect =
+            self.explicit_adaptive_control.as_ref().map(|control| {
+                self.explicit_residual_graph
+                    .clone_with_indirect_dispatch(|kind| match kind {
+                        DispatchKind::Faces => {
+                            (Arc::clone(control.indirect_args()), FACES_INDIRECT_OFFSET)
+                        }
+                        _ => (Arc::clone(control.indirect_args()), CELLS_INDIRECT_OFFSET),
+                    })
+            });
+        self.explicit_stage_graphs_indirect =
+            self.explicit_adaptive_control.as_ref().map(|control| {
+                std::array::from_fn(|stage| {
+                    self.explicit_stage_graphs[stage].clone_with_indirect_dispatch(
+                        |kind| match kind {
+                            DispatchKind::Faces => {
+                                (Arc::clone(control.indirect_args()), FACES_INDIRECT_OFFSET)
+                            }
+                            _ => (Arc::clone(control.indirect_args()), CELLS_INDIRECT_OFFSET),
+                        },
+                    )
+                })
+            });
 
         Ok(MeshRefreshReport {
             bc_overrides_reset: true,
@@ -1368,9 +1774,11 @@ pub(crate) fn spec_state_buffer(plan: &GpuProgramPlan) -> &wgpu::Buffer {
 }
 
 pub(crate) fn spec_write_state_bytes(plan: &GpuProgramPlan, bytes: &[u8]) -> Result<(), String> {
-    res(plan)
-        .fields
-        .write_state_bytes(&plan.context.queue, bytes);
+    let r = res(plan);
+    r.fields.write_state_bytes(&plan.context.queue, bytes);
+    if let Some(control) = &r.explicit_adaptive_control {
+        control.invalidate();
+    }
     Ok(())
 }
 
@@ -1378,9 +1786,12 @@ pub(crate) fn spec_write_state_bytes_current(
     plan: &GpuProgramPlan,
     bytes: &[u8],
 ) -> Result<(), String> {
-    res(plan)
-        .fields
+    let r = res(plan);
+    r.fields
         .write_state_bytes_current(&plan.context.queue, bytes);
+    if let Some(control) = &r.explicit_adaptive_control {
+        control.invalidate();
+    }
     Ok(())
 }
 
@@ -1674,6 +2085,9 @@ pub(crate) fn spec_restore_full(
         values.dtau = snap.dtau;
     }
     r.fields.constants.write(&queue);
+    if let Some(control) = &r.explicit_adaptive_control {
+        control.invalidate();
+    }
     plan.current_dtau = Some(snap.dtau);
     Ok(())
 }
@@ -1727,6 +2141,9 @@ pub(crate) fn spec_set_bc_values_per_face(
 }
 
 pub(crate) fn host_prepare_explicit_step(plan: &mut GpuProgramPlan) {
+    if let Some(control) = &res(plan).explicit_adaptive_control {
+        control.invalidate();
+    }
     // Defence in depth: explicit RK4 is a physical-time method and must never
     // inherit pseudo-time state from a restored snapshot or a generic named
     // parameter update.
@@ -1806,15 +2223,24 @@ pub(crate) fn host_prepare_step(plan: &mut GpuProgramPlan) {
     }
 }
 
+#[inline]
+fn explicit_stage_time_f32(base_time: f64, dt: f32, abscissa: f32) -> f32 {
+    (base_time + abscissa as f64 * dt as f64) as f32
+}
+
 fn host_set_explicit_stage_time(plan: &mut GpuProgramPlan, abscissa: f32) {
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     // `host_prepare_step` follows the implicit path's convention and has
     // already advanced the host clock to t^{n+1}. Recover t^n here, then write
     // the classical RK abscissa before the residual graph submission.
-    let dt = r.time_integration.dt;
-    let base_time = r.time_integration.time as f32 - dt;
-    r.fields.constants.values_mut().time = base_time + abscissa * dt;
+    let dt = r.time_integration.dt as f64;
+    let base_time = r.time_integration.time - dt;
+    // Keep the physical clock in f64 until the generated-kernel ABI boundary.
+    // Casting t^{n+1} first and then subtracting dt double-rounds t^n; over a
+    // long explicit run that shifts time-dependent boundary stages by an ulp
+    // (and eventually much more with a raw f32 accumulator).
+    r.fields.constants.values_mut().time = explicit_stage_time_f32(base_time, dt as f32, abscissa);
     r.fields.constants.write(&queue);
 }
 
@@ -1849,6 +2275,507 @@ pub(crate) fn host_finalize_explicit_step(plan: &mut GpuProgramPlan) {
         r.fields.constants.values().dtau
     };
     plan.current_dtau = Some(current_dtau);
+}
+
+/// Submit a bounded, fixed-`dt` explicit RK4 batch as one command buffer.
+///
+/// Every step retains the exact existing schedule:
+///
+/// `rotate/copy -> (stage-time constants -> residual -> RK update) x 4`.
+///
+/// Stage-time constants are materialized in a small COPY_SRC buffer and copied
+/// into the live uniform before each residual/update pair.  A host-side series
+/// of `queue.write_buffer` calls would not work here: all writes would be
+/// visible before the one compute submission and every stage would observe the
+/// final time.  Recording the copies in the command buffer gives the required
+/// queue ordering without a CPU wait or an intermediate submission.
+pub(crate) fn submit_explicit_rk4_batch(
+    plan: &mut GpuProgramPlan,
+    steps: u32,
+) -> Result<wgpu::SubmissionIndex, String> {
+    if steps == 0 {
+        return Err("explicit RK4 batch must contain at least one step".to_string());
+    }
+    if !matches!(res(plan).recipe.stepping, SteppingMode::Explicit) {
+        return Err("explicit RK4 batching requires SteppingMode::Explicit".to_string());
+    }
+    if plan.model.system.is_ale() {
+        return Err(
+            "explicit RK4 batching currently supports static meshes only; ALE geometry must be advanced once per host step"
+                .to_string(),
+        );
+    }
+    if plan.collect_trace || plan.profiling_stats.is_enabled() {
+        return Err(
+            "explicit RK4 batching is disabled while per-step tracing/profiling is active"
+                .to_string(),
+        );
+    }
+    if let Some(control) = &res(plan).explicit_adaptive_control {
+        control.invalidate();
+    }
+
+    let steps_usize = usize::try_from(steps)
+        .map_err(|_| "explicit RK4 batch size does not fit usize".to_string())?;
+    let constants_count = steps_usize
+        .checked_mul(4)
+        .and_then(|count| count.checked_add(1))
+        .ok_or_else(|| "explicit RK4 batch constants size overflow".to_string())?;
+    let mut encoded_constants = Vec::<GpuConstants>::with_capacity(constants_count);
+    let mut phases = Vec::<usize>::with_capacity(steps_usize);
+
+    // Explicit stepping has no linear solve, retry, or positivity rollback.
+    // Keep the public step-stat surface equivalent to the latest accepted
+    // ordinary step while the returned batch size owns aggregate accounting.
+    plan.last_linear_stats = LinearSolverStats::default();
+    plan.step_linear_stats.clear();
+    plan.step_graph_timings.clear();
+    plan.outer_iterations = 0;
+    plan.outer_residual_u = None;
+    plan.outer_residual_p = None;
+    plan.outer_step_status = None;
+    plan.outer_field_residuals.clear();
+    plan.outer_field_residuals_scaled.clear();
+    plan.prev_outer_field_residuals_scaled.clear();
+    plan.pending_outer_delta = None;
+    plan.step_attempt_index = 0;
+    plan.step_attempt_count = 1;
+    plan.rejected_retry_count = 0;
+    plan.retry_step = false;
+    plan.repeat_break = false;
+    plan.skip_remaining_block = false;
+    plan.positivity_min_rho = None;
+    plan.positivity_min_p = None;
+    plan.positivity_rho_undershoot_count = 0;
+    plan.positivity_pressure_undershoot_count = 0;
+
+    {
+        let r = res_mut(plan);
+        let dt = r.time_integration.dt;
+        let requested_time_scheme = r.requested_time_scheme as u32;
+        {
+            let values = r.fields.constants.values_mut();
+            values.dtau = 0.0;
+            values.time_scheme = requested_time_scheme;
+        }
+
+        for _ in 0..steps_usize {
+            phases.push(r.fields.advance_step());
+
+            // Match TimeIntegrationModule::prepare_step and the corrected
+            // stage-time oracle: retain the true f64 t^n through the RK
+            // abscissa and cast only at the generated-kernel ABI boundary.
+            let base_time = r.time_integration.time;
+            r.time_integration.time += dt as f64;
+            let prepared_time = r.time_integration.time as f32;
+            let template = *r.fields.constants.values();
+            for abscissa in [0.0_f32, 0.5, 0.5, 1.0] {
+                let mut values = template;
+                values.time = explicit_stage_time_f32(base_time, dt, abscissa);
+                encoded_constants.push(values);
+            }
+
+            // Match TimeIntegrationModule::finalize_step on the host shadow.
+            r.time_integration.dt_old = dt;
+            r.time_integration.step_count += 1;
+            let values = r.fields.constants.values_mut();
+            values.time = prepared_time;
+            values.dt_old = dt;
+            values.time_scheme = requested_time_scheme;
+        }
+
+        // The last copy leaves the public constants buffer in exactly the
+        // state an ordinary finalize op would expose after the batch.
+        encoded_constants.push(*r.fields.constants.values());
+    }
+
+    debug_assert_eq!(encoded_constants.len(), constants_count);
+    let device = plan.context.device.clone();
+    let queue = plan.context.queue.clone();
+    let constants_upload = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("generic_coupled:explicit_batch_constants"),
+        contents: bytemuck::cast_slice(&encoded_constants),
+        usage: wgpu::BufferUsages::COPY_SRC,
+    });
+    let constants_size = std::mem::size_of::<GpuConstants>() as u64;
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("generic_coupled:explicit_rk4_batch"),
+    });
+
+    {
+        let r = res(plan);
+        let state_size = r.fields.state_size_bytes();
+        for (step, &phase) in phases.iter().enumerate() {
+            // Select concrete buffers/bind groups while encoding.  The atomic
+            // is host scheduling state only; the command buffer records the
+            // selected resources and remains valid after the phase advances.
+            r.fields.state.set_step_index(phase);
+            let (current, previous, _) =
+                crate::solver::gpu::modules::state::ping_pong_indices(phase);
+            encoder.copy_buffer_to_buffer(
+                &r.fields.state_buffers()[previous],
+                0,
+                &r.fields.state_buffers()[current],
+                0,
+                state_size,
+            );
+
+            for stage in 0..4 {
+                let constants_index = step * 4 + stage;
+                encoder.copy_buffer_to_buffer(
+                    &constants_upload,
+                    constants_index as u64 * constants_size,
+                    r.fields.constants.buffer(),
+                    0,
+                    constants_size,
+                );
+                ModuleGraph::encode_sequence_into(
+                    &[&r.explicit_residual_graph, &r.explicit_stage_graphs[stage]],
+                    &mut encoder,
+                    &r.kernels,
+                    r.runtime_dims(),
+                );
+            }
+        }
+
+        encoder.copy_buffer_to_buffer(
+            &constants_upload,
+            (constants_count - 1) as u64 * constants_size,
+            r.fields.constants.buffer(),
+            0,
+            constants_size,
+        );
+        r.fields
+            .state
+            .set_step_index(*phases.last().expect("non-empty batch phases"));
+    }
+
+    let submission = queue.submit(Some(encoder.finish()));
+    crate::count_submission!("Generic Coupled", "explicit_rk4_batch");
+    plan.current_dtau = Some(0.0);
+    Ok(submission)
+}
+
+/// Submit an autonomous production all-Mach or density-based compressible batch. RK stages use
+/// indirect dispatch counts owned by the model-specific controller; a failed
+/// accepted-state audit zeros those counts, rolls the candidate state back,
+/// and turns every remaining pre-encoded step into a transfer-only freeze.
+pub(crate) fn submit_explicit_rk4_autonomous_batch(
+    plan: &mut GpuProgramPlan,
+    steps: u32,
+    adaptive: bool,
+    target_cfl: f32,
+) -> Result<wgpu::SubmissionIndex, String> {
+    submit_explicit_rk4_autonomous_batch_impl(plan, steps, adaptive, target_cfl, false, None)
+}
+
+pub(crate) fn submit_explicit_rk4_autonomous_batch_with_status(
+    plan: &mut GpuProgramPlan,
+    steps: u32,
+    adaptive: bool,
+    target_cfl: f32,
+    dt_is_accepted_candidate: bool,
+    callback: Box<dyn FnOnce(Result<ExplicitControlStatus, String>) + Send + 'static>,
+) -> Result<wgpu::SubmissionIndex, String> {
+    submit_explicit_rk4_autonomous_batch_impl(
+        plan,
+        steps,
+        adaptive,
+        target_cfl,
+        dt_is_accepted_candidate,
+        Some(callback),
+    )
+}
+
+/// Compatibility entry point for callers which explicitly require adaptive
+/// control. New scheduling code should use the fixed-or-adaptive autonomous
+/// API above and pass its current runtime policy.
+pub(crate) fn submit_explicit_rk4_adaptive_batch(
+    plan: &mut GpuProgramPlan,
+    steps: u32,
+    target_cfl: f32,
+) -> Result<wgpu::SubmissionIndex, String> {
+    submit_explicit_rk4_autonomous_batch(plan, steps, true, target_cfl)
+}
+
+pub(crate) fn submit_explicit_rk4_adaptive_batch_with_status(
+    plan: &mut GpuProgramPlan,
+    steps: u32,
+    target_cfl: f32,
+    callback: Box<dyn FnOnce(Result<ExplicitControlStatus, String>) + Send + 'static>,
+) -> Result<wgpu::SubmissionIndex, String> {
+    submit_explicit_rk4_autonomous_batch_with_status(
+        plan,
+        steps,
+        true,
+        target_cfl,
+        false,
+        callback,
+    )
+}
+
+fn submit_explicit_rk4_autonomous_batch_impl(
+    plan: &mut GpuProgramPlan,
+    steps: u32,
+    adaptive: bool,
+    target_cfl: f32,
+    dt_is_accepted_candidate: bool,
+    status_callback: Option<
+        Box<dyn FnOnce(Result<ExplicitControlStatus, String>) + Send + 'static>,
+    >,
+) -> Result<wgpu::SubmissionIndex, String> {
+    if steps == 0 {
+        return Err("autonomous explicit RK4 batch must contain at least one step".to_string());
+    }
+    if !matches!(res(plan).recipe.stepping, SteppingMode::Explicit) {
+        return Err("autonomous explicit RK4 batching requires SteppingMode::Explicit".to_string());
+    }
+    if plan.model.system.is_ale() {
+        return Err("autonomous explicit RK4 batching supports static meshes only".to_string());
+    }
+    if plan.collect_trace || plan.profiling_stats.is_enabled() {
+        return Err(
+            "autonomous explicit RK4 batching is disabled during tracing/profiling".to_string(),
+        );
+    }
+    if !(target_cfl.is_finite() && target_cfl > 0.0) {
+        return Err(format!(
+            "autonomous explicit RK4 target CFL must be finite and positive, got {target_cfl}"
+        ));
+    }
+
+    // Reserve completion telemetry before advancing any host phase shadow. A
+    // saturated ring is a clean pre-submit rejection, never a half-queued step.
+    let status_staging = {
+        let control = res(plan)
+            .explicit_adaptive_control
+            .as_ref()
+            .ok_or_else(|| "solver has no GPU-resident explicit controller".to_string())?;
+        if !control.supports_constants(res(plan).fields.constants.values()) {
+            return Err(
+                "GPU-resident density-based compressible RK4 control requires an ideal-gas EOS"
+                    .to_string(),
+            );
+        }
+        control.ensure_status_recoverable()?;
+        status_callback
+            .as_ref()
+            .map(|_| control.acquire_status_staging())
+            .transpose()?
+    };
+
+    let control_queue = plan.context.queue.clone();
+    let (initial_phase, final_phase) = {
+        let r = res_mut(plan);
+        let initial_phase = r.fields.state.step_index();
+        let Some(control) = r.explicit_adaptive_control.as_mut() else {
+            return Err("solver has no GPU-resident explicit controller".to_string());
+        };
+        control.configure(
+            &control_queue,
+            r.time_integration.time,
+            r.time_integration.dt,
+            r.time_integration.dt_old,
+            r.time_integration.step_count,
+            initial_phase,
+            target_cfl,
+            adaptive,
+            dt_is_accepted_candidate,
+        );
+        let final_phase = (initial_phase + (steps % 3) as usize) % 3;
+        (initial_phase, final_phase)
+    };
+
+    plan.last_linear_stats = LinearSolverStats::default();
+    plan.step_linear_stats.clear();
+    plan.step_graph_timings.clear();
+    plan.step_attempt_count = 1;
+    plan.rejected_retry_count = 0;
+    plan.current_dtau = Some(0.0);
+
+    let device = plan.context.device.clone();
+    let queue = plan.context.queue.clone();
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("generic_coupled:adaptive_explicit_rk4_batch"),
+    });
+    {
+        let r = res(plan);
+        let control = r
+            .explicit_adaptive_control
+            .as_ref()
+            .expect("adaptive control checked above");
+        let residual = r
+            .explicit_residual_graph_indirect
+            .as_ref()
+            .expect("adaptive residual graph");
+        let stages = r
+            .explicit_stage_graphs_indirect
+            .as_ref()
+            .expect("adaptive stage graphs");
+        control.encode_batch_reset(&mut encoder, (initial_phase + 1) % 3);
+        for step in 0..steps {
+            let phase = (initial_phase + 1 + (step % 3) as usize) % 3;
+            r.fields.state.set_step_index(phase);
+            // stage_1 snapshots next_dt into immutable step_dt and restores
+            // real indirect counts only when the controller remains active.
+            control.encode_stage(&mut encoder, 0, phase);
+            control.encode_history_prepare(&mut encoder, phase);
+            ModuleGraph::encode_sequence_into(
+                &[residual, &stages[0]],
+                &mut encoder,
+                &r.kernels,
+                r.runtime_dims(),
+            );
+            for stage in 1..4 {
+                control.encode_stage(&mut encoder, stage, phase);
+                ModuleGraph::encode_sequence_into(
+                    &[residual, &stages[stage]],
+                    &mut encoder,
+                    &r.kernels,
+                    r.runtime_dims(),
+                );
+            }
+            control.encode_health(&mut encoder, phase);
+        }
+        // Publish exactly the requested tail phase once encoding is complete;
+        // accepted-prefix reconciliation may later move it back after a halt.
+        r.fields.state.set_step_index(final_phase);
+    }
+    if let Some(staging) = status_staging.as_ref() {
+        let control = res(plan)
+            .explicit_adaptive_control
+            .as_ref()
+            .expect("adaptive control checked above");
+        control.encode_status_copy(&mut encoder, staging.buffer());
+    }
+    let status_fault_flag = status_callback.as_ref().map(|_| {
+        res(plan)
+            .explicit_adaptive_control
+            .as_ref()
+            .expect("adaptive control checked above")
+            .status_fault_flag()
+    });
+    let control_kind = res(plan)
+        .explicit_adaptive_control
+        .as_ref()
+        .expect("adaptive control checked above")
+        .kind();
+    let command = encoder.finish();
+    if let (Some(staging), Some(callback), Some(status_fault_flag)) =
+        (status_staging, status_callback, status_fault_flag)
+    {
+        let map_buffer = staging.buffer().clone();
+        let callback_buffer = staging.buffer().clone();
+        let size = staging.buffer().size();
+        command.map_buffer_on_submit(&map_buffer, wgpu::MapMode::Read, .., move |result| {
+            let decoded = result
+                .map_err(|error| format!("explicit control deferred map failed: {error:?}"))
+                .and_then(|()| {
+                    let view = callback_buffer.slice(0..size).get_mapped_range();
+                    let status = AutonomousExplicitControl::decode_status(control_kind, &view);
+                    drop(view);
+                    callback_buffer.unmap();
+                    status
+                });
+            if decoded.is_err() {
+                status_fault_flag.store(true, Ordering::Release);
+            }
+            callback(decoded);
+            drop(staging);
+        });
+    }
+    let submission = queue.submit(Some(command));
+    crate::count_submission!("Generic Coupled", "adaptive_explicit_rk4_batch");
+    Ok(submission)
+}
+
+pub(crate) fn read_explicit_control_status(
+    plan: &GpuProgramPlan,
+) -> PlanFuture<'_, Result<ExplicitControlStatus, String>> {
+    Box::pin(async move {
+        let Some(control) = res(plan).explicit_adaptive_control.as_ref() else {
+            return Err("solver has no GPU-resident explicit controller".to_string());
+        };
+        let size = control.status_buffer().size();
+        let bytes = crate::solver::gpu::readback::read_buffer_cached(
+            &plan.context,
+            &plan.staging_cache,
+            &plan.profiling_stats,
+            control.status_buffer(),
+            size,
+            "explicit_control:status_readback",
+        )
+        .await;
+        AutonomousExplicitControl::decode_status(control.kind(), &bytes)
+    })
+}
+
+pub(crate) fn install_explicit_control_frame_targets(
+    plan: &mut GpuProgramPlan,
+    destinations: &[wgpu::Buffer; 3],
+) -> Result<(), String> {
+    let device = plan.context.device.clone();
+    let Some(control) = res_mut(plan).explicit_adaptive_control.as_mut() else {
+        return Ok(());
+    };
+    control.install_frame_copy_targets(&device, destinations)
+}
+
+pub(crate) fn encode_explicit_control_accepted_state(
+    plan: &GpuProgramPlan,
+    encoder: &mut wgpu::CommandEncoder,
+    target_slot: usize,
+) -> Result<(), String> {
+    let control = res(plan)
+        .explicit_adaptive_control
+        .as_ref()
+        .ok_or_else(|| "solver has no GPU-resident explicit controller".to_string())?;
+    control.encode_accepted_state_copy(encoder, target_slot)
+}
+
+#[cfg(test)]
+pub(crate) fn explicit_control_cached_frame_copy_bind_group_count(
+    plan: &GpuProgramPlan,
+) -> usize {
+    res(plan)
+        .explicit_adaptive_control
+        .as_ref()
+        .map_or(0, AutonomousExplicitControl::cached_frame_copy_bind_group_count)
+}
+
+pub(crate) fn explicit_control_capabilities(
+    plan: &GpuProgramPlan,
+) -> Option<crate::solver::gpu::modules::explicit_control::ExplicitControlCapabilities> {
+    res(plan)
+        .explicit_adaptive_control
+        .as_ref()
+        .and_then(|control| control.capabilities(res(plan).fields.constants.values()))
+}
+
+pub(crate) fn reconcile_explicit_control_status(
+    plan: &mut GpuProgramPlan,
+    status: ExplicitControlStatus,
+) -> Result<(), String> {
+    let r = res_mut(plan);
+    let Some(control) = r.explicit_adaptive_control.as_ref() else {
+        return Err("solver has no GPU-resident explicit controller".to_string());
+    };
+    r.time_integration.time = status.time;
+    r.time_integration.dt = status.next_dt;
+    if status.last_dt > 0.0 {
+        r.time_integration.dt_old = status.last_dt;
+    }
+    r.time_integration.step_count = control
+        .initial_step_count()
+        .saturating_add(status.accepted_total);
+    r.fields
+        .state
+        .set_step_index(control.accepted_phase(status.accepted_total));
+    let values = r.fields.constants.values_mut();
+    values.time = status.time as f32;
+    values.dt = status.next_dt;
+    values.dt_old = r.time_integration.dt_old;
+    Ok(())
 }
 
 pub(crate) fn host_finalize_step(plan: &mut GpuProgramPlan) {
@@ -3729,6 +4656,9 @@ pub(crate) fn param_dt(plan: &mut GpuProgramPlan, value: PlanParamValue) -> Resu
     let r = res_mut(plan);
     r.time_integration
         .set_dt(dt, &mut r.fields.constants, &queue);
+    if let Some(control) = &r.explicit_adaptive_control {
+        control.invalidate();
+    }
     if r.dp_init_enabled {
         r.dp_init_needed.store(true, Ordering::Relaxed);
     }
@@ -3923,18 +4853,18 @@ pub(crate) fn param_eos_dp_drho(
     Ok(())
 }
 
-pub(crate) fn param_eos_p_offset(
+pub(crate) fn param_eos_p_ref(
     plan: &mut GpuProgramPlan,
     value: PlanParamValue,
 ) -> Result<(), String> {
-    let PlanParamValue::F32(p_offset) = value else {
+    let PlanParamValue::F32(p_ref) = value else {
         return Err("invalid value type".into());
     };
     let queue = plan.context.queue.clone();
     let r = res_mut(plan);
     {
         let values = r.fields.constants.values_mut();
-        values.eos_p_offset = p_offset;
+        values.eos_p_ref = p_ref;
     }
     r.fields.constants.write(&queue);
     Ok(())
@@ -3952,6 +4882,23 @@ pub(crate) fn param_eos_theta_ref(
     {
         let values = r.fields.constants.values_mut();
         values.eos_theta_ref = theta;
+    }
+    r.fields.constants.write(&queue);
+    Ok(())
+}
+
+pub(crate) fn param_eos_rho_ref(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(rho_ref) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.eos_rho_ref = rho_ref;
     }
     r.fields.constants.write(&queue);
     Ok(())
@@ -4244,8 +5191,8 @@ mod tests {
     use crate::solver::model::ports::PortRegistry;
     use crate::solver::model::{eos, primitives};
     use crate::solver::model::{
-        incompressible_momentum_model, BoundarySpec, ModelLinearSolverSpec,
-        ModelPreconditionerSpec, SchurBlockLayout,
+        generic_diffusion_demo_mms_model, incompressible_momentum_model, BoundarySpec,
+        ModelLinearSolverSpec, ModelPreconditionerSpec, SchurBlockLayout, MMS_SOURCE_FIELD,
     };
 
     /// Helper to create a PortRegistry with all state fields registered.
@@ -4257,6 +5204,1200 @@ mod tests {
                 .expect("Failed to register field");
         }
         registry
+    }
+
+    #[test]
+    fn explicit_stage_time_casts_only_at_the_kernel_abi_boundary() {
+        // This ordinary GUI-scale clock/dt pair is a concrete counterexample
+        // to the retired `f32(t_n + dt) - dt + c*dt` route: stage zero moves by
+        // one ulp before any physics kernel runs.
+        let base_time = 0.173_569_f64;
+        let dt = 0.000_087_01_f32;
+        let expected = (base_time + 0.0 * dt as f64) as f32;
+        assert_eq!(
+            explicit_stage_time_f32(base_time, dt, 0.0).to_bits(),
+            expected.to_bits()
+        );
+
+        let prepared_f32 = (base_time + dt as f64) as f32;
+        let legacy = prepared_f32 - dt;
+        assert_ne!(
+            legacy.to_bits(),
+            expected.to_bits(),
+            "counterexample no longer distinguishes pre-cast/subtract timing"
+        );
+
+        for abscissa in [0.0_f32, 0.5, 1.0] {
+            let expected = (base_time + abscissa as f64 * dt as f64) as f32;
+            assert_eq!(
+                explicit_stage_time_f32(base_time, dt, abscissa).to_bits(),
+                expected.to_bits()
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_rk4_batch_matches_single_steps_for_b1_b2_b3() {
+        let mesh = generate_structured_rect_mesh(4, 3, 1.0, 0.75, BoundarySides::wall());
+        let model = generic_diffusion_demo_mms_model().expect("diffusion MMS model");
+        let config = crate::solver::gpu::program::plan_instance::PlanInitConfig {
+            advection_scheme: crate::solver::scheme::Scheme::Upwind,
+            time_scheme: crate::solver::gpu::enums::TimeScheme::RK4,
+            preconditioner: crate::solver::gpu::structs::PreconditionerType::Jacobi,
+            stepping: SteppingMode::Explicit,
+        };
+
+        let mut single = match pollster::block_on(crate::solver::gpu::lowering::lower_program_plan(
+            &mesh, &model, config, None, None,
+        )) {
+            Ok(plan) => plan,
+            Err(error) => {
+                eprintln!("[explicit-rk4-batch] no compatible GPU ({error}); skipping");
+                return;
+            }
+        };
+        let mut batched = pollster::block_on(crate::solver::gpu::lowering::lower_program_plan(
+            &mesh,
+            &model,
+            config,
+            Some(single.context.device.clone()),
+            Some(single.context.queue.clone()),
+        ))
+        .expect("second explicit plan on the selected GPU");
+
+        for plan in [&mut single, &mut batched] {
+            plan.set_named_param("dt", PlanParamValue::F32(0.0125))
+                .expect("set fixed dt");
+        }
+
+        let stride = model.state_layout.stride() as usize;
+        let phi = model.state_layout.offset_for("phi").expect("phi offset") as usize;
+        let source = model
+            .state_layout
+            .offset_for(MMS_SOURCE_FIELD)
+            .expect("MMS source offset") as usize;
+        let mut initial_state = vec![0.0_f32; mesh.num_cells() * stride];
+        for cell in 0..mesh.num_cells() {
+            // Nonuniform state exercises the full face/gradient operator; the
+            // source makes each RK stage depend on both carried state and the
+            // immutable state-layout tail.
+            initial_state[cell * stride + phi] = 0.25 + 0.03125 * cell as f32;
+            initial_state[cell * stride + source] = -0.4 + 0.02 * cell as f32;
+        }
+        for plan in [&single, &batched] {
+            plan.write_state_bytes(bytemuck::cast_slice(&initial_state))
+                .expect("seed explicit state");
+            plan.initialize_history();
+        }
+        let initial = single.snapshot_full();
+
+        for steps in [1_u32, 2, 3] {
+            single.restore_full(&initial).expect("restore single plan");
+            batched.restore_full(&initial).expect("restore batch plan");
+
+            for _ in 0..steps {
+                single.step();
+            }
+            batched
+                .step_explicit_batch(steps)
+                .expect("submit explicit batch");
+
+            // Full snapshots fence both queues and compare the logical
+            // current/old/old-old histories, not just the visible field.
+            let expected = single.snapshot_full();
+            let actual = batched.snapshot_full();
+            assert_eq!(actual.state, expected.state, "B={steps}: current state");
+            assert_eq!(actual.state_old, expected.state_old, "B={steps}: old state");
+            assert_eq!(
+                actual.state_old_old, expected.state_old_old,
+                "B={steps}: old-old state"
+            );
+            assert_eq!(
+                actual.time.to_bits(),
+                expected.time.to_bits(),
+                "B={steps}: time"
+            );
+            assert_eq!(actual.dt.to_bits(), expected.dt.to_bits(), "B={steps}: dt");
+            assert_eq!(
+                actual.dt_old.to_bits(),
+                expected.dt_old.to_bits(),
+                "B={steps}: dt_old"
+            );
+            assert_eq!(actual.step_count, expected.step_count, "B={steps}: count");
+        }
+    }
+
+    #[test]
+    fn adaptive_allmach_batch_advances_and_freezes_after_injected_invalid_bc() {
+        let mesh = generate_structured_rect_mesh(
+            6,
+            3,
+            1.0,
+            0.5,
+            BoundarySides {
+                left: BoundaryType::Inlet,
+                right: BoundaryType::Outlet,
+                bottom: BoundaryType::Wall,
+                top: BoundaryType::Wall,
+            },
+        );
+        let model = crate::solver::model::allmach_thermal_model().expect("all-Mach model");
+        let config = crate::solver::gpu::program::plan_instance::PlanInitConfig {
+            advection_scheme: crate::solver::scheme::Scheme::Upwind,
+            time_scheme: crate::solver::gpu::enums::TimeScheme::RK4,
+            preconditioner: crate::solver::gpu::structs::PreconditionerType::Jacobi,
+            stepping: SteppingMode::Explicit,
+        };
+        let mut plan = match pollster::block_on(crate::solver::gpu::lowering::lower_program_plan(
+            &mesh, &model, config, None, None,
+        )) {
+            Ok(plan) => plan,
+            Err(error) => {
+                eprintln!("[adaptive-explicit-control] no compatible GPU ({error}); skipping");
+                return;
+            }
+        };
+
+        // Device proof for the Q64 fractional-second clock: an awkward f32
+        // mantissa near 1 ns is not representable by the old Q48 fraction.
+        {
+            let mut encoder =
+                plan.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("explicit_control:time_probe_test"),
+                    });
+            let r = res(&plan);
+            r.explicit_adaptive_control
+                .as_ref()
+                .expect("adaptive controller")
+                .encode_time_accumulation_probe(&mut encoder, r.fields.state.step_index());
+            plan.context.queue.submit(Some(encoder.finish()));
+            let probe =
+                pollster::block_on(plan.read_explicit_control_status()).expect("time probe status");
+            let dt_probe = f32::from_bits(0x30a9ad7f);
+            let exact = f64::from(dt_probe) * 100_003.0;
+            assert_eq!(probe.time, exact, "fixed-point time drift");
+            let stage_dt = f32::from_bits(0x3157e37c);
+            for (actual, a, label) in [
+                (probe.next_dt, 0.0_f64, "a=0"),
+                (probe.last_dt, 0.5, "a=1/2"),
+                (probe.max_base_rate, 1.0, "a=1"),
+            ] {
+                let expected = (exact + a * f64::from(stage_dt)) as f32;
+                assert_eq!(actual.to_bits(), expected.to_bits(), "fixed Q64 {label}");
+            }
+            let mut naive = 0.0_f32;
+            for _ in 0..100_003 {
+                naive += dt_probe;
+            }
+            assert!(
+                (naive as f64 - exact).abs() > 1.0e-8,
+                "probe no longer distinguishes raw f32 accumulation"
+            );
+            r.explicit_adaptive_control
+                .as_ref()
+                .expect("adaptive controller")
+                .invalidate();
+        }
+        // Random awkward ~1 ns f32 mantissas start just below 32 seconds and
+        // cross the integer boundary, auditing low/high/seconds carries.
+        {
+            let mut seed = 0x6d2b79f5_u32;
+            let mut tiny_sum = 0.0_f64;
+            for _ in 0..4096 {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                let bits = 0x3089705f_u32 + (seed & 0x001f_ffff);
+                tiny_sum += f64::from(f32::from_bits(bits));
+            }
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let stage_dt = f32::from_bits(0x3089705f_u32 + (seed & 0x001f_ffff));
+            let exact = 31.0 + f64::from(0xfffff000_u32) * (1.0 / 4_294_967_296.0)
+                + tiny_sum;
+            assert!(
+                exact > 32.0 && exact < 32.000_01,
+                "probe must cross the integer boundary"
+            );
+            let mut encoder =
+                plan.context
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("explicit_control:random_time_probe_test"),
+                    });
+            let r = res(&plan);
+            r.explicit_adaptive_control
+                .as_ref()
+                .expect("adaptive controller")
+                .encode_time_random_sequence_probe(&mut encoder, r.fields.state.step_index());
+            plan.context.queue.submit(Some(encoder.finish()));
+            let probe = pollster::block_on(plan.read_explicit_control_status())
+                .expect("random time probe status");
+            assert_eq!(probe.time, exact, "Q64 random-sequence carry drift");
+            for (actual, a, label) in [
+                (probe.next_dt, 0.0_f64, "a=0"),
+                (probe.last_dt, 0.5, "a=1/2"),
+                (probe.max_base_rate, 1.0, "a=1"),
+            ] {
+                let expected = (exact + a * f64::from(stage_dt)) as f32;
+                assert_eq!(actual.to_bits(), expected.to_bits(), "random Q64 {label}");
+            }
+            r.explicit_adaptive_control
+                .as_ref()
+                .expect("adaptive controller")
+                .invalidate();
+        }
+        plan.set_named_param("dt", PlanParamValue::F32(1.0e-5))
+            .expect("set dt");
+        plan.set_named_param("density", PlanParamValue::F32(1.225))
+            .expect("set density");
+        plan.set_named_param("viscosity", PlanParamValue::F32(1.81e-5))
+            .expect("set viscosity");
+
+        let stride = model.state_layout.stride() as usize;
+        let mut state = vec![0.0_f32; mesh.num_cells() * stride];
+        let mut set = |name: &str, value: f32| {
+            if let Some(off) = model.state_layout.offset_for(name) {
+                for row in state.chunks_exact_mut(stride) {
+                    row[off as usize] = value;
+                }
+            }
+        };
+        let psi = 1.0e-4_f32;
+        for (name, value) in [
+            ("p", 0.0),
+            ("T", 1.0),
+            ("rho", 1.225),
+            ("rho_t_ref", 1.225),
+            ("rho_dT", -1.225),
+            ("rho_floor", psi * 1.0e-5),
+            ("t_ref", 1.0),
+            ("psi_ref", psi),
+            ("psi", psi),
+            ("psi_precond", 0.25),
+            ("u_ref", 2.0),
+            ("precond_mask", 1.0),
+            ("dt_local", 2.0e-4),
+            ("d_p", 2.0e-4 / 1.225),
+        ] {
+            set(name, value);
+        }
+        let u_off = model.state_layout.offset_for("U").expect("U offset") as usize;
+        let p_off = model.state_layout.offset_for("p").expect("p offset") as usize;
+        let t_off = model.state_layout.offset_for("T").expect("T offset") as usize;
+        for (cell, row) in state.chunks_exact_mut(stride).enumerate() {
+            let x = mesh.cell_cx[cell] as f32;
+            let y = mesh.cell_cy[cell] as f32;
+            row[u_off] = 0.08 + 0.03 * x - 0.01 * y;
+            row[u_off + 1] = -0.02 + 0.015 * y;
+            row[p_off] = 0.04 * (3.0 * x).sin() * (2.0 * y).cos();
+            row[t_off] = 0.95 + 0.08 * x + 0.02 * y;
+        }
+        plan.write_state_bytes(bytemuck::cast_slice(&state))
+            .expect("seed state");
+        plan.initialize_history();
+        let initial = plan.snapshot_full();
+
+        // Fixed policy uses the identical accepted-state health/rollback route,
+        // but must never let the measured spectral rate modify the configured
+        // timestep.
+        let (fixed_tx, fixed_rx) = std::sync::mpsc::channel();
+        let fixed_submission = plan
+            .step_explicit_autonomous_batch_with_status(3, false, 0.9, move |status| {
+                fixed_tx.send(status).expect("send fixed deferred status");
+            })
+            .expect("submit fixed autonomous batch");
+        plan.context
+            .device
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(fixed_submission),
+                timeout: None,
+            })
+            .expect("wait fixed autonomous batch in test");
+        let fixed = fixed_rx
+            .recv()
+            .expect("receive fixed deferred status")
+            .expect("fixed autonomous status");
+        assert_eq!(
+            fixed.accepted_total, 3,
+            "unexpected fixed status: {fixed:?}"
+        );
+        assert_eq!(
+            fixed.accepted_batch, 3,
+            "unexpected fixed batch count: {fixed:?}"
+        );
+        assert!(!fixed.halted, "valid fixed batch halted: {fixed:?}");
+        assert_eq!(fixed.last_dt.to_bits(), 1.0e-5_f32.to_bits());
+        assert_eq!(fixed.next_dt.to_bits(), fixed.last_dt.to_bits());
+        assert_eq!(fixed.max_base_rate.to_bits(), 0);
+        assert_eq!(fixed.max_rhie_chow_turnover.to_bits(), 0);
+        assert_eq!(fixed.total_rate.to_bits(), 0);
+        let fixed_exact = initial.time as f64 + 3.0 * f64::from(1.0e-5_f32);
+        assert!((fixed.time - fixed_exact).abs() < 2.0e-14);
+        plan.reconcile_explicit_control_status(fixed)
+            .expect("reconcile fixed autonomous status");
+        assert_eq!(plan.dt().to_bits(), 1.0e-5_f32.to_bits());
+        plan.restore_full(&initial)
+            .expect("restore after fixed policy audit");
+
+        let (status_tx, status_rx) = std::sync::mpsc::channel();
+        let submission = plan
+            .step_explicit_adaptive_batch_with_status(3, 0.9, move |status| {
+                status_tx.send(status).expect("send deferred status");
+            })
+            .expect("submit adaptive batch");
+        plan.context
+            .device
+            .poll(wgpu::PollType::Wait {
+                submission_index: Some(submission),
+                timeout: None,
+            })
+            .expect("wait adaptive batch in test");
+        let status = status_rx
+            .recv()
+            .expect("receive deferred status")
+            .expect("adaptive status");
+        assert_eq!(status.accepted_total, 3, "unexpected status: {status:?}");
+        assert_eq!(
+            status.accepted_batch, 3,
+            "unexpected batch count: {status:?}"
+        );
+        assert!(!status.halted, "valid batch halted: {status:?}");
+        assert!(status.max_base_rate.is_finite() && status.max_base_rate > 0.0);
+        assert!(status.max_rhie_chow_turnover.is_finite());
+        assert_eq!(
+            status.total_rate.to_bits(),
+            (status.max_base_rate + status.max_rhie_chow_turnover).to_bits(),
+            "controller must add independently reduced maxima"
+        );
+        assert!(status.next_dt <= status.last_dt * 1.2 * (1.0 + 2.0e-6));
+        plan.reconcile_explicit_control_status(status)
+            .expect("reconcile valid status");
+
+        #[cfg(feature = "meshgen")]
+        {
+            let accepted = plan.snapshot_full();
+            let metrics = crate::sim::explicit_cell_metrics(&mesh);
+            let params = crate::sim::RuntimeParams {
+                adaptive_dt: true,
+                target_cfl: 0.9,
+                requested_dt: 1.0e-5,
+                dtau: 0.0,
+                log_convergence: false,
+                log_every_steps: 100,
+                advection_scheme: crate::solver::scheme::Scheme::Upwind,
+                time_scheme: crate::solver::gpu::enums::TimeScheme::RK4,
+                preconditioner: crate::solver::gpu::structs::PreconditionerType::Jacobi,
+                outer_iters: 1,
+                outer_auto_converge: false,
+                low_mach_model: crate::solver::gpu::enums::GpuLowMachPrecondModel::Off,
+                low_mach_theta_floor: 1.0e-6,
+                low_mach_pressure_coupling_alpha: 1.0,
+                alpha_u: 1.0,
+                alpha_p: 1.0,
+                inlet_velocity: 0.1,
+                density: 1.225,
+                viscosity: 1.81e-5,
+                eos: crate::solver::model::eos::EosSpec::Constant,
+                compressibility_psi: psi,
+                outlet_back_pressure: 0.0,
+                allmach_precond_uref_min: 1.0,
+                pressure_inlet: false,
+                inlet_pressure: 0.0,
+            };
+            let host = crate::sim::sample_allmach_explicit_state(
+                &accepted.state,
+                &model.state_layout,
+                &metrics,
+                &mesh,
+                &params,
+                true,
+            );
+            assert_eq!(host.invalid, 0, "host reference rejected accepted state");
+            let rel =
+                (status.total_rate as f64 - host.max_rate).abs() / host.max_rate.abs().max(1.0e-30);
+            assert!(
+                rel < 7.5e-4,
+                "device/host accepted-state rate mismatch: device={} host={} rel={rel:e}",
+                status.total_rate,
+                host.max_rate
+            );
+            let device_candidate = 0.8_f64 * 0.9 / status.total_rate as f64;
+            let host_candidate = 0.8_f64 * 0.9 / host.max_rate;
+            assert!((device_candidate - host_candidate).abs() / host_candidate < 7.5e-4);
+        }
+
+        // Build the exact one-step accepted prefix, including both history
+        // levels and scalar counters.
+        plan.restore_full(&initial).expect("restore initial state");
+        plan.step_explicit_adaptive_batch(1, 0.9)
+            .expect("submit accepted prefix");
+        let prefix_status =
+            pollster::block_on(plan.read_explicit_control_status()).expect("prefix status");
+        assert_eq!(prefix_status.accepted_total, 1);
+        assert_eq!(prefix_status.accepted_batch, 1);
+        plan.reconcile_explicit_control_status(prefix_status)
+            .expect("reconcile prefix");
+        let expected_prefix = plan.snapshot_full();
+
+        // Deterministically inject a controller-visible invalidity into the
+        // second candidate. The B=3 route must retain exactly the B=1 accepted
+        // prefix: current/old/old-old bytes, time, and committed step count.
+        plan.restore_full(&initial)
+            .expect("restore for injected failure");
+        res(&plan)
+            .explicit_adaptive_control
+            .as_ref()
+            .expect("adaptive controller")
+            .inject_failure_after(1);
+        plan.step_explicit_adaptive_batch(3, 0.9)
+            .expect("submit invalid adaptive batch");
+        let bad = pollster::block_on(plan.read_explicit_control_status())
+            .expect("invalid adaptive status");
+        assert!(bad.halted, "invalid candidate did not halt: {bad:?}");
+        assert!(bad.invalid_count > 0, "invalid candidate was not counted");
+        assert_eq!(bad.accepted_total, 1, "wrong accepted prefix length");
+        assert_eq!(
+            bad.accepted_batch, 1,
+            "wrong accepted count for failed batch"
+        );
+        plan.reconcile_explicit_control_status(bad)
+            .expect("reconcile failed batch");
+        let frozen = plan.snapshot_full();
+        assert_eq!(frozen.state, expected_prefix.state, "current state prefix");
+        assert_eq!(
+            frozen.state_old, expected_prefix.state_old,
+            "old state prefix"
+        );
+        assert_eq!(
+            frozen.state_old_old, expected_prefix.state_old_old,
+            "old-old state prefix"
+        );
+        assert_eq!(frozen.time.to_bits(), expected_prefix.time.to_bits());
+        assert_eq!(frozen.step_count, expected_prefix.step_count);
+
+        // A lost/decode-failed tail status means the host cannot recover the
+        // authoritative ping-pong phase. Pin the fail-closed contract: no
+        // subsequent autonomous submission may guess and resume this backend.
+        res(&plan)
+            .explicit_adaptive_control
+            .as_ref()
+            .expect("adaptive controller")
+            .status_fault_flag()
+            .store(true, Ordering::Release);
+        let error = plan
+            .step_explicit_autonomous_batch(1, true, 0.9)
+            .expect_err("status-faulted controller resumed");
+        assert!(error.contains("non-resumable"), "unexpected error: {error}");
+    }
+
+    #[cfg(feature = "meshgen")]
+    #[test]
+    fn autonomous_allmach_pressure_rates_fixed_fast_path_and_gpu_selected_frame() {
+        let mesh = generate_structured_rect_mesh(
+            6,
+            3,
+            1.0,
+            0.5,
+            BoundarySides {
+                left: BoundaryType::Inlet,
+                right: BoundaryType::Outlet,
+                bottom: BoundaryType::Wall,
+                top: BoundaryType::Wall,
+            },
+        );
+        let model = crate::solver::model::allmach_pressure_model().expect("all-Mach pressure");
+        let config = crate::solver::gpu::program::plan_instance::PlanInitConfig {
+            advection_scheme: crate::solver::scheme::Scheme::Upwind,
+            time_scheme: crate::solver::gpu::enums::TimeScheme::RK4,
+            preconditioner: crate::solver::gpu::structs::PreconditionerType::Jacobi,
+            stepping: SteppingMode::Explicit,
+        };
+        let mut plan = match pollster::block_on(crate::solver::gpu::lowering::lower_program_plan(
+            &mesh, &model, config, None, None,
+        )) {
+            Ok(plan) => plan,
+            Err(error) => {
+                eprintln!("[barotropic-explicit-control] no compatible GPU ({error}); skipping");
+                return;
+            }
+        };
+        let capabilities = plan
+            .autonomous_explicit_capabilities()
+            .expect("barotropic autonomous capabilities");
+        assert!(
+            capabilities.fixed_health
+                && capabilities.adaptive_health
+                && capabilities.accepted_state_copy
+        );
+        {
+            let control = res(&plan)
+                .explicit_adaptive_control
+                .as_ref()
+                .expect("barotropic controller");
+            let leases = [
+                control.acquire_status_staging().expect("status slot 0"),
+                control.acquire_status_staging().expect("status slot 1"),
+                control.acquire_status_staging().expect("status slot 2"),
+            ];
+            assert!(
+                control.acquire_status_staging().is_err(),
+                "status ring overcommitted"
+            );
+            drop(leases);
+            drop(control.acquire_status_staging().expect("released status slot"));
+        }
+        plan.set_named_param("dt", PlanParamValue::F32(1.0e-5))
+            .expect("set dt");
+        plan.set_named_param("density", PlanParamValue::F32(1.225))
+            .expect("set density");
+        plan.set_named_param("viscosity", PlanParamValue::F32(1.81e-5))
+            .expect("set viscosity");
+
+        let stride = model.state_layout.stride() as usize;
+        let mut state = vec![0.0_f32; mesh.num_cells() * stride];
+        let mut set = |name: &str, value: f32| {
+            let off = model
+                .state_layout
+                .offset_for(name)
+                .unwrap_or_else(|| panic!("barotropic field {name}"))
+                as usize;
+            for row in state.chunks_exact_mut(stride) {
+                row[off] = value;
+            }
+        };
+        let psi = 1.0e-4_f32;
+        for (name, value) in [
+            ("p", 0.0),
+            ("psi", psi),
+            ("psi_precond", 0.25),
+            ("rho", 1.225),
+            ("dt_local", 2.0e-4),
+            ("d_p", 2.0e-4 / 1.225),
+            ("u_ref", 2.0),
+            ("precond_mask", 1.0),
+        ] {
+            set(name, value);
+        }
+        let u_off = model.state_layout.offset_for("U").expect("U") as usize;
+        let p_off = model.state_layout.offset_for("p").expect("p") as usize;
+        for (cell, row) in state.chunks_exact_mut(stride).enumerate() {
+            let x = mesh.cell_cx[cell] as f32;
+            let y = mesh.cell_cy[cell] as f32;
+            row[u_off] = 0.08 + 0.03 * x - 0.01 * y;
+            row[u_off + 1] = -0.02 + 0.015 * y;
+            row[p_off] = 0.04 * (3.0 * x).sin() * (2.0 * y).cos();
+        }
+        plan.write_state_bytes(bytemuck::cast_slice(&state))
+            .expect("seed barotropic state");
+        plan.initialize_history();
+        let initial = plan.snapshot_full();
+
+        plan.step_explicit_autonomous_batch(2, true, 0.9)
+            .expect("barotropic adaptive B=2");
+        let adaptive = pollster::block_on(plan.read_explicit_control_status())
+            .expect("barotropic adaptive status");
+        assert_eq!(adaptive.accepted_batch, 2, "{adaptive:?}");
+        assert!(!adaptive.halted, "{adaptive:?}");
+        assert!(adaptive.max_base_rate > 0.0);
+        assert!(adaptive.max_rhie_chow_turnover >= 0.0);
+        assert_eq!(
+            adaptive.total_rate.to_bits(),
+            (adaptive.max_base_rate + adaptive.max_rhie_chow_turnover).to_bits()
+        );
+        plan.reconcile_explicit_control_status(adaptive)
+            .expect("reconcile barotropic adaptive");
+        let accepted = plan.snapshot_full();
+        let params = crate::sim::RuntimeParams {
+            adaptive_dt: true,
+            target_cfl: 0.9,
+            requested_dt: 1.0e-5,
+            dtau: 0.0,
+            log_convergence: false,
+            log_every_steps: 100,
+            advection_scheme: crate::solver::scheme::Scheme::Upwind,
+            time_scheme: crate::solver::gpu::enums::TimeScheme::RK4,
+            preconditioner: crate::solver::gpu::structs::PreconditionerType::Jacobi,
+            outer_iters: 1,
+            outer_auto_converge: false,
+            low_mach_model: crate::solver::gpu::enums::GpuLowMachPrecondModel::Off,
+            low_mach_theta_floor: 1.0e-6,
+            low_mach_pressure_coupling_alpha: 1.0,
+            alpha_u: 1.0,
+            alpha_p: 1.0,
+            inlet_velocity: 0.1,
+            density: 1.225,
+            viscosity: 1.81e-5,
+            eos: crate::solver::model::eos::EosSpec::Constant,
+            compressibility_psi: psi,
+            outlet_back_pressure: 0.0,
+            allmach_precond_uref_min: 1.0,
+            pressure_inlet: false,
+            inlet_pressure: 0.0,
+        };
+        let metrics = crate::sim::explicit_cell_metrics(&mesh);
+        let host = crate::sim::sample_allmach_explicit_state(
+            &accepted.state,
+            &model.state_layout,
+            &metrics,
+            &mesh,
+            &params,
+            false,
+        );
+        assert_eq!(host.invalid, 0, "host rejected barotropic state");
+        let rel = (f64::from(adaptive.total_rate) - host.max_rate).abs()
+            / host.max_rate.abs().max(1.0e-30);
+        assert!(
+            rel < 7.5e-4,
+            "barotropic device/host rate: device={} host={} rel={rel:e}",
+            adaptive.total_rate,
+            host.max_rate
+        );
+
+        plan.restore_full(&initial)
+            .expect("restore fixed barotropic");
+        plan.step_explicit_autonomous_batch(2, false, 0.9)
+            .expect("barotropic fixed B=2");
+        let fixed = pollster::block_on(plan.read_explicit_control_status())
+            .expect("barotropic fixed status");
+        assert_eq!(fixed.accepted_batch, 2, "{fixed:?}");
+        assert!(!fixed.halted, "{fixed:?}");
+        assert_eq!(fixed.next_dt.to_bits(), fixed.last_dt.to_bits());
+        assert_eq!(fixed.max_base_rate.to_bits(), 0);
+        assert_eq!(fixed.max_rhie_chow_turnover.to_bits(), 0);
+        assert_eq!(fixed.total_rate.to_bits(), 0);
+
+        // Build an independent accepted B=1 prefix.
+        plan.restore_full(&initial)
+            .expect("restore barotropic prefix");
+        plan.step_explicit_autonomous_batch(1, true, 0.9)
+            .expect("barotropic prefix");
+        let prefix_status = pollster::block_on(plan.read_explicit_control_status())
+            .expect("barotropic prefix status");
+        plan.reconcile_explicit_control_status(prefix_status)
+            .expect("reconcile barotropic prefix");
+        let prefix = plan.snapshot_full();
+
+        // B=3 returns the host shadow to its initial phase, while only B=1 is
+        // accepted. The GPU selector must still publish the accepted buffer.
+        plan.restore_full(&initial)
+            .expect("restore barotropic failure");
+        res(&plan)
+            .explicit_adaptive_control
+            .as_ref()
+            .expect("barotropic controller")
+            .inject_failure_after(1);
+        plan.step_explicit_autonomous_batch(3, true, 0.9)
+            .expect("barotropic failing B=3");
+        let destination = plan.context.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("barotropic-accepted-frame"),
+            size: res(&plan).fields.state_size_bytes(),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        plan.install_autonomous_frame_copy_targets(&[
+            destination.clone(),
+            destination.clone(),
+            destination.clone(),
+        ])
+        .expect("install GPU-selected frame targets");
+        assert_eq!(plan.autonomous_frame_copy_bind_group_count(), 3);
+        let mut frame_encoder =
+            plan.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("barotropic-accepted-frame"),
+                });
+        plan.encode_autonomous_accepted_state_copy(&mut frame_encoder, 0)
+            .expect("GPU-selected accepted frame");
+        plan.context.queue.submit(Some(frame_encoder.finish()));
+        let frame_bytes = pollster::block_on(crate::solver::gpu::readback::read_buffer_cached(
+            &plan.context,
+            &plan.staging_cache,
+            &plan.profiling_stats,
+            &destination,
+            destination.size(),
+            "barotropic-accepted-frame-readback",
+        ));
+        let frame: Vec<f32> = bytemuck::cast_slice(&frame_bytes).to_vec();
+        assert_eq!(
+            frame, prefix.state,
+            "GPU frame selected rejected/stale phase"
+        );
+        let failed = pollster::block_on(plan.read_explicit_control_status())
+            .expect("barotropic failure status");
+        assert!(failed.halted && failed.invalid_count > 0, "{failed:?}");
+        assert_eq!(failed.accepted_batch, 1);
+
+        // Build an independent fixed B=5 reference, then force the portable
+        // lo/hi accepted counter adjacent to its u32 carry. The injected value
+        // is congruent to the already accepted B=1 phase modulo three.
+        plan.restore_full(&initial).expect("restore wrap reference");
+        res(&plan)
+            .explicit_adaptive_control
+            .as_ref()
+            .expect("barotropic controller")
+            .inject_failure_after(u32::MAX);
+        plan.step_explicit_autonomous_batch(5, false, 0.9)
+            .expect("submit wrap reference B=5");
+        let reference_status = pollster::block_on(plan.read_explicit_control_status())
+            .expect("wrap reference status");
+        assert_eq!(reference_status.accepted_total, 5);
+        plan.reconcile_explicit_control_status(reference_status)
+            .expect("reconcile wrap reference");
+        let wrap_reference = plan.snapshot_full();
+
+        plan.restore_full(&initial).expect("restore wrap carry");
+        plan.step_explicit_autonomous_batch(1, false, 0.9)
+            .expect("initialize wrap carry controller");
+        let initial_status = pollster::block_on(plan.read_explicit_control_status())
+            .expect("initial wrap status");
+        assert_eq!(initial_status.accepted_total, 1);
+        let control = res(&plan)
+            .explicit_adaptive_control
+            .as_ref()
+            .expect("barotropic controller");
+        let before_wrap = u64::from(u32::MAX) - 2;
+        control.inject_accepted_total(&plan.context.queue, before_wrap);
+        plan.step_explicit_autonomous_batch(4, false, 0.9)
+            .expect("submit wrap-crossing B=4");
+        let mut wrap_frame_encoder =
+            plan.context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("barotropic-wrap-frame"),
+                });
+        plan.encode_autonomous_accepted_state_copy(&mut wrap_frame_encoder, 0)
+            .expect("GPU-selected wrap frame");
+        plan.context
+            .queue
+            .submit(Some(wrap_frame_encoder.finish()));
+        assert_eq!(
+            plan.autonomous_frame_copy_bind_group_count(),
+            3,
+            "accepted frame encoding must reuse the installed bind groups"
+        );
+        let wrap_frame_bytes =
+            pollster::block_on(crate::solver::gpu::readback::read_buffer_cached(
+                &plan.context,
+                &plan.staging_cache,
+                &plan.profiling_stats,
+                &destination,
+                destination.size(),
+                "barotropic-wrap-frame-readback",
+            ));
+        let wrap_frame: Vec<f32> = bytemuck::cast_slice(&wrap_frame_bytes).to_vec();
+        assert_eq!(
+            wrap_frame, wrap_reference.state,
+            "lo/hi phase selected the wrong accepted frame"
+        );
+        let wrapped = pollster::block_on(plan.read_explicit_control_status())
+            .expect("wrap carry status");
+        let expected_total = before_wrap + 4;
+        assert!(!wrapped.halted && wrapped.invalid_count == 0, "{wrapped:?}");
+        assert_eq!(wrapped.accepted_total, expected_total);
+        assert_eq!(wrapped.accepted_batch, 4);
+        assert_eq!(wrapped.time.to_bits(), reference_status.time.to_bits());
+        plan.reconcile_explicit_control_status(wrapped)
+            .expect("reconcile wrap carry");
+        let wrapped_state = plan.snapshot_full();
+        assert_eq!(wrapped_state.state, wrap_reference.state);
+        assert_eq!(wrapped_state.state_old, wrap_reference.state_old);
+        assert_eq!(wrapped_state.state_old_old, wrap_reference.state_old_old);
+        assert_eq!(
+            wrapped_state.step_count,
+            initial.step_count.saturating_add(expected_total)
+        );
+    }
+
+    #[test]
+    fn autonomous_density_compressible_advertises_capability_and_accepts_healthy_batch() {
+        let mesh = generate_structured_rect_mesh(6, 4, 1.0, 0.5, BoundarySides::wall());
+        let model = crate::solver::model::compressible_model().expect("compressible model");
+        let config = crate::solver::gpu::program::plan_instance::PlanInitConfig {
+            advection_scheme: crate::solver::scheme::Scheme::Upwind,
+            time_scheme: crate::solver::gpu::enums::TimeScheme::RK4,
+            preconditioner: crate::solver::gpu::structs::PreconditionerType::Jacobi,
+            stepping: SteppingMode::Explicit,
+        };
+        let mut plan = match pollster::block_on(
+            crate::solver::gpu::lowering::lower_program_plan(
+                &mesh, &model, config, None, None,
+            ),
+        ) {
+            Ok(plan) => plan,
+            Err(error) => {
+                eprintln!(
+                    "[compressible-explicit-control] no compatible GPU ({error}); skipping"
+                );
+                return;
+            }
+        };
+
+        let capabilities = plan
+            .autonomous_explicit_capabilities()
+            .expect("density-based compressible autonomous capabilities");
+        assert!(
+            capabilities.fixed_health
+                && capabilities.adaptive_health
+                && capabilities.accepted_state_copy
+        );
+        assert!(matches!(
+            res(&plan).explicit_adaptive_control,
+            Some(AutonomousExplicitControl::Compressible(_))
+        ));
+
+        // Deliberately unsafe for this mesh's acoustic scale. The accepted-
+        // state bootstrap must replace it before stage 1, rather than letting
+        // the first candidate fail after an RK4 step taken at dt=1.
+        plan.set_named_param("dt", PlanParamValue::F32(1.0))
+            .expect("set intentionally oversized compressible dt");
+        plan.set_named_param("viscosity", PlanParamValue::F32(0.05))
+            .expect("set compressible viscosity");
+        let stride = model.state_layout.stride() as usize;
+        let mut state = vec![0.0_f32; mesh.num_cells() * stride];
+        let rho = model.state_layout.offset_for("rho").expect("rho offset") as usize;
+        let rho_e = model
+            .state_layout
+            .offset_for("rho_e")
+            .expect("rho_e offset") as usize;
+        let p = model.state_layout.offset_for("p").expect("p offset") as usize;
+        let temperature = model
+            .state_layout
+            .offset_for("T")
+            .expect("temperature offset") as usize;
+        for cell in 0..mesh.num_cells() {
+            let base = cell * stride;
+            state[base + rho] = 1.0;
+            // Four times the reference internal energy while the auxiliary
+            // p/T caches deliberately remain stale.  The bootstrap CFL must
+            // reconstruct c from conserved rho/rho_e, not reuse theta_ref.
+            state[base + rho_e] = 10.0;
+            state[base + p] = 1.0;
+            state[base + temperature] = 1.0;
+        }
+        plan.write_state_bytes(bytemuck::cast_slice(&state))
+            .expect("seed uniform compressible state");
+        plan.initialize_history();
+
+        plan.step_explicit_autonomous_batch(1, true, 0.5)
+            .expect("submit compressible autonomous batch");
+        let status = pollster::block_on(plan.read_explicit_control_status())
+            .expect("read compressible autonomous status");
+        assert!(!status.halted, "healthy compressible batch halted: {status:?}");
+        assert_eq!(status.invalid_count, 0, "healthy state failed EOS audit");
+        assert_eq!(status.accepted_batch, 1);
+        assert_eq!(status.accepted_total, 1);
+        assert!(status.total_rate.is_finite() && status.total_rate > 0.0);
+        assert!(status.next_dt.is_finite() && status.next_dt > 0.0);
+        assert!(
+            status.last_dt > 0.0 && status.last_dt < 1.0,
+            "first stage used the oversized host dt instead of the bootstrap CFL: {status:?}"
+        );
+        let min_h = mesh
+            .cell_vol
+            .iter()
+            .copied()
+            .map(f64::sqrt)
+            .fold(f64::INFINITY, f64::min) as f32;
+        let hot_sound = (1.4_f32 * 0.4 * 10.0).sqrt();
+        let hot_wave_dt = 0.5 * min_h / hot_sound;
+        assert!(
+            status.last_dt <= hot_wave_dt * 1.001,
+            "bootstrap ignored accepted-state sound speed: dt={} hot bound={hot_wave_dt}",
+            status.last_dt,
+        );
+        assert!(
+            status.last_dt * status.total_rate <= 0.500_5,
+            "bootstrapped first step exceeds target CFL: {status:?}"
+        );
+        plan.reconcile_explicit_control_status(status)
+            .expect("reconcile compressible autonomous batch");
+        assert_eq!(res(&plan).time_integration.step_count, 1);
+
+        // Capability observation owns the EOS transition seam. Leaving the
+        // ideal-gas closure must reject before touching the host phase; coming
+        // back must re-seed the device clock/counter from reconciled shadows.
+        let accepted_phase = res(&plan).fields.state.step_index();
+        plan.set_named_param("eos.dp_drho", PlanParamValue::F32(1.0))
+            .expect("select unsupported linear EOS signature");
+        assert!(plan.autonomous_explicit_capabilities().is_none());
+        let error = plan
+            .step_explicit_autonomous_batch(1, true, 0.5)
+            .expect_err("unsupported EOS entered autonomous route");
+        assert!(error.contains("ideal-gas EOS"), "unexpected error: {error}");
+        assert_eq!(
+            res(&plan).fields.state.step_index(),
+            accepted_phase,
+            "pre-submit EOS rejection mutated the host phase"
+        );
+
+        plan.set_named_param("eos.dp_drho", PlanParamValue::F32(0.0))
+            .expect("restore ideal-gas EOS signature");
+        assert!(plan.autonomous_explicit_capabilities().is_some());
+        plan.step_explicit_autonomous_batch(1, true, 0.5)
+            .expect("submit after ideal-gas re-entry");
+        let reentered = pollster::block_on(plan.read_explicit_control_status())
+            .expect("read re-entered compressible status");
+        assert_eq!(
+            reentered.accepted_total, 1,
+            "EOS re-entry retained the old controller epoch instead of re-seeding"
+        );
+        assert_eq!(reentered.accepted_batch, 1);
+        assert!(!reentered.halted, "re-entered batch halted: {reentered:?}");
+        plan.reconcile_explicit_control_status(reentered)
+            .expect("reconcile re-entered compressible batch");
+        assert_eq!(res(&plan).time_integration.step_count, 2);
+    }
+
+    fn assert_nonpositive_volume_halts_before_stage_one(model: ModelSpec, adaptive: bool) {
+        let mesh = generate_structured_rect_mesh(4, 3, 1.0, 0.75, BoundarySides::wall());
+        let config = crate::solver::gpu::program::plan_instance::PlanInitConfig {
+            advection_scheme: crate::solver::scheme::Scheme::Upwind,
+            time_scheme: crate::solver::gpu::enums::TimeScheme::RK4,
+            preconditioner: crate::solver::gpu::structs::PreconditionerType::Jacobi,
+            stepping: SteppingMode::Explicit,
+        };
+        let mut plan = match pollster::block_on(
+            crate::solver::gpu::lowering::lower_program_plan(
+                &mesh, &model, config, None, None,
+            ),
+        ) {
+            Ok(plan) => plan,
+            Err(error) => {
+                eprintln!(
+                    "[autonomous-volume-preflight] no compatible GPU for {} ({error}); skipping",
+                    model.id
+                );
+                return;
+            }
+        };
+
+        plan.set_named_param("dt", PlanParamValue::F32(1.0e-5))
+            .expect("set volume-preflight dt");
+        let stride = model.state_layout.stride() as usize;
+        let mut state = vec![0.0_f32; mesh.num_cells() * stride];
+        if model.id == "compressible" {
+            let rho = model.state_layout.offset_for("rho").expect("rho") as usize;
+            let rho_e = model.state_layout.offset_for("rho_e").expect("rho_e") as usize;
+            let p = model.state_layout.offset_for("p").expect("p") as usize;
+            let temperature = model.state_layout.offset_for("T").expect("T") as usize;
+            for row in state.chunks_exact_mut(stride) {
+                row[rho] = 1.0;
+                row[rho_e] = 2.5;
+                row[p] = 1.0;
+                row[temperature] = 1.0;
+            }
+        } else {
+            let mut set = |name: &str, value: f32| {
+                let offset = model
+                    .state_layout
+                    .offset_for(name)
+                    .unwrap_or_else(|| panic!("all-Mach volume-preflight field {name}"))
+                    as usize;
+                for row in state.chunks_exact_mut(stride) {
+                    row[offset] = value;
+                }
+            };
+            for (name, value) in [
+                ("p", 0.0),
+                ("psi", 1.0e-4),
+                ("psi_precond", 0.25),
+                ("rho", 1.225),
+                ("dt_local", 2.0e-4),
+                ("d_p", 2.0e-4 / 1.225),
+                ("u_ref", 2.0),
+                ("precond_mask", 1.0),
+            ] {
+                set(name, value);
+            }
+        }
+        plan.write_state_bytes(bytemuck::cast_slice(&state))
+            .expect("seed volume-preflight state");
+        plan.initialize_history();
+        let initial = plan.snapshot_full();
+        let initial_phase = res(&plan).fields.state.step_index();
+        assert!(initial.cell_vols[0].is_finite() && initial.cell_vols[0] > 0.0);
+
+        for invalid_volume in [0.0_f32, -initial.cell_vols[0], f32::NAN] {
+            plan.restore_full(&initial)
+                .expect("restore volume-preflight epoch");
+
+            // The low-storage base is written by stage_1. A byte sentinel is
+            // therefore a direct ordering oracle: if preflight only detected
+            // the bad mesh after RK work, this buffer could not remain intact.
+            let rk_base = res(&plan)
+                .fields
+                .workspaces
+                .get("rk_base")
+                .expect("RK base workspace")
+                .clone();
+            let sentinel = vec![0xa5_u8; rk_base.size() as usize];
+            plan.context.queue.write_buffer(&rk_base, 0, &sentinel);
+            let cell_vols = res(&plan).runtime.common.mesh.b_cell_vols.clone();
+            plan.context.queue.write_buffer(
+                &cell_vols,
+                0,
+                bytemuck::bytes_of(&invalid_volume),
+            );
+
+            plan.step_explicit_autonomous_batch(2, adaptive, 0.5)
+                .expect("submit invalid-volume autonomous batch");
+            let status = pollster::block_on(plan.read_explicit_control_status())
+                .expect("read invalid-volume status");
+            assert!(
+                status.halted,
+                "{} adaptive={adaptive} volume={invalid_volume:?} did not halt: {status:?}",
+                model.id
+            );
+            assert!(status.invalid_count > 0, "invalid volume was not counted");
+            assert_eq!(status.accepted_total, 0, "accepted invalid geometry");
+            assert_eq!(status.accepted_batch, 0, "accepted invalid batch step");
+            assert_eq!(status.time.to_bits(), f64::from(initial.time).to_bits());
+            plan.reconcile_explicit_control_status(status)
+                .expect("reconcile invalid-volume status");
+            assert_eq!(
+                res(&plan).fields.state.step_index(),
+                initial_phase,
+                "invalid batch selected an unaccepted phase"
+            );
+
+            let frozen = plan.snapshot_full();
+            assert_eq!(frozen.state, initial.state, "current state changed");
+            assert_eq!(frozen.state_old, initial.state_old, "old state changed");
+            assert_eq!(
+                frozen.state_old_old, initial.state_old_old,
+                "old-old state changed"
+            );
+            assert_eq!(frozen.time.to_bits(), initial.time.to_bits());
+            assert_eq!(frozen.step_count, initial.step_count);
+            let rk_bytes = pollster::block_on(res(&plan).runtime.common.read_buffer(
+                &rk_base,
+                rk_base.size(),
+                "volume-preflight:rk-base",
+            ));
+            assert_eq!(
+                rk_bytes, sentinel,
+                "{} adaptive={adaptive} volume={invalid_volume:?} reached stage_1",
+                model.id
+            );
+        }
+    }
+
+    #[test]
+    fn autonomous_allmach_rejects_nonpositive_volume_before_stage_one() {
+        for adaptive in [false, true] {
+            assert_nonpositive_volume_halts_before_stage_one(
+                crate::solver::model::allmach_pressure_model().expect("all-Mach pressure"),
+                adaptive,
+            );
+        }
+    }
+
+    #[test]
+    fn autonomous_compressible_rejects_nonpositive_volume_before_stage_one() {
+        for adaptive in [false, true] {
+            assert_nonpositive_volume_halts_before_stage_one(
+                crate::solver::model::compressible_model().expect("compressible"),
+                adaptive,
+            );
+        }
+    }
+
+    #[cfg(feature = "meshgen")]
+    #[test]
+    fn driver_bootstraps_first_autonomous_step_from_resampled_rate() {
+        let mesh = generate_structured_rect_mesh(
+            8,
+            4,
+            2.0,
+            0.5,
+            BoundarySides {
+                left: BoundaryType::Inlet,
+                right: BoundaryType::Outlet,
+                bottom: BoundaryType::Wall,
+                top: BoundaryType::Wall,
+            },
+        );
+        let params = crate::sim::RuntimeParams {
+            adaptive_dt: true,
+            target_cfl: 0.9,
+            requested_dt: 0.02,
+            dtau: 0.0,
+            log_convergence: false,
+            log_every_steps: 100,
+            advection_scheme: crate::solver::scheme::Scheme::Upwind,
+            time_scheme: crate::solver::gpu::enums::TimeScheme::RK4,
+            preconditioner: crate::solver::gpu::structs::PreconditionerType::Jacobi,
+            outer_iters: 1,
+            outer_auto_converge: false,
+            low_mach_model: crate::solver::gpu::enums::GpuLowMachPrecondModel::Off,
+            low_mach_theta_floor: 1.0e-6,
+            low_mach_pressure_coupling_alpha: 1.0,
+            alpha_u: 1.0,
+            alpha_p: 1.0,
+            inlet_velocity: 0.1,
+            density: 1.225,
+            viscosity: 1.81e-5,
+            eos: crate::solver::model::eos::EosSpec::Constant,
+            compressibility_psi: (1.0 / (347.0_f64 * 347.0)) as f32,
+            outlet_back_pressure: 0.0,
+            allmach_precond_uref_min: 1.0,
+            pressure_inlet: false,
+            inlet_pressure: 0.0,
+        };
+        let n = mesh.num_cells();
+        let built = match pollster::block_on(crate::sim::SolverDriver::build(
+            &mesh,
+            crate::solver::model::allmach_thermal_model().expect("all-Mach thermal"),
+            &params,
+            &vec![(0.0, 0.0); n],
+            &vec![0.0; n],
+            None,
+            None,
+        )) {
+            Ok(built) => built,
+            Err(error) => {
+                eprintln!("[autonomous-bootstrap] no compatible GPU ({error}); skipping");
+                return;
+            }
+        };
+        let mut driver = built.driver;
+        driver.apply_params(&params);
+        let seeded_dt = driver.solver().dt();
+        assert!(
+            seeded_dt.is_finite() && seeded_dt > 0.0 && seeded_dt < params.requested_dt,
+            "resampled rate did not replace GUI requested dt: {seeded_dt}"
+        );
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        driver
+            .submit_autonomous_explicit_gpu_batch(1, move |result| {
+                let _ = tx.send(result);
+            })
+            .expect("submit first autonomous step");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let completed = loop {
+            driver
+                .poll_gpu_batch_completions()
+                .expect("poll autonomous bootstrap");
+            match rx.try_recv() {
+                Ok(result) => break result.expect("autonomous bootstrap status"),
+                Err(std::sync::mpsc::TryRecvError::Empty)
+                    if std::time::Instant::now() < deadline =>
+                {
+                    std::thread::yield_now();
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    panic!("autonomous bootstrap callback timed out")
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    panic!("autonomous bootstrap callback disconnected")
+                }
+            }
+        };
+        assert_eq!(completed.accepted_batch, 1, "{completed:?}");
+        assert!(!completed.halted, "{completed:?}");
+        assert_eq!(completed.last_dt.to_bits(), seeded_dt.to_bits());
     }
 
     #[test]

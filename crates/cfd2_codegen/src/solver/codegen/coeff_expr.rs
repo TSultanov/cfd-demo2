@@ -90,15 +90,20 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
                 eos_dp_drho_unit,
             ))
         }
-        "eos_p_offset" => Some(DynExpr::new(
-            Expr::ident("constants").field("eos_p_offset"),
+        "eos_p_ref" => Some(DynExpr::new(
+            Expr::ident("constants").field("eos_p_ref"),
             DslType::f32(),
             Pressure::UNIT,
         )),
         "eos_theta_ref" => Some(DynExpr::new(
             Expr::ident("constants").field("eos_theta_ref"),
             DslType::f32(),
-            Temperature::UNIT,
+            DivDim::<Pressure, Density>::UNIT,
+        )),
+        "eos_rho_ref" => Some(DynExpr::new(
+            Expr::ident("constants").field("eos_rho_ref"),
+            DslType::f32(),
+            Density::UNIT,
         )),
         // Buoyant Boussinesq runtime params. beta*g: acceleration per kelvin.
         "buoyant_beta_g" => Some(DynExpr::new(
@@ -393,6 +398,21 @@ mod tests {
         let expected_unit = DivDim::<Pressure, Density>::UNIT;
         assert_eq!(eos_dp_drho.unit, expected_unit);
         assert_eq!(eos_dp_drho.ty, DslType::f32());
+    }
+
+    #[test]
+    fn coeff_named_expr_dyn_centered_eos_constants_have_correct_units() {
+        let p_ref = coeff_named_expr_dyn("eos_p_ref").expect("eos_p_ref should exist");
+        let theta_ref =
+            coeff_named_expr_dyn("eos_theta_ref").expect("eos_theta_ref should exist");
+        let rho_ref = coeff_named_expr_dyn("eos_rho_ref").expect("eos_rho_ref should exist");
+
+        assert_eq!(p_ref.unit, Pressure::UNIT);
+        assert_eq!(theta_ref.unit, DivDim::<Pressure, Density>::UNIT);
+        assert_eq!(rho_ref.unit, Density::UNIT);
+        assert_eq!(p_ref.ty, DslType::f32());
+        assert_eq!(theta_ref.ty, DslType::f32());
+        assert_eq!(rho_ref.ty, DslType::f32());
     }
 
     #[test]

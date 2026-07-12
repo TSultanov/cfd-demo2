@@ -1448,16 +1448,13 @@ fn sweep_incompressible_obstacle() {
     }
 }
 
-/// Guards the GUI Model dropdown contents. The dropdown (`supported_ui_models`) is
-/// `all_models()` filtered to an explicit allowlist of physical-flow models, because
-/// `UiPortSet::is_complete()` (velocity+pressure present) ALONE also matches the
-/// MMS / biharmonic / demo *verification* variants — which only reproduce a
-/// manufactured solution, never a physical flow a user would run. This test
-/// documents which models completeness alone would leak, and asserts the two
-/// physical models are present and valid (so the dropdown is neither broken/empty
-/// nor polluted).
+/// Companion registry audit for the GUI model options. The authoritative option
+/// lists are tested by calling `CFDApp::supported_ui_models` in `ui::app`'s unit
+/// tests; this integration test verifies that every option those lists name is
+/// also registered and exposes complete velocity/pressure UI ports. Completeness
+/// alone is deliberately insufficient because MMS / demo variants satisfy it too.
 #[test]
-fn gui_model_dropdown_only_exposes_physical_models() {
+fn every_gui_model_option_is_registered_with_complete_ports() {
     let complete: Vec<&'static str> = cfd2::solver::model::all_models()
         .expect("all_models")
         .into_iter()
@@ -1466,15 +1463,24 @@ fn gui_model_dropdown_only_exposes_physical_models() {
         .collect();
     eprintln!("[ui-models] pass UiPortSet completeness (U+p): {complete:?}");
 
-    // The GUI dropdown allowlist (must mirror `supported_ui_models`).
-    const GUI_PHYSICAL: &[&str] =
-        &["incompressible_momentum", "compressible", "allmach_pressure"];
+    // Keep this registry-side union explicit. Exact ordering and topology
+    // partitioning are pinned against the real helper in `ui::app`.
+    const GUI_PHYSICAL: &[&str] = &[
+        "allmach_pressure",
+        "allmach_thermal",
+        "compressible",
+        "incompressible_momentum",
+        "incompressible_momentum_structured",
+        "allmach_thermal_structured",
+        "compressible_structured",
+    ];
     let leaked: Vec<&&str> = complete.iter().filter(|id| !GUI_PHYSICAL.contains(id)).collect();
     eprintln!(
         "[ui-models] completeness ALSO matches these non-physical variants (excluded by the dropdown allowlist): {leaked:?}"
     );
 
-    // Both physical models must exist and be complete, or the dropdown is broken.
+    // Every physical option must exist and be complete, or its renderer fields
+    // cannot be resolved from the model's UI ports.
     for id in GUI_PHYSICAL {
         assert!(
             complete.contains(id),

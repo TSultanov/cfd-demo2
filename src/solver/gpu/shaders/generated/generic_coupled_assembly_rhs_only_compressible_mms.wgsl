@@ -25,8 +25,9 @@ struct Constants {
     eos_gm1: f32,
     eos_r: f32,
     eos_dp_drho: f32,
-    eos_p_offset: f32,
+    eos_p_ref: f32,
     eos_theta_ref: f32,
+    eos_rho_ref: f32,
 }
 
 
@@ -149,7 +150,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     rhs_1 += state[idx * 26u + 23u] * vol;
     rhs_2 += state[idx * 26u + 24u] * vol;
     rhs_3 += state[idx * 26u + 25u] * vol;
-    rhs_6 += -constants.eos_p_offset * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
+    rhs_6 += constants.eos_dp_drho * constants.eos_rho_ref * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
+    rhs_6 += -constants.eos_p_ref * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
     for (var k = start; k < end; k++) {
         let face_idx = cell_faces[k];
         let owner = face_owner[face_idx];
@@ -202,7 +204,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         let scalar_mat_idx = cell_face_matrix_indices[k];
         let neighbor_rank = scalar_mat_idx - scalar_offset;
-        var phi_0: f32 = fluxes[face_idx * 8u + 0u];
+        var phi_0: f32 = fluxes[face_idx * 4u + 0u];
         if (owner != idx) {
             phi_0 -= phi_0 * 2.0;
         }
@@ -236,12 +238,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        var phi_1: f32 = fluxes[face_idx * 8u + 1u];
+        var phi_1: f32 = fluxes[face_idx * 4u + 1u];
         if (owner != idx) {
             phi_1 -= phi_1 * 2.0;
         }
         rhs_1 -= phi_1;
-        var phi_2: f32 = fluxes[face_idx * 8u + 2u];
+        var phi_2: f32 = fluxes[face_idx * 4u + 2u];
         if (owner != idx) {
             phi_2 -= phi_2 * 2.0;
         }
@@ -257,7 +259,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        var phi_3: f32 = fluxes[face_idx * 8u + 3u];
+        var phi_3: f32 = fluxes[face_idx * 4u + 3u];
         if (owner != idx) {
             phi_3 -= phi_3 * 2.0;
         }

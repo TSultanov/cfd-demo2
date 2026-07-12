@@ -11,7 +11,13 @@ impl ConstantsModule {
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(label),
             contents: bytemuck::bytes_of(&values),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            // STORAGE lets the autonomous explicit controller update only the
+            // timestep/time words between dispatches in one command buffer.
+            // Generated physics kernels continue to bind this as UNIFORM; the
+            // usage transition is ordered by the intervening pass boundary.
+            usage: wgpu::BufferUsages::UNIFORM
+                | wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST,
         });
         Self { values, buffer }
     }

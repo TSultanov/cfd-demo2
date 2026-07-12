@@ -30,8 +30,9 @@ pub struct CentralUpwindDecl {
     pub velocity: &'static str,
     /// Primitive pressure field (named by the generalized wave speed).
     pub pressure_field: &'static str,
-    /// Face pressure from reconstructed primitives; atoms: `density`,
-    /// `temperature` fields (e.g. `rho * R * T`).
+    /// Face pressure from reconstructed conserved variables. Scalar atoms may
+    /// reference `density` and `energy`; `mag_sqr(momentum)` is lowered from
+    /// the same scheme/limiter's reconstructed momentum vector.
     pub pressure: AlgExpr,
     /// Squared acoustic speed for the Kurganov wave bounds; atom:
     /// `temperature` field (e.g. `gamma * R * T`).
@@ -44,23 +45,20 @@ pub struct CentralUpwindDecl {
 
 /// Lower a (cell-)algebraic expression to a face expression by mapping its
 /// field atoms through `map_field` (typically to reconstructed face states
-/// of a chosen side). Params become uniform constants; `mag_sqr` has no
-/// face-expression counterpart.
+/// of a chosen side). Params become uniform constants; vector `mag_sqr`
+/// atoms are supplied separately so the caller must choose an explicitly
+/// reconstructed vector rather than accidentally reading a raw cell value.
 fn lower_alg_to_face(
     expr: &AlgExpr,
     map_field: &dyn Fn(&str) -> Result<S, String>,
+    map_mag_sqr: &dyn Fn(&str) -> Result<S, String>,
 ) -> Result<S, String> {
-    let rec = |e: &AlgExpr| lower_alg_to_face(e, map_field);
+    let rec = |e: &AlgExpr| lower_alg_to_face(e, map_field, map_mag_sqr);
     Ok(match expr {
         AlgExpr::Constant { value, .. } => S::lit(*value as f32),
         AlgExpr::Param(p) => S::constant(p.name()),
         AlgExpr::Field(f) => map_field(f.name())?,
-        AlgExpr::MagSqr(f) => {
-            return Err(format!(
-                "mag_sqr({}) is not supported in face-expression lowering",
-                f.name()
-            ))
-        }
+        AlgExpr::MagSqr(f) => map_mag_sqr(f.name())?,
         AlgExpr::Mul(a, b) => S::Mul(Box::new(rec(a)?), Box::new(rec(b)?)),
         AlgExpr::Div(a, b) => S::Div(Box::new(rec(a)?), Box::new(rec(b)?)),
         AlgExpr::Add(a, b) => S::Add(Box::new(rec(a)?), Box::new(rec(b)?)),
@@ -146,10 +144,12 @@ fn derive_central_upwind(
     };
 
     let rho_raw = |side: FaceSide| S::state(side, rho_name);
+    let rho_e_raw = |side: FaceSide| S::state(side, rho_e_name);
     let t_raw = |side: FaceSide| S::state(side, decl.temperature);
 
     // Derived gradient-field names (state-layout convention: `grad_<field>`).
     let grad_rho_name = format!("grad_{}", rho_name);
+    let grad_rho_e_name = format!("grad_{}", rho_e_name);
     let grad_t_name = format!("grad_{}", decl.temperature);
     let grad_rho_u_x_name = format!("grad_{}_x", rho_u_name);
     let grad_rho_u_y_name = format!("grad_{}_y", rho_u_name);
@@ -323,28 +323,32 @@ fn derive_central_upwind(
         ),
     };
 
-    let t = |side: FaceSide| match reconstruction {
+    // Total energy is a conserved unknown for every EOS family. Reconstruct
+    // that authoritative value directly; deriving it back from p/(gamma-1)
+    // is equivalent only for a perfectly consistent ideal-gas state and is
+    // singular for barotropic closures where gamma-1 == 0.
+    let rho_e = |side: FaceSide| match reconstruction {
         Scheme::SecondOrderUpwindVanLeer => reconstruct_limited_scalar(
             &vanleer_limiter,
             side,
-            t_raw(FaceSide::Owner),
-            t_raw(FaceSide::Neighbor),
-            V::state_vec2(FaceSide::Owner, grad_t_name.clone()),
-            V::state_vec2(FaceSide::Neighbor, grad_t_name.clone()),
+            rho_e_raw(FaceSide::Owner),
+            rho_e_raw(FaceSide::Neighbor),
+            V::state_vec2(FaceSide::Owner, grad_rho_e_name.clone()),
+            V::state_vec2(FaceSide::Neighbor, grad_rho_e_name.clone()),
         ),
         Scheme::SecondOrderUpwindMinMod => reconstruct_limited_scalar(
             &minmod_limiter,
             side,
-            t_raw(FaceSide::Owner),
-            t_raw(FaceSide::Neighbor),
-            V::state_vec2(FaceSide::Owner, grad_t_name.clone()),
-            V::state_vec2(FaceSide::Neighbor, grad_t_name.clone()),
+            rho_e_raw(FaceSide::Owner),
+            rho_e_raw(FaceSide::Neighbor),
+            V::state_vec2(FaceSide::Owner, grad_rho_e_name.clone()),
+            V::state_vec2(FaceSide::Neighbor, grad_rho_e_name.clone()),
         ),
         _ => reconstruct_scalar(
             side,
-            t_raw(side),
-            t_raw(other_side(side)),
-            V::state_vec2(side, grad_t_name.clone()),
+            rho_e_raw(side),
+            rho_e_raw(other_side(side)),
+            V::state_vec2(side, grad_rho_e_name.clone()),
         ),
     };
 
@@ -395,24 +399,39 @@ fn derive_central_upwind(
         V::MulScalar(Box::new(rho_u(side)), Box::new(inv_rho))
     };
 
-    // Face pressure over reconstructed primitives, from the declared EOS
-    // relation (atoms: density -> rho(side), temperature -> t(side)).
-    // (For barotropic closures, the model still enforces the declared
-    // relation via the temperature recovery constraint, so this remains
-    // consistent.)
+    // Evaluate the declared EOS over one coherent reconstructed conserved
+    // state. Every atom uses the selected scheme/limiter on rho, rho_u, and
+    // rho_e before the nonlinear pressure closure is applied. This avoids the
+    // non-commuting rho_f*T_f surrogate that violates an affine barotropic EOS
+    // and can disagree with conserved energy for ideal-gas high-order faces.
     let p_lowered = |side: FaceSide| -> Result<S, String> {
-        lower_alg_to_face(&decl.pressure, &|name| {
-            if name == rho_name {
-                Ok(rho(side))
-            } else if name == decl.temperature {
-                Ok(t(side))
-            } else {
-                Err(format!(
-                    "pressure declaration references '{name}', expected only '{}' or '{}'",
-                    rho_name, decl.temperature
-                ))
-            }
-        })
+        lower_alg_to_face(
+            &decl.pressure,
+            &|name| {
+                if name == rho_name {
+                    Ok(rho(side))
+                } else if name == rho_e_name {
+                    Ok(rho_e(side))
+                } else {
+                    Err(format!(
+                        "pressure declaration references scalar '{name}', expected only '{}' or \
+                         '{}'",
+                        rho_name, rho_e_name
+                    ))
+                }
+            },
+            &|name| {
+                if name == rho_u_name {
+                    let momentum = rho_u(side);
+                    Ok(S::Dot(Box::new(momentum.clone()), Box::new(momentum)))
+                } else {
+                    Err(format!(
+                        "pressure declaration references mag_sqr({name}), expected only \
+                         mag_sqr({rho_u_name})"
+                    ))
+                }
+            },
+        )
     };
     let p_own = p_lowered(FaceSide::Owner)?;
     let p_neigh = p_lowered(FaceSide::Neighbor)?;
@@ -430,19 +449,27 @@ fn derive_central_upwind(
     // Generalized squared wave speed over reconstructed states, from the
     // declaration (atoms: pressure_field -> p(side), density -> rho(side)).
     let c2_lowered = |side: FaceSide| -> Result<S, String> {
-        lower_alg_to_face(&decl.generalized_wave_speed_sq, &|name| {
-            if name == decl.pressure_field {
-                Ok(p(side))
-            } else if name == rho_name {
-                Ok(rho(side))
-            } else {
+        lower_alg_to_face(
+            &decl.generalized_wave_speed_sq,
+            &|name| {
+                if name == decl.pressure_field {
+                    Ok(p(side))
+                } else if name == rho_name {
+                    Ok(rho(side))
+                } else {
+                    Err(format!(
+                        "generalized wave-speed declaration references '{name}', expected only \
+                         '{}' or '{}'",
+                        decl.pressure_field, rho_name
+                    ))
+                }
+            },
+            &|name| {
                 Err(format!(
-                    "generalized wave-speed declaration references '{name}', expected only \
-                     '{}' or '{}'",
-                    decl.pressure_field, rho_name
+                    "generalized wave-speed declaration unexpectedly references mag_sqr({name})"
                 ))
-            }
-        })
+            },
+        )
     };
     let c2_own = c2_lowered(FaceSide::Owner)?;
     let c2_neigh = c2_lowered(FaceSide::Neighbor)?;
@@ -752,8 +779,11 @@ fn derive_central_upwind(
     // Match OpenFOAM: reconstruct the acoustic speed `c` as a scalar field using the same
     // `reconstruct(T)` scheme (vanLeer) and then multiply by `magSf`.
     //
-    // `c = sqrt(declared wave_speed_sq)` over raw cell temperatures
-    // (atom: temperature -> t_raw(side)).
+    // `c = sqrt(declared wave_speed_sq)` over raw cell temperatures and
+    // runtime EOS constants. For the production declaration this is the full
+    // physical `sqrt(gamma*R*T + dp_drho)`: ideal gas is algebraically and
+    // numerically identical at dp_drho=0, while a linear EOS obtains its
+    // nonzero acoustic base.
     let c_cell_lowered = |side: FaceSide| -> Result<S, String> {
         Ok(S::Sqrt(Box::new(lower_alg_to_face(
             &decl.wave_speed_sq,
@@ -767,6 +797,11 @@ fn derive_central_upwind(
                     ))
                 }
             },
+            &|name| {
+                Err(format!(
+                    "wave-speed declaration unexpectedly references mag_sqr({name})"
+                ))
+            },
         )?)))
     };
     let c_cell_own = c_cell_lowered(FaceSide::Owner)?;
@@ -778,12 +813,11 @@ fn derive_central_upwind(
             c_cell_neigh.clone()
         }
     };
-    // Analytic gradient of the ideal-gas acoustic speed:
+    // Analytic gradient of the runtime-EOS acoustic speed:
     //   grad(c) = 0.5 * (gamma * R / c) * grad(T)
-    // This is d(sqrt(wave_speed_sq))/dT for the declared `gamma*R*T` form and
-    // is only used to drive vanLeer reconstruction of `c`. A non-ideal-gas
-    // wave-speed declaration would need its own gradient form here (no
-    // symbolic differentiation by design).
+    // for c²=gamma*R*T+dp_drho. The affine dp_drho term is spatially constant,
+    // so it contributes no gradient. A more general non-ideal EOS would need
+    // its own gradient form here (no symbolic differentiation by design).
     let grad_c = |side: FaceSide| {
         let denom = S::Max(Box::new(c_cell(side)), Box::new(S::lit(1e-12)));
         let factor = S::Div(
@@ -1014,29 +1048,8 @@ fn derive_central_upwind(
     };
 
     let phi_ep = {
-        let gm1 = S::Max(Box::new(S::constant("eos_gm1")), Box::new(S::lit(1e-12)));
-
-        let rho_pos = rho(FaceSide::Owner);
-        let rho_neg = rho(FaceSide::Neighbor);
-        let u_pos = u_vec(FaceSide::Owner);
-        let u_neg = u_vec(FaceSide::Neighbor);
-        let u2_pos = S::Dot(Box::new(u_pos.clone()), Box::new(u_pos));
-        let u2_neg = S::Dot(Box::new(u_neg.clone()), Box::new(u_neg));
-
-        let rho_e_pos = S::Add(
-            Box::new(S::Div(Box::new(p_pos.clone()), Box::new(gm1.clone()))),
-            Box::new(S::Mul(
-                Box::new(S::Mul(Box::new(S::lit(0.5)), Box::new(rho_pos.clone()))),
-                Box::new(u2_pos),
-            )),
-        );
-        let rho_e_neg = S::Add(
-            Box::new(S::Div(Box::new(p_neg.clone()), Box::new(gm1))),
-            Box::new(S::Mul(
-                Box::new(S::Mul(Box::new(S::lit(0.5)), Box::new(rho_neg.clone()))),
-                Box::new(u2_neg),
-            )),
-        );
+        let rho_e_pos = rho_e(FaceSide::Owner);
+        let rho_e_neg = rho_e(FaceSide::Neighbor);
 
         let term_pos = S::Add(Box::new(rho_e_pos), Box::new(p_pos.clone()));
         let term_neg = S::Add(Box::new(rho_e_neg), Box::new(p_neg.clone()));
@@ -1089,6 +1102,727 @@ mod tests {
 
     fn is_lit(expr: &S, value: f32) -> bool {
         matches!(expr, S::Literal(v) if *v == value)
+    }
+
+    fn contains_state(expr: &S, wanted: &str) -> bool {
+        match expr {
+            S::State { name, .. } | S::CellState { name, .. } => name == wanted,
+            S::Add(a, b)
+            | S::Sub(a, b)
+            | S::Mul(a, b)
+            | S::Div(a, b)
+            | S::Max(a, b)
+            | S::Min(a, b)
+            | S::Lerp(a, b) => contains_state(a, wanted) || contains_state(b, wanted),
+            S::Neg(a) | S::Abs(a) | S::Sqrt(a) => contains_state(a, wanted),
+            S::Dot(_, _)
+            | S::Literal(_)
+            | S::Builtin(_)
+            | S::Constant { .. }
+            | S::LowMachParam(_)
+            | S::BoundaryDirichlet { .. }
+            | S::MeshFlux
+            | S::Primitive { .. } => false,
+        }
+    }
+
+    fn contains_constant(expr: &S, wanted: &str) -> bool {
+        match expr {
+            S::Constant { name } => name == wanted,
+            S::Add(a, b)
+            | S::Sub(a, b)
+            | S::Mul(a, b)
+            | S::Div(a, b)
+            | S::Max(a, b)
+            | S::Min(a, b)
+            | S::Lerp(a, b) => contains_constant(a, wanted) || contains_constant(b, wanted),
+            S::Neg(a) | S::Abs(a) | S::Sqrt(a) => contains_constant(a, wanted),
+            S::Dot(_, _)
+            | S::Literal(_)
+            | S::Builtin(_)
+            | S::LowMachParam(_)
+            | S::State { .. }
+            | S::CellState { .. }
+            | S::BoundaryDirichlet { .. }
+            | S::MeshFlux
+            | S::Primitive { .. } => false,
+        }
+    }
+
+    fn contains_low_mach_parameter(expr: &S) -> bool {
+        match expr {
+            S::LowMachParam(_) => true,
+            S::Add(a, b)
+            | S::Sub(a, b)
+            | S::Mul(a, b)
+            | S::Div(a, b)
+            | S::Max(a, b)
+            | S::Min(a, b)
+            | S::Lerp(a, b) => {
+                contains_low_mach_parameter(a) || contains_low_mach_parameter(b)
+            }
+            S::Neg(a) | S::Abs(a) | S::Sqrt(a) => contains_low_mach_parameter(a),
+            S::Dot(_, _)
+            | S::Literal(_)
+            | S::Builtin(_)
+            | S::Constant { .. }
+            | S::State { .. }
+            | S::CellState { .. }
+            | S::BoundaryDirichlet { .. }
+            | S::MeshFlux
+            | S::Primitive { .. } => false,
+        }
+    }
+
+    fn contains_physical_barotropic_acoustic_sqrt(expr: &S) -> bool {
+        match expr {
+            S::Sqrt(inner)
+                if contains_constant(inner, "eos_dp_drho")
+                    && !contains_low_mach_parameter(inner) =>
+            {
+                true
+            }
+            S::Add(a, b)
+            | S::Sub(a, b)
+            | S::Mul(a, b)
+            | S::Div(a, b)
+            | S::Max(a, b)
+            | S::Min(a, b)
+            | S::Lerp(a, b) => {
+                contains_physical_barotropic_acoustic_sqrt(a)
+                    || contains_physical_barotropic_acoustic_sqrt(b)
+            }
+            S::Neg(a) | S::Abs(a) | S::Sqrt(a) => {
+                contains_physical_barotropic_acoustic_sqrt(a)
+            }
+            S::Dot(_, _)
+            | S::Literal(_)
+            | S::Builtin(_)
+            | S::Constant { .. }
+            | S::LowMachParam(_)
+            | S::State { .. }
+            | S::CellState { .. }
+            | S::BoundaryDirichlet { .. }
+            | S::MeshFlux
+            | S::Primitive { .. } => false,
+        }
+    }
+
+    fn contains_divisor_constant(expr: &S, wanted: &str) -> bool {
+        fn is_constant_floor(expr: &S, wanted: &str) -> bool {
+            match expr {
+                S::Constant { name } => name == wanted,
+                S::Max(a, b) | S::Min(a, b) => {
+                    (is_constant_floor(a, wanted) && matches!(b.as_ref(), S::Literal(_)))
+                        || (is_constant_floor(b, wanted)
+                            && matches!(a.as_ref(), S::Literal(_)))
+                }
+                S::Neg(a) | S::Abs(a) => is_constant_floor(a, wanted),
+                _ => false,
+            }
+        }
+
+        match expr {
+            S::Div(a, b) => {
+                is_constant_floor(b, wanted)
+                    || contains_divisor_constant(a, wanted)
+                    || contains_divisor_constant(b, wanted)
+            }
+            S::Add(a, b)
+            | S::Sub(a, b)
+            | S::Mul(a, b)
+            | S::Max(a, b)
+            | S::Min(a, b)
+            | S::Lerp(a, b) => {
+                contains_divisor_constant(a, wanted)
+                    || contains_divisor_constant(b, wanted)
+            }
+            S::Neg(a) | S::Abs(a) | S::Sqrt(a) => contains_divisor_constant(a, wanted),
+            S::Dot(_, _)
+            | S::Literal(_)
+            | S::Builtin(_)
+            | S::Constant { .. }
+            | S::LowMachParam(_)
+            | S::State { .. }
+            | S::CellState { .. }
+            | S::BoundaryDirichlet { .. }
+            | S::MeshFlux
+            | S::Primitive { .. } => false,
+        }
+    }
+
+    #[test]
+    fn compressible_flux_uses_conserved_energy_and_barotropic_acoustic_base() {
+        let system = crate::solver::model::compressible_system();
+        let spec = derive_central_upwind(
+            &system,
+            &crate::solver::model::compressible_central_upwind_decl(),
+            Scheme::Upwind,
+        )
+        .expect("derive production compressible flux");
+        let FluxModuleKernelSpec::ScalarPerComponent { components, flux } = spec else {
+            panic!("compressible flux did not lower per component");
+        };
+        let energy = &flux[components
+            .iter()
+            .position(|name| name == "rho_e")
+            .expect("rho_e flux component")];
+        assert!(
+            contains_state(energy, "rho_e"),
+            "energy flux no longer reads the conserved energy"
+        );
+        assert!(
+            !contains_divisor_constant(energy, "eos_gm1"),
+            "energy flux reintroduced a singular division by gamma-1"
+        );
+        assert!(
+            flux.iter()
+                .any(contains_physical_barotropic_acoustic_sqrt),
+            "physical Kurganov wave bound does not contain the barotropic sound-speed term"
+        );
+    }
+
+    #[test]
+    fn ideal_and_water_enthalpy_fluxes_are_finite_from_conserved_energy() {
+        let rho = 1.2_f32;
+        let velocity = 30.0_f32;
+        let pressure = rho * 287.0 * 300.0;
+        let kinetic = 0.5 * rho * velocity * velocity;
+        let conserved_energy = pressure / 0.4 + kinetic;
+        let old_ideal_flux = (pressure / 0.4 + kinetic + pressure) * velocity;
+        let conserved_ideal_flux = (conserved_energy + pressure) * velocity;
+        assert_eq!(conserved_ideal_flux.to_bits(), old_ideal_flux.to_bits());
+
+        let water = crate::solver::model::eos::EosSpec::LinearCompressibility {
+            bulk_modulus: 2.2e9,
+            rho_ref: 1000.0,
+            p_ref: 1.0e5,
+        }
+        .runtime_params();
+        for rho in [1000.0_f32, 1000.125] {
+            let pressure = water.dp_drho * (rho - water.rho_ref) + water.p_ref;
+            let arbitrary_conserved_energy = -12_345.0_f32 + 7.0 * (rho - 1000.0);
+            let flux = (arbitrary_conserved_energy + pressure) * 2.0;
+            assert!(pressure.is_finite() && flux.is_finite());
+            assert!(flux.abs() < 1.0e7, "barotropic energy flux exploded: {flux}");
+        }
+    }
+
+    fn eval_declared_pressure(
+        expr: &AlgExpr,
+        rho: f64,
+        rho_u: [f64; 2],
+        rho_e: f64,
+        gm1: f64,
+        dp_drho: f64,
+        rho_ref: f64,
+        p_ref: f64,
+    ) -> f64 {
+        let rec = |e: &AlgExpr| {
+            eval_declared_pressure(e, rho, rho_u, rho_e, gm1, dp_drho, rho_ref, p_ref)
+        };
+        match expr {
+            AlgExpr::Constant { value, .. } => *value,
+            AlgExpr::Param(param) => match param.name() {
+                "eos_gm1" => gm1,
+                "eos_dp_drho" => dp_drho,
+                "eos_rho_ref" => rho_ref,
+                "eos_p_ref" => p_ref,
+                other => panic!("unexpected pressure parameter {other}"),
+            },
+            AlgExpr::Field(field) => match field.name() {
+                "rho" => rho,
+                "rho_e" => rho_e,
+                other => panic!("unexpected scalar pressure field {other}"),
+            },
+            AlgExpr::MagSqr(field) => match field.name() {
+                "rho_u" => rho_u[0] * rho_u[0] + rho_u[1] * rho_u[1],
+                other => panic!("unexpected pressure magnitude field {other}"),
+            },
+            AlgExpr::Mul(a, b) => rec(a) * rec(b),
+            AlgExpr::Div(a, b) => rec(a) / rec(b),
+            AlgExpr::Add(a, b) => rec(a) + rec(b),
+            AlgExpr::Sub(a, b) => rec(a) - rec(b),
+            AlgExpr::Neg(a) => -rec(a),
+        }
+    }
+
+    fn alg_contains_field(expr: &AlgExpr, wanted: &str) -> bool {
+        match expr {
+            AlgExpr::Field(field) | AlgExpr::MagSqr(field) => field.name() == wanted,
+            AlgExpr::Mul(a, b)
+            | AlgExpr::Div(a, b)
+            | AlgExpr::Add(a, b)
+            | AlgExpr::Sub(a, b) => {
+                alg_contains_field(a, wanted) || alg_contains_field(b, wanted)
+            }
+            AlgExpr::Neg(a) => alg_contains_field(a, wanted),
+            AlgExpr::Constant { .. } | AlgExpr::Param(_) => false,
+        }
+    }
+
+    fn alg_contains_param(expr: &AlgExpr, wanted: &str) -> bool {
+        match expr {
+            AlgExpr::Param(param) => param.name() == wanted,
+            AlgExpr::Mul(a, b)
+            | AlgExpr::Div(a, b)
+            | AlgExpr::Add(a, b)
+            | AlgExpr::Sub(a, b) => {
+                alg_contains_param(a, wanted) || alg_contains_param(b, wanted)
+            }
+            AlgExpr::Neg(a) => alg_contains_param(a, wanted),
+            AlgExpr::Constant { .. } | AlgExpr::Field(_) | AlgExpr::MagSqr(_) => false,
+        }
+    }
+
+    fn alg_contains_mag_sqr(expr: &AlgExpr, wanted: &str) -> bool {
+        match expr {
+            AlgExpr::MagSqr(field) => field.name() == wanted,
+            AlgExpr::Mul(a, b)
+            | AlgExpr::Div(a, b)
+            | AlgExpr::Add(a, b)
+            | AlgExpr::Sub(a, b) => {
+                alg_contains_mag_sqr(a, wanted) || alg_contains_mag_sqr(b, wanted)
+            }
+            AlgExpr::Neg(a) => alg_contains_mag_sqr(a, wanted),
+            AlgExpr::Constant { .. } | AlgExpr::Param(_) | AlgExpr::Field(_) => false,
+        }
+    }
+
+    fn has_grouped_centered_barotropic_product(expr: &AlgExpr) -> bool {
+        match expr {
+            AlgExpr::Mul(a, b) => {
+                let is_dp = |e: &AlgExpr| {
+                    matches!(e, AlgExpr::Param(param) if param.name() == "eos_dp_drho")
+                };
+                let is_centered_density = |e: &AlgExpr| {
+                    matches!(
+                        e,
+                        AlgExpr::Sub(rho, rho_ref)
+                            if matches!(rho.as_ref(), AlgExpr::Field(field) if field.name() == "rho")
+                                && matches!(rho_ref.as_ref(), AlgExpr::Param(param) if param.name() == "eos_rho_ref")
+                    )
+                };
+                (is_dp(a) && is_centered_density(b))
+                    || (is_dp(b) && is_centered_density(a))
+                    || has_grouped_centered_barotropic_product(a)
+                    || has_grouped_centered_barotropic_product(b)
+            }
+            AlgExpr::Div(a, b)
+            | AlgExpr::Add(a, b)
+            | AlgExpr::Sub(a, b) => {
+                has_grouped_centered_barotropic_product(a)
+                    || has_grouped_centered_barotropic_product(b)
+            }
+            AlgExpr::Neg(a) => has_grouped_centered_barotropic_product(a),
+            AlgExpr::Constant { .. }
+            | AlgExpr::Param(_)
+            | AlgExpr::Field(_)
+            | AlgExpr::MagSqr(_) => false,
+        }
+    }
+
+    fn has_momentum_squared_over_density(expr: &AlgExpr) -> bool {
+        match expr {
+            AlgExpr::Div(numerator, denominator) => {
+                let numerator_has_momentum = alg_contains_mag_sqr(numerator, "rho_u")
+                    && matches!(
+                        denominator.as_ref(),
+                        AlgExpr::Field(field) if field.name() == "rho"
+                    );
+                numerator_has_momentum
+                    || has_momentum_squared_over_density(numerator)
+                    || has_momentum_squared_over_density(denominator)
+            }
+            AlgExpr::Mul(a, b)
+            | AlgExpr::Add(a, b)
+            | AlgExpr::Sub(a, b) => {
+                has_momentum_squared_over_density(a) || has_momentum_squared_over_density(b)
+            }
+            AlgExpr::Neg(a) => has_momentum_squared_over_density(a),
+            AlgExpr::Constant { .. }
+            | AlgExpr::Param(_)
+            | AlgExpr::Field(_)
+            | AlgExpr::MagSqr(_) => false,
+        }
+    }
+
+    #[test]
+    fn declared_face_pressure_is_the_grouped_conserved_eos_closure() {
+        let pressure = crate::solver::model::compressible_central_upwind_decl().pressure;
+        for field in ["rho", "rho_u", "rho_e"] {
+            assert!(alg_contains_field(&pressure, field), "missing {field}");
+        }
+        for parameter in ["eos_gm1", "eos_dp_drho", "eos_rho_ref", "eos_p_ref"] {
+            assert!(
+                alg_contains_param(&pressure, parameter),
+                "missing {parameter}"
+            );
+        }
+        assert!(!alg_contains_field(&pressure, "T"));
+        assert!(!alg_contains_param(&pressure, "eos_r"));
+        assert!(has_momentum_squared_over_density(&pressure));
+        assert!(has_grouped_centered_barotropic_product(&pressure));
+    }
+
+    #[derive(Clone, Copy)]
+    struct LineState {
+        owner: f64,
+        neighbor: f64,
+        grad_owner: f64,
+        grad_neighbor: f64,
+    }
+
+    fn reconstruct_1d(line: LineState, scheme: Scheme, side: FaceSide) -> f64 {
+        let (cell, other, gradient, cell_to_face, other_minus_cell) = match side {
+            FaceSide::Owner => (
+                line.owner,
+                line.neighbor,
+                line.grad_owner,
+                0.5,
+                1.0,
+            ),
+            FaceSide::Neighbor => (
+                line.neighbor,
+                line.owner,
+                line.grad_neighbor,
+                -0.5,
+                -1.0,
+            ),
+        };
+        match scheme {
+            Scheme::Upwind => cell,
+            Scheme::SecondOrderUpwind => cell + gradient * cell_to_face,
+            Scheme::QUICK => {
+                0.625 * cell + 0.375 * other + 0.125 * gradient * other_minus_cell
+            }
+            other => panic!("numeric pressure fixture does not cover {other:?}"),
+        }
+    }
+
+    #[test]
+    fn exact_contact_pressure_survives_three_schemes_and_both_flow_directions() {
+        // Exact ideal-gas contact: p=10 and |u|=3 on both sides, but density
+        // jumps 2 -> 4. Conserved variables are linear across this two-cell
+        // fixture, so SOU and QUICK both reconstruct the exact midpoint
+        // (rho,m,E)=(3,+/-9,38.5). Reconstructing primitive T independently
+        // instead produces rho_f*T_f=3*3.75=11.25.
+        let rho = LineState {
+            owner: 2.0,
+            neighbor: 4.0,
+            grad_owner: 2.0,
+            grad_neighbor: 2.0,
+        };
+        let energy = LineState {
+            owner: 34.0,
+            neighbor: 43.0,
+            grad_owner: 9.0,
+            grad_neighbor: 9.0,
+        };
+        let exact_t = LineState {
+            owner: 5.0,
+            neighbor: 2.5,
+            grad_owner: -2.5,
+            grad_neighbor: -2.5,
+        };
+        let pressure_expr =
+            crate::solver::model::compressible_central_upwind_decl().pressure;
+
+        for velocity_sign in [1.0, -1.0] {
+            let momentum = LineState {
+                owner: velocity_sign * 6.0,
+                neighbor: velocity_sign * 12.0,
+                grad_owner: velocity_sign * 6.0,
+                grad_neighbor: velocity_sign * 6.0,
+            };
+            for scheme in [Scheme::Upwind, Scheme::SecondOrderUpwind, Scheme::QUICK] {
+                for side in [FaceSide::Owner, FaceSide::Neighbor] {
+                    let rho_f = reconstruct_1d(rho, scheme, side);
+                    let pressure = eval_declared_pressure(
+                        &pressure_expr,
+                        rho_f,
+                        [reconstruct_1d(momentum, scheme, side), 0.0],
+                        reconstruct_1d(energy, scheme, side),
+                        0.4,
+                        0.0,
+                        0.0,
+                        0.0,
+                    );
+                    assert!(
+                        (pressure - 10.0).abs() <= 2.0e-15,
+                        "sign={velocity_sign} {scheme:?} {side:?}: pressure={pressure}"
+                    );
+
+                    let old_rho_t = rho_f * reconstruct_1d(exact_t, scheme, side);
+                    if scheme == Scheme::Upwind {
+                        assert!((old_rho_t - 10.0).abs() <= 2.0e-15);
+                    } else {
+                        assert!((old_rho_t - 11.25).abs() <= 2.0e-15);
+                    }
+                }
+            }
+
+            // Upwind is cellwise exact when T is synchronized, but the new
+            // closure is also robust to a stale primitive snapshot: its
+            // authoritative owner pressure remains 10 while rho*T would be 12.
+            let upwind_pressure = eval_declared_pressure(
+                &pressure_expr,
+                rho.owner,
+                [velocity_sign * 6.0, 0.0],
+                energy.owner,
+                0.4,
+                0.0,
+                0.0,
+                0.0,
+            );
+            assert_eq!(upwind_pressure, 10.0);
+            assert_eq!(rho.owner * 6.0, 12.0);
+        }
+    }
+
+    #[test]
+    fn exact_barotropic_cells_expose_high_order_rho_t_noncommutation() {
+        let rho = LineState {
+            owner: 1000.0,
+            neighbor: 1001.0,
+            grad_owner: 1.0,
+            grad_neighbor: 1.0,
+        };
+        let p_owner = 100_000.0;
+        let p_neighbor = 2_300_000.0;
+        let temperature = LineState {
+            owner: p_owner / rho.owner,
+            neighbor: p_neighbor / rho.neighbor,
+            grad_owner: p_neighbor / rho.neighbor - p_owner / rho.owner,
+            grad_neighbor: p_neighbor / rho.neighbor - p_owner / rho.owner,
+        };
+        let pressure_expr =
+            crate::solver::model::compressible_central_upwind_decl().pressure;
+
+        for scheme in [Scheme::SecondOrderUpwind, Scheme::QUICK] {
+            for side in [FaceSide::Owner, FaceSide::Neighbor] {
+                let rho_f = reconstruct_1d(rho, scheme, side);
+                let pressure = eval_declared_pressure(
+                    &pressure_expr,
+                    rho_f,
+                    [17.0, -9.0],
+                    -1234.0,
+                    0.0,
+                    2.2e6,
+                    1000.0,
+                    100_000.0,
+                );
+                assert!((pressure - 1_200_000.0).abs() <= 1.0e-9);
+
+                let old_rho_t = rho_f * reconstruct_1d(temperature, scheme, side);
+                assert!(
+                    ((old_rho_t - pressure).abs() - 549.425_574_425_6).abs() <= 1.0e-8,
+                    "{scheme:?} {side:?}: rho*T error was {} Pa",
+                    old_rho_t - pressure
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn asymmetric_pressure_table_pins_owner_neighbor_and_momentum_parity() {
+        // Asymmetric rational fixture: unlike the contact test, the two
+        // high-order side states differ, so this catches owner/neighbor swaps
+        // as well as a pressure expression that is not even in momentum.
+        let rho = LineState {
+            owner: 2.0,
+            neighbor: 4.0,
+            grad_owner: 1.0,
+            grad_neighbor: 2.0,
+        };
+        let mx_positive = LineState {
+            owner: 4.0,
+            neighbor: 8.0,
+            grad_owner: 2.0,
+            grad_neighbor: 4.0,
+        };
+        let my = LineState {
+            owner: 2.0,
+            neighbor: -4.0,
+            grad_owner: -1.0,
+            grad_neighbor: -2.0,
+        };
+        let energy = LineState {
+            owner: 30.0,
+            neighbor: 40.0,
+            grad_owner: 4.0,
+            grad_neighbor: 8.0,
+        };
+        let cases = [
+            (Scheme::Upwind, FaceSide::Owner, 10.0),
+            (Scheme::Upwind, FaceSide::Neighbor, 12.0),
+            (Scheme::SecondOrderUpwind, FaceSide::Owner, 531.0 / 50.0),
+            (Scheme::SecondOrderUpwind, FaceSide::Neighbor, 57.0 / 5.0),
+            (Scheme::QUICK, FaceSide::Owner, 10_479.0 / 920.0),
+            (Scheme::QUICK, FaceSide::Neighbor, 231.0 / 20.0),
+        ];
+        let pressure_expr =
+            crate::solver::model::compressible_central_upwind_decl().pressure;
+
+        for momentum_sign in [1.0, -1.0] {
+            let mx = LineState {
+                owner: momentum_sign * mx_positive.owner,
+                neighbor: momentum_sign * mx_positive.neighbor,
+                grad_owner: momentum_sign * mx_positive.grad_owner,
+                grad_neighbor: momentum_sign * mx_positive.grad_neighbor,
+            };
+            for (scheme, side, expected) in cases {
+                let pressure = eval_declared_pressure(
+                    &pressure_expr,
+                    reconstruct_1d(rho, scheme, side),
+                    [
+                        reconstruct_1d(mx, scheme, side),
+                        reconstruct_1d(my, scheme, side),
+                    ],
+                    reconstruct_1d(energy, scheme, side),
+                    0.4,
+                    0.0,
+                    0.0,
+                    0.0,
+                );
+                assert!(
+                    (pressure - expected).abs() <= 3.0e-15,
+                    "sign={momentum_sign} {scheme:?} {side:?}: {pressure} != {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ideal_uniform_exact_state_pressure_is_invariant_for_every_reconstruction() {
+        let rho_value = 1.2;
+        let velocity = [30.0, -4.0];
+        let pressure_value = 101_325.0;
+        let momentum = [rho_value * velocity[0], rho_value * velocity[1]];
+        let energy = pressure_value / 0.4
+            + 0.5 * rho_value * (velocity[0] * velocity[0] + velocity[1] * velocity[1]);
+        let uniform = |value| LineState {
+            owner: value,
+            neighbor: value,
+            grad_owner: 0.0,
+            grad_neighbor: 0.0,
+        };
+        let pressure_expr =
+            crate::solver::model::compressible_central_upwind_decl().pressure;
+
+        for scheme in [Scheme::Upwind, Scheme::SecondOrderUpwind, Scheme::QUICK] {
+            for side in [FaceSide::Owner, FaceSide::Neighbor] {
+                let pressure = eval_declared_pressure(
+                    &pressure_expr,
+                    reconstruct_1d(uniform(rho_value), scheme, side),
+                    [
+                        reconstruct_1d(uniform(momentum[0]), scheme, side),
+                        reconstruct_1d(uniform(momentum[1]), scheme, side),
+                    ],
+                    reconstruct_1d(uniform(energy), scheme, side),
+                    0.4,
+                    0.0,
+                    0.0,
+                    0.0,
+                );
+                assert!(
+                    (pressure - pressure_value).abs() <= pressure_value * 2.0e-15,
+                    "{scheme:?} {side:?}: uniform pressure drifted to {pressure}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn derived_momentum_flux_pressure_reads_reconstructed_conserved_state() {
+        let system = crate::solver::model::compressible_system();
+        for scheme in [
+            Scheme::Upwind,
+            Scheme::SecondOrderUpwind,
+            Scheme::SecondOrderUpwindMinMod,
+            Scheme::SecondOrderUpwindVanLeer,
+            Scheme::QUICK,
+            Scheme::QUICKMinMod,
+            Scheme::QUICKVanLeer,
+        ] {
+            let spec = derive_central_upwind(
+                &system,
+                &crate::solver::model::compressible_central_upwind_decl(),
+                scheme,
+            )
+            .expect("derive production compressible flux");
+            let FluxModuleKernelSpec::ScalarPerComponent { components, flux } = spec else {
+                panic!("compressible flux did not lower per component");
+            };
+            let momentum_x = &flux[components
+                .iter()
+                .position(|name| name == "rho_u_x")
+                .expect("rho_u_x flux component")];
+            assert!(
+                contains_state(momentum_x, "rho_e"),
+                "{scheme:?}: pressure path does not read reconstructed rho_e"
+            );
+            for constant in ["eos_gm1", "eos_dp_drho", "eos_rho_ref", "eos_p_ref"] {
+                assert!(
+                    contains_constant(momentum_x, constant),
+                    "{scheme:?}: pressure path lost {constant}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn generated_compressible_fluxes_pin_two_conserved_pressure_closures_per_scheme() {
+        let generated = [
+            (
+                "compressible",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/gpu/shaders/generated/flux_module_compressible.wgsl"
+                )),
+            ),
+            (
+                "compressible_mms",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/gpu/shaders/generated/flux_module_compressible_mms.wgsl"
+                )),
+            ),
+            (
+                "compressible_mms_biharmonic",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/gpu/shaders/generated/flux_module_compressible_mms_biharmonic.wgsl"
+                )),
+            ),
+            (
+                "compressible_structured",
+                include_str!(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/src/solver/gpu/shaders/generated/flux_module_compressible_structured.wgsl"
+                )),
+            ),
+        ];
+
+        for (name, wgsl) in generated {
+            assert_eq!(
+                wgsl.matches("constants.eos_gm1 * (").count(),
+                14,
+                "{name}: expected owner+neighbor closure for all seven schemes"
+            );
+            assert_eq!(
+                wgsl.matches(" - constants.eos_rho_ref) + constants.eos_p_ref")
+                    .count(),
+                14,
+                "{name}: centered affine closure was expanded or omitted"
+            );
+            assert!(wgsl.contains("s_own_rho_e"));
+            assert!(wgsl.contains("s_neigh_rho_e"));
+            assert!(
+                !wgsl.contains("/ max(constants.eos_gm1"),
+                "{name}: singular energy reconstruction returned"
+            );
+        }
     }
 
     fn contains_sign_guard_for_states(expr: &S, a: &str, b: &str) -> bool {

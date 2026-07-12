@@ -10,6 +10,7 @@ use cfd2_codegen::solver::codegen::bc_table::BcTable;
 use cfd2_codegen::solver::codegen::constants::constants_struct;
 use cfd2_codegen::solver::codegen::dsl as typed;
 use cfd2_codegen::solver::codegen::dsl::XY;
+use cfd2_codegen::solver::codegen::explicit_liveness::ExplicitFaceChannelLiveness;
 use cfd2_codegen::solver::codegen::wgsl_ast::{
     AccessMode, Attribute, Block, CseBuilder, Expr, Function, Item, Module, Param, Stmt, Type,
 };
@@ -50,11 +51,29 @@ impl ResolvedSlotResolver {
     }
 }
 
+fn validate_face_channel_layout(
+    flux_layout: &FluxLayout,
+    face_channels: &ExplicitFaceChannelLiveness,
+    flux_stride: u32,
+) {
+    assert_eq!(
+        face_channels.coupled_stride(),
+        flux_layout.stride,
+        "face-channel liveness must cover the semantic FluxLayout"
+    );
+    assert_eq!(
+        flux_stride,
+        face_channels.storage_stride(),
+        "flux_stride must match compact live face-channel storage"
+    );
+}
+
 #[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub fn generate_flux_module_wgsl(
     resolved_slots: &ResolvedStateSlotsSpec,
     flux_layout: &FluxLayout,
+    face_channels: &ExplicitFaceChannelLiveness,
     flux_stride: u32,
     primitives: &[(String, Expr)],
     spec: &FluxModuleKernelSpec,
@@ -62,10 +81,7 @@ pub fn generate_flux_module_wgsl(
     structured: bool,
 ) -> KernelWgsl {
     assert!(flux_stride > 0, "flux_module requires flux_stride > 0");
-    assert_eq!(
-        flux_stride, flux_layout.stride,
-        "flux_stride must match FluxLayout.stride"
-    );
+    validate_face_channel_layout(flux_layout, face_channels, flux_stride);
 
     let primitive_map: HashMap<&str, &Expr> =
         primitives.iter().map(|(k, v)| (k.as_str(), v)).collect();
@@ -87,6 +103,7 @@ pub fn generate_flux_module_wgsl(
     module.push(Item::Function(main_fn(
         resolver_ref,
         flux_layout,
+        face_channels,
         flux_stride,
         &primitive_map,
         spec,
@@ -145,6 +162,7 @@ pub fn generate_flux_module_kernel_program(
     id: &str,
     resolved_slots: &ResolvedStateSlotsSpec,
     flux_layout: &FluxLayout,
+    face_channels: &ExplicitFaceChannelLiveness,
     flux_stride: u32,
     primitives: &[(String, Expr)],
     spec: &FluxModuleKernelSpec,
@@ -152,10 +170,7 @@ pub fn generate_flux_module_kernel_program(
     structured: bool,
 ) -> Result<KernelProgram, String> {
     assert!(flux_stride > 0, "flux_module requires flux_stride > 0");
-    assert_eq!(
-        flux_stride, flux_layout.stride,
-        "flux_stride must match FluxLayout.stride"
-    );
+    validate_face_channel_layout(flux_layout, face_channels, flux_stride);
 
     let uses_low_mach = flux_spec_uses_low_mach(spec);
     let items = base_items(
@@ -173,7 +188,15 @@ pub fn generate_flux_module_kernel_program(
     let resolver = ResolvedSlotResolver::from_spec(resolved_slots);
     let resolver_ref: &dyn OffsetResolver = &resolver;
 
-    let main = main_fn(resolver_ref, flux_layout, flux_stride, &primitive_map, spec, structured);
+    let main = main_fn(
+        resolver_ref,
+        flux_layout,
+        face_channels,
+        flux_stride,
+        &primitive_map,
+        spec,
+        structured,
+    );
     let (launch, skip) = extract_launch_pattern_b(&main)?;
 
     let kernel_stmts = &main.body.stmts[skip..];
@@ -200,6 +223,7 @@ pub fn generate_flux_module_kernel_program_runtime_scheme(
     id: &str,
     resolved_slots: &ResolvedStateSlotsSpec,
     flux_layout: &FluxLayout,
+    face_channels: &ExplicitFaceChannelLiveness,
     flux_stride: u32,
     primitives: &[(String, Expr)],
     variants: &[(Scheme, FluxModuleKernelSpec)],
@@ -207,10 +231,7 @@ pub fn generate_flux_module_kernel_program_runtime_scheme(
     structured: bool,
 ) -> Result<KernelProgram, String> {
     assert!(flux_stride > 0, "flux_module requires flux_stride > 0");
-    assert_eq!(
-        flux_stride, flux_layout.stride,
-        "flux_stride must match FluxLayout.stride"
-    );
+    validate_face_channel_layout(flux_layout, face_channels, flux_stride);
 
     let uses_low_mach = variants
         .iter()
@@ -233,6 +254,7 @@ pub fn generate_flux_module_kernel_program_runtime_scheme(
     let main = main_fn_runtime_scheme(
         resolver_ref,
         flux_layout,
+        face_channels,
         flux_stride,
         &primitive_map,
         variants,
@@ -304,6 +326,14 @@ mod tests {
         }
     }
 
+    fn all_live_face_channels(
+        fields: impl IntoIterator<Item = crate::solver::ir::FieldRef>,
+    ) -> ExplicitFaceChannelLiveness {
+        ExplicitFaceChannelLiveness::from_row_consumers(
+            fields.into_iter().map(|field| (field, true)),
+        )
+    }
+
     #[test]
     fn flux_module_codegen_accepts_cell_to_face_reconstruction_exprs() {
         let phi = vol_scalar_dim::<Dimensionless>("phi");
@@ -349,7 +379,18 @@ mod tests {
             a_minus: FaceScalarExpr::lit(-1.0),
         };
 
-        let wgsl = generate_flux_module_wgsl(&resolved, &flux_layout, 1, &[], &spec, &[], false).to_wgsl();
+        let face_channels = all_live_face_channels([phi]);
+        let wgsl = generate_flux_module_wgsl(
+            &resolved,
+            &flux_layout,
+            &face_channels,
+            1,
+            &[],
+            &spec,
+            &[],
+            false,
+        )
+        .to_wgsl();
         assert!(wgsl.contains("cell_centers"));
         assert!(wgsl.contains("face_centers"));
     }
@@ -381,7 +422,18 @@ mod tests {
         );
         let spec = FluxModuleKernelSpec::ScalarReplicated { phi: phi_expr };
 
-        let wgsl = generate_flux_module_wgsl(&resolved, &flux_layout, 1, &[], &spec, &[], false).to_wgsl();
+        let face_channels = all_live_face_channels([phi]);
+        let wgsl = generate_flux_module_wgsl(
+            &resolved,
+            &flux_layout,
+            &face_channels,
+            1,
+            &[],
+            &spec,
+            &[],
+            false,
+        )
+        .to_wgsl();
 
         // `phi`(scalar) + `grad_phi`(vec2) => stride=3; grad_phi.x is at offset 1.
         assert!(wgsl.contains("state[neigh_idx * 3u + 1u]"));
@@ -438,8 +490,18 @@ mod tests {
             ],
         };
 
-        let wgsl = generate_flux_module_wgsl(&resolved, &flux_layout, 2, &primitives, &spec, &[], false)
-            .to_wgsl();
+        let face_channels = all_live_face_channels([rho_u]);
+        let wgsl = generate_flux_module_wgsl(
+            &resolved,
+            &flux_layout,
+            &face_channels,
+            2,
+            &primitives,
+            &spec,
+            &[],
+            false,
+        )
+        .to_wgsl();
 
         // rho_u_x is at offset 0, rho_u_y is at offset 1
         assert!(
@@ -683,6 +745,7 @@ fn state_bindings(include_low_mach_params: bool) -> Vec<Item> {
 fn main_fn(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
+    face_channels: &ExplicitFaceChannelLiveness,
     flux_stride: u32,
     primitives: &HashMap<&str, &Expr>,
     spec: &FluxModuleKernelSpec,
@@ -699,13 +762,22 @@ fn main_fn(
         params,
         None,
         vec![Attribute::Compute, Attribute::WorkgroupSize(64)],
-        main_body(resolver, flux_layout, flux_stride, primitives, spec, structured),
+        main_body(
+            resolver,
+            flux_layout,
+            face_channels,
+            flux_stride,
+            primitives,
+            spec,
+            structured,
+        ),
     )
 }
 
 fn main_fn_runtime_scheme(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
+    face_channels: &ExplicitFaceChannelLiveness,
     flux_stride: u32,
     primitives: &HashMap<&str, &Expr>,
     variants: &[(Scheme, FluxModuleKernelSpec)],
@@ -722,20 +794,36 @@ fn main_fn_runtime_scheme(
         params,
         None,
         vec![Attribute::Compute, Attribute::WorkgroupSize(64)],
-        main_body_runtime_scheme(resolver, flux_layout, flux_stride, primitives, variants, structured),
+        main_body_runtime_scheme(
+            resolver,
+            flux_layout,
+            face_channels,
+            flux_stride,
+            primitives,
+            variants,
+            structured,
+        ),
     )
 }
 
 fn main_body(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
+    face_channels: &ExplicitFaceChannelLiveness,
     flux_stride: u32,
     primitives: &HashMap<&str, &Expr>,
     spec: &FluxModuleKernelSpec,
     structured: bool,
 ) -> Block {
     if structured {
-        return structured_main_body(resolver, flux_layout, flux_stride, primitives, spec);
+        return structured_main_body(
+            resolver,
+            flux_layout,
+            face_channels,
+            flux_stride,
+            primitives,
+            spec,
+        );
     }
     let mut stmts = vec![
         dsl::let_expr(
@@ -824,6 +912,7 @@ fn main_body(
     stmts.extend(face_stmts(
         resolver,
         flux_layout,
+        face_channels,
         flux_stride,
         primitives,
         spec,
@@ -841,6 +930,7 @@ fn main_body(
 fn structured_main_body(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
+    face_channels: &ExplicitFaceChannelLiveness,
     flux_stride: u32,
     primitives: &HashMap<&str, &Expr>,
     spec: &FluxModuleKernelSpec,
@@ -890,7 +980,13 @@ fn structured_main_body(
         sg::sfd_vec2("sfd_face_cx", "sfd_face_cy"),
     ));
     face_body.extend(face_stmts(
-        resolver, flux_layout, flux_stride, primitives, spec, true,
+        resolver,
+        flux_layout,
+        face_channels,
+        flux_stride,
+        primitives,
+        spec,
+        true,
     ));
 
     stmts.push(dsl::for_loop_expr(
@@ -909,6 +1005,7 @@ fn structured_main_body(
 fn structured_main_body_runtime_scheme(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
+    face_channels: &ExplicitFaceChannelLiveness,
     flux_stride: u32,
     primitives: &HashMap<&str, &Expr>,
     variants: &[(Scheme, FluxModuleKernelSpec)],
@@ -950,7 +1047,13 @@ fn structured_main_body_runtime_scheme(
         sg::sfd_vec2("sfd_face_cx", "sfd_face_cy"),
     ));
     face_body.extend(face_stmts_runtime_scheme(
-        resolver, flux_layout, flux_stride, primitives, variants, true,
+        resolver,
+        flux_layout,
+        face_channels,
+        flux_stride,
+        primitives,
+        variants,
+        true,
     ));
 
     stmts.push(dsl::for_loop_expr(
@@ -965,6 +1068,7 @@ fn structured_main_body_runtime_scheme(
 fn main_body_runtime_scheme(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
+    face_channels: &ExplicitFaceChannelLiveness,
     flux_stride: u32,
     primitives: &HashMap<&str, &Expr>,
     variants: &[(Scheme, FluxModuleKernelSpec)],
@@ -974,6 +1078,7 @@ fn main_body_runtime_scheme(
         return structured_main_body_runtime_scheme(
             resolver,
             flux_layout,
+            face_channels,
             flux_stride,
             primitives,
             variants,
@@ -1066,6 +1171,7 @@ fn main_body_runtime_scheme(
     stmts.extend(face_stmts_runtime_scheme(
         resolver,
         flux_layout,
+        face_channels,
         flux_stride,
         primitives,
         variants,
@@ -1078,6 +1184,7 @@ fn main_body_runtime_scheme(
 fn face_stmts(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
+    face_channels: &ExplicitFaceChannelLiveness,
     flux_stride: u32,
     primitives: &HashMap<&str, &Expr>,
     spec: &FluxModuleKernelSpec,
@@ -1086,11 +1193,21 @@ fn face_stmts(
     // The face index the FLUX is written to: unstructured is the physical face
     // `idx`; structured is the per-(cell,dir) slot `idx*4 + k` (== `sfd_face_id`),
     // matching what the structured assembly reads (`fluxes[(idx*4+k)*stride+c]`).
-    let flux_face = |off: u32| {
+    let flux_face = |storage_rank: u32| {
         if structured {
-            dsl::array_access_linear("fluxes", Expr::ident("sfd_face_id"), flux_stride, off)
+            dsl::array_access_linear(
+                "fluxes",
+                Expr::ident("sfd_face_id"),
+                flux_stride,
+                storage_rank,
+            )
         } else {
-            dsl::array_access_linear("fluxes", Expr::ident("idx"), flux_stride, off)
+            dsl::array_access_linear(
+                "fluxes",
+                Expr::ident("idx"),
+                flux_stride,
+                storage_rank,
+            )
         }
     };
     let mut body: Vec<Stmt> = Vec::new();
@@ -1246,11 +1363,16 @@ fn face_stmts(
             }
 
             for (i, comp_name) in components.iter().enumerate() {
-                let off = flux_layout
+                let coupled_rank = flux_layout
                     .offset_for(comp_name)
                     .unwrap_or_else(|| panic!("missing flux layout component '{comp_name}'"));
+                let Some(storage_rank) =
+                    face_channels.storage_rank_for_coupled(coupled_rank)
+                else {
+                    continue;
+                };
                 let flux_expr = lower_scalar(&flux[i], &ctx, &mut nocse);
-                body.push(dsl::assign_expr(flux_face(off), flux_expr));
+                body.push(dsl::assign_expr(flux_face(storage_rank), flux_expr));
             }
         }
         FluxModuleKernelSpec::CentralUpwind {
@@ -1289,9 +1411,14 @@ fn face_stmts(
             ));
 
             for (i, comp_name) in components.iter().enumerate() {
-                let off = flux_layout
+                let coupled_rank = flux_layout
                     .offset_for(comp_name)
                     .unwrap_or_else(|| panic!("missing flux layout component '{comp_name}'"));
+                let Some(storage_rank) =
+                    face_channels.storage_rank_for_coupled(coupled_rank)
+                else {
+                    continue;
+                };
                 let (fcse_stmts, exprs) = fcse.lower_scalars(
                     &[&u_left[i], &u_right[i], &flux_left[i], &flux_right[i]],
                     &ctx,
@@ -1307,7 +1434,10 @@ fn face_stmts(
                     + (Expr::ident("a_plus") * Expr::ident("a_minus")) * (u_r - u_l);
                 let flux = num / Expr::ident("denom");
 
-                body.push(dsl::assign_expr(flux_face(off), flux * Expr::ident("area")));
+                body.push(dsl::assign_expr(
+                    flux_face(storage_rank),
+                    flux * Expr::ident("area"),
+                ));
             }
         }
     }
@@ -1318,6 +1448,7 @@ fn face_stmts(
 fn face_stmts_runtime_scheme(
     resolver: &dyn OffsetResolver,
     flux_layout: &FluxLayout,
+    face_channels: &ExplicitFaceChannelLiveness,
     flux_stride: u32,
     primitives: &HashMap<&str, &Expr>,
     variants: &[(Scheme, FluxModuleKernelSpec)],
@@ -1333,11 +1464,21 @@ fn face_stmts_runtime_scheme(
         a_plus: &'a FaceScalarExpr,
         a_minus: &'a FaceScalarExpr,
     }
-    let flux_face = |off: u32| {
+    let flux_face = |storage_rank: u32| {
         if structured {
-            dsl::array_access_linear("fluxes", Expr::ident("sfd_face_id"), flux_stride, off)
+            dsl::array_access_linear(
+                "fluxes",
+                Expr::ident("sfd_face_id"),
+                flux_stride,
+                storage_rank,
+            )
         } else {
-            dsl::array_access_linear("fluxes", Expr::ident("idx"), flux_stride, off)
+            dsl::array_access_linear(
+                "fluxes",
+                Expr::ident("idx"),
+                flux_stride,
+                storage_rank,
+            )
         }
     };
 
@@ -1566,10 +1707,18 @@ fn face_stmts_runtime_scheme(
         }
 
         for (name, comp_name) in var_names.iter().zip(upwind.components.iter()) {
-            let off = flux_layout
+            let coupled_rank = flux_layout
                 .offset_for(comp_name)
                 .unwrap_or_else(|| panic!("missing flux layout component '{comp_name}'"));
-            body.push(dsl::assign_expr(flux_face(off), Expr::ident(name.clone())));
+            let Some(storage_rank) =
+                face_channels.storage_rank_for_coupled(coupled_rank)
+            else {
+                continue;
+            };
+            body.push(dsl::assign_expr(
+                flux_face(storage_rank),
+                Expr::ident(name.clone()),
+            ));
         }
 
         return body;
@@ -1774,13 +1923,15 @@ fn face_stmts_runtime_scheme(
                 * (Expr::ident(&u_r) - Expr::ident(&u_l));
         let flux = num / Expr::ident("denom");
 
-        body.push(dsl::assign_expr(
-            // Use the face-id-aware helper: in the structured lowering the flux slot
-            // is `sfd_face_id`, not the cell `idx` (same class of bug as the boundary
-            // BC-table keying above).
-            flux_face(off),
-            flux * Expr::ident("area"),
-        ));
+        if let Some(storage_rank) = face_channels.storage_rank_for_coupled(off) {
+            body.push(dsl::assign_expr(
+                // Use the face-id-aware helper: in the structured lowering the flux slot
+                // is `sfd_face_id`, not the cell `idx` (same class of bug as the boundary
+                // BC-table keying above).
+                flux_face(storage_rank),
+                flux * Expr::ident("area"),
+            ));
+        }
     }
 
     body

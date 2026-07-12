@@ -1,6 +1,5 @@
 use super::plan_instance::{
-    OuterStepStatus, PlanAction, PlanFuture, PlanLinearSystemDebug, PlanParamValue,
-    PlanStepStats,
+    OuterStepStatus, PlanAction, PlanFuture, PlanLinearSystemDebug, PlanParamValue, PlanStepStats,
 };
 use crate::solver::gpu::context::GpuContext;
 use crate::solver::gpu::execution_plan::{GraphDetail, GraphExecMode};
@@ -315,7 +314,8 @@ impl ProgramSpecBuilder {
 /// Strongly-typed container for program-level resources.
 pub(crate) struct PlanResources {
     /// The solver backend (currently always GenericCoupled).
-    pub backend: crate::solver::gpu::lowering::programs::generic_coupled::GenericCoupledProgramResources,
+    pub backend:
+        crate::solver::gpu::lowering::programs::generic_coupled::GenericCoupledProgramResources,
     /// Cached port registry for field offset lookups.
     pub port_registry: Arc<crate::solver::model::ports::PortRegistry>,
 }
@@ -648,6 +648,176 @@ impl GpuProgramPlan {
         })
     }
 
+    /// Encode and submit `steps` complete fixed-timestep explicit RK4 steps as
+    /// one command buffer, without a wait or readback between steps.
+    ///
+    /// The host clock and ping-pong phase advance when the batch is submitted;
+    /// callers that present progress asynchronously must therefore pair this
+    /// with a GPU completion fence rather than treating [`Self::time`] as a
+    /// completion signal.  Adaptive/device-owned timestep control can build on
+    /// the same command-buffer seam by replacing the encoded constants copies.
+    pub(crate) fn step_explicit_batch(
+        &mut self,
+        steps: u32,
+    ) -> Result<wgpu::SubmissionIndex, String> {
+        crate::solver::gpu::lowering::programs::generic_coupled::submit_explicit_rk4_batch(
+            self, steps,
+        )
+    }
+
+    /// Submit a production barotropic-or-thermal all-Mach RK4 batch whose accepted-state
+    /// health check and optional next-step CFL controller remain entirely on
+    /// the GPU timeline. Fixed mode retains the same rollback/freeze contract.
+    pub(crate) fn step_explicit_autonomous_batch(
+        &mut self,
+        steps: u32,
+        adaptive: bool,
+        target_cfl: f32,
+    ) -> Result<wgpu::SubmissionIndex, String> {
+        crate::solver::gpu::lowering::programs::generic_coupled::submit_explicit_rk4_autonomous_batch(
+            self,
+            steps,
+            adaptive,
+            target_cfl,
+        )
+    }
+
+    /// Compatibility alias for explicitly adaptive callers.
+    pub(crate) fn step_explicit_adaptive_batch(
+        &mut self,
+        steps: u32,
+        target_cfl: f32,
+    ) -> Result<wgpu::SubmissionIndex, String> {
+        self.step_explicit_autonomous_batch(steps, true, target_cfl)
+    }
+
+    /// Variant that appends the tiny controller-status copy to the batch and
+    /// delivers it through wgpu's deferred map callback. Submission remains
+    /// nonblocking and needs only the event loop's ordinary `PollType::Poll`.
+    pub(crate) fn step_explicit_autonomous_batch_with_status<F>(
+        &mut self,
+        steps: u32,
+        adaptive: bool,
+        target_cfl: f32,
+        callback: F,
+    ) -> Result<wgpu::SubmissionIndex, String>
+    where
+        F: FnOnce(
+                Result<crate::solver::gpu::modules::explicit_control::ExplicitControlStatus, String>,
+            ) + Send
+            + 'static,
+    {
+        self.step_explicit_autonomous_batch_with_status_and_dt_ownership(
+            steps,
+            adaptive,
+            target_cfl,
+            false,
+            callback,
+        )
+    }
+
+    /// Driver-aware variant: `dt_is_accepted_candidate` prevents a freshly
+    /// initialized density controller from applying the growth limiter twice
+    /// to a timestep already sized from the current accepted state.
+    pub(crate) fn step_explicit_autonomous_batch_with_status_and_dt_ownership<F>(
+        &mut self,
+        steps: u32,
+        adaptive: bool,
+        target_cfl: f32,
+        dt_is_accepted_candidate: bool,
+        callback: F,
+    ) -> Result<wgpu::SubmissionIndex, String>
+    where
+        F: FnOnce(
+                Result<crate::solver::gpu::modules::explicit_control::ExplicitControlStatus, String>,
+            ) + Send
+            + 'static,
+    {
+        crate::solver::gpu::lowering::programs::generic_coupled::submit_explicit_rk4_autonomous_batch_with_status(
+            self,
+            steps,
+            adaptive,
+            target_cfl,
+            dt_is_accepted_candidate,
+            Box::new(callback),
+        )
+    }
+
+    /// Compatibility alias for explicitly adaptive callers.
+    pub(crate) fn step_explicit_adaptive_batch_with_status<F>(
+        &mut self,
+        steps: u32,
+        target_cfl: f32,
+        callback: F,
+    ) -> Result<wgpu::SubmissionIndex, String>
+    where
+        F: FnOnce(
+                Result<crate::solver::gpu::modules::explicit_control::ExplicitControlStatus, String>,
+            ) + Send
+            + 'static,
+    {
+        self.step_explicit_autonomous_batch_with_status(steps, true, target_cfl, callback)
+    }
+
+    /// Completion-fenced tiny telemetry for the autonomous explicit controller.
+    pub(crate) fn read_explicit_control_status(
+        &self,
+    ) -> PlanFuture<
+        '_,
+        Result<crate::solver::gpu::modules::explicit_control::ExplicitControlStatus, String>,
+    > {
+        crate::solver::gpu::lowering::programs::generic_coupled::read_explicit_control_status(self)
+    }
+
+    /// Install the renderer's three mailbox buffers once for allocation-free
+    /// accepted-state frame copies. Reinstalled only after a controller rebuild.
+    pub(crate) fn install_autonomous_frame_copy_targets(
+        &mut self,
+        destinations: &[wgpu::Buffer; 3],
+    ) -> Result<(), String> {
+        crate::solver::gpu::lowering::programs::generic_coupled::install_explicit_control_frame_targets(
+            self,
+            destinations,
+        )
+    }
+
+    /// Encode a GPU-selected copy of the authoritative accepted triple-buffer
+    /// state into one of the three preinstalled renderer targets. Submission is
+    /// deliberately owned by the caller so range reduction can share it.
+    pub(crate) fn encode_autonomous_accepted_state_copy(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target_slot: usize,
+    ) -> Result<(), String> {
+        crate::solver::gpu::lowering::programs::generic_coupled::encode_explicit_control_accepted_state(
+            self,
+            encoder,
+            target_slot,
+        )
+    }
+
+    #[cfg(test)]
+    pub(crate) fn autonomous_frame_copy_bind_group_count(&self) -> usize {
+        crate::solver::gpu::lowering::programs::generic_coupled::explicit_control_cached_frame_copy_bind_group_count(self)
+    }
+
+    pub(crate) fn autonomous_explicit_capabilities(
+        &self,
+    ) -> Option<crate::solver::gpu::modules::explicit_control::ExplicitControlCapabilities> {
+        crate::solver::gpu::lowering::programs::generic_coupled::explicit_control_capabilities(self)
+    }
+
+    /// Reconcile host-side scalar shadows after reading a completed autonomous
+    /// batch status. No device write/readback is performed.
+    pub(crate) fn reconcile_explicit_control_status(
+        &mut self,
+        status: crate::solver::gpu::modules::explicit_control::ExplicitControlStatus,
+    ) -> Result<(), String> {
+        crate::solver::gpu::lowering::programs::generic_coupled::reconcile_explicit_control_status(
+            self, status,
+        )
+    }
+
     pub fn linear_system_debug(&mut self) -> Option<&mut dyn PlanLinearSystemDebug> {
         let provider = self.spec.linear_debug?;
         provider(self)
@@ -756,8 +926,7 @@ impl GpuProgramPlan {
                                 self.spec.ops.run_graph(kind, &*self, &self.context, mode)
                             })
                         } else {
-                            let out =
-                                self.spec.ops.run_graph(kind, &*self, &self.context, mode);
+                            let out = self.spec.ops.run_graph(kind, &*self, &self.context, mode);
                             let idx = self.context.queue.submit(std::iter::empty());
                             let _ = self.context.device.poll(wgpu::PollType::Wait {
                                 submission_index: Some(idx),

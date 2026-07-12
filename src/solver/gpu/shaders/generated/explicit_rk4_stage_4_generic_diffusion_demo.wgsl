@@ -20,8 +20,9 @@ struct Constants {
     eos_gm1: f32,
     eos_r: f32,
     eos_dp_drho: f32,
-    eos_p_offset: f32,
+    eos_p_ref: f32,
     eos_theta_ref: f32,
+    eos_rho_ref: f32,
 }
 
 
@@ -43,9 +44,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     let volume_precision_risk_0 = raw_rhs_0 != 0.0 && abs(initial_rate_0) < bitcast<f32>(8388608u);
     var rate_0: f32 = initial_rate_0;
     mass_0_0 += 1.0;
-    rate_0 = select(rate_0, bitcast<f32>(2143289344u), rate_0 != 0.0 && abs(rate_0) < bitcast<f32>(8388608u) && abs(rate_0) / max(abs(mass_0_0), bitcast<f32>(1u)) >= bitcast<f32>(8388608u) || volume_precision_risk_0 && abs(mass_0_0) < 0.00000023841858);
+    rate_0 = select(rate_0, bitcast<f32>(2143289344u), rate_0 != 0.0 && abs(rate_0) < bitcast<f32>(8388608u) && abs(rate_0) / max(abs(mass_0_0), bitcast<f32>(1u)) * abs(constants.dt) >= bitcast<f32>(8388608u) || volume_precision_risk_0 && abs(mass_0_0) < 0.00000023841858 && abs(constants.dt) >= max(abs(mass_0_0), bitcast<f32>(1u)));
     let pivot_0 = select(mass_0_0, bitcast<f32>(2143289344u), abs(mass_0_0) < bitcast<f32>(1u) || abs(mass_0_0) > bitcast<f32>(2139095039u) || abs(mass_0_0) != abs(mass_0_0));
     var backsolve_rate_0: f32 = rate_0;
     rate_0 = backsolve_rate_0 / select(mass_0_0, bitcast<f32>(2143289344u), abs(mass_0_0) < bitcast<f32>(1u) || abs(mass_0_0) > bitcast<f32>(2139095039u) || abs(mass_0_0) != abs(mass_0_0));
+    rate_0 = select(rate_0, 0.0, rate_0 != 0.0 && abs(rate_0) * abs(constants.dt) < bitcast<f32>(8388608u));
     state[idx * 1u + 0u] = rk_base[idx * 1u + 0u] + constants.dt * (rk_accum[idx * 1u + 0u] + rate_0 / 6.0);
 }

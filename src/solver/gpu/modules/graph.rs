@@ -135,6 +135,51 @@ impl<M: GpuComputeModule> ModuleGraph<M> {
         }
     }
 
+    /// Encode several graphs into one compute pass.
+    ///
+    /// This is useful when the graphs form one dependency chain and do not
+    /// need an intervening transfer.  WebGPU defines every dispatch as a
+    /// separate usage scope, so storage writes from a node in an earlier graph
+    /// are visible to nodes in later graphs.  Keeping the graphs as distinct
+    /// values preserves the math-first schedule while avoiding an otherwise
+    /// artificial pass boundary (for example, an explicit residual followed
+    /// by its RK stage update).
+    pub fn encode_sequence_into(
+        graphs: &[&Self],
+        encoder: &mut wgpu::CommandEncoder,
+        module: &M,
+        runtime: RuntimeDims,
+    ) {
+        if graphs.iter().all(|graph| graph.nodes.is_empty()) {
+            return;
+        }
+
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("ModuleGraph sequence"),
+            timestamp_writes: None,
+        });
+        for graph in graphs {
+            for node in &graph.nodes {
+                match node {
+                    ModuleNode::Compute(spec) => {
+                        pass.set_pipeline(module.pipeline(spec.pipeline));
+                        module.bind(spec.bind, &mut pass);
+                        match &spec.dispatch {
+                            DispatchKind::Indirect { buffer, offset } => {
+                                pass.dispatch_workgroups_indirect(buffer, *offset);
+                            }
+                            other => {
+                                let (x, y, z) = module.dispatch(other.clone(), runtime);
+                                pass.dispatch_workgroups(x, y, z);
+                            }
+                        }
+                        crate::count_dispatch!("Kernel Graph", spec.label);
+                    }
+                }
+            }
+        }
+    }
+
     pub fn execute(&self, context: &GpuContext, module: &M, runtime: RuntimeDims) {
         let mut encoder = context
             .device

@@ -112,6 +112,51 @@ impl Default for SolverConfig {
     }
 }
 
+/// Host-side accounting for one asynchronously submitted explicit GPU batch.
+///
+/// `start_time` and `end_time` describe work accepted by the GPU queue, not
+/// work known to have completed.  Consumers must fence `submission_index`
+/// before publishing `end_time` as completed simulation progress.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ExplicitGpuBatchMetadata {
+    pub steps: u32,
+    pub dt: f32,
+    pub start_time: f32,
+    pub end_time: f32,
+}
+
+/// A bounded explicit RK4 batch and the queue fence that completes it.
+#[derive(Debug, Clone)]
+pub(crate) struct ExplicitGpuBatchSubmission {
+    pub submission_index: wgpu::SubmissionIndex,
+    pub metadata: ExplicitGpuBatchMetadata,
+}
+
+/// Completion payload for a health-audited autonomous explicit batch.
+/// Counts and physical time describe accepted GPU work only; a halted batch
+/// may accept fewer steps than requested.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct AdaptiveExplicitGpuBatchCompletion {
+    pub requested_steps: u32,
+    pub accepted_batch: u32,
+    pub accepted_total: u64,
+    pub time: f64,
+    pub last_dt: f32,
+    pub next_dt: f32,
+    pub halted: bool,
+    pub invalid_count: u32,
+    pub max_base_rate: f32,
+    pub max_rhie_chow_turnover: f32,
+    pub total_rate: f32,
+    control_status: crate::solver::gpu::modules::explicit_control::ExplicitControlStatus,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AdaptiveExplicitGpuBatchSubmission {
+    pub submission_index: wgpu::SubmissionIndex,
+    pub requested_steps: u32,
+}
+
 /// Internal backend implementation held by the solver.
 enum SolverBackend {
     Gpu(GpuProgramPlan),
@@ -578,6 +623,35 @@ impl GpuUnifiedSolver {
             * std::mem::size_of::<f32>() as u64
     }
 
+    /// Record a GPU state copy into a caller-owned command buffer. CPU-backed
+    /// solvers upload through the same queue; the caller's subsequent submit
+    /// flushes that write without an extra empty submission.
+    pub(crate) fn encode_or_upload_state_to_buffer(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        dst: &wgpu::Buffer,
+    ) -> Result<(), String> {
+        let size_bytes = self.state_size_bytes().min(dst.size());
+        if size_bytes == 0 {
+            return Ok(());
+        }
+        if !dst.usage().contains(wgpu::BufferUsages::COPY_DST) {
+            return Err("visualization destination lacks COPY_DST usage".to_string());
+        }
+
+        #[cfg(feature = "cpu")]
+        if let (SolverBackend::Cpu(c), Some(r)) = (&self.backend, &self.cpu_render) {
+            let bytes = c.read_state_f32();
+            let n = (size_bytes as usize / 4).min(bytes.len());
+            r.queue
+                .write_buffer(dst, 0, bytemuck::cast_slice(&bytes[..n]));
+            return Ok(());
+        }
+
+        encoder.copy_buffer_to_buffer(self.state_buffer(), 0, dst, 0, size_bytes);
+        Ok(())
+    }
+
     pub fn copy_state_to_buffer(&self, dst: &wgpu::Buffer) {
         // Clamp to the destination's capacity: a moving-mesh cell-count
         // RESIZE can grow the solver state past a viz buffer allocated at
@@ -611,6 +685,55 @@ impl GpuUnifiedSolver {
         encoder.copy_buffer_to_buffer(self.state_buffer(), 0, dst, 0, size_bytes);
         queue.submit(Some(encoder.finish()));
         crate::count_submission!("Unified Solver", "copy_state_to_buffer");
+    }
+
+    pub(crate) fn install_autonomous_frame_copy_targets(
+        &mut self,
+        destinations: &[wgpu::Buffer; 3],
+    ) -> Result<(), String> {
+        match &mut self.backend {
+            SolverBackend::Gpu(plan) => plan.install_autonomous_frame_copy_targets(destinations),
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(_) => Ok(()),
+        }
+    }
+
+    /// Frame-cadence copy selected entirely from the autonomous controller's
+    /// accepted count. The caller owns submission so the range pass can share
+    /// the same command buffer.
+    pub(crate) fn encode_autonomous_accepted_state_copy(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target_slot: usize,
+    ) -> Result<(), String> {
+        match &self.backend {
+            SolverBackend::Gpu(plan) => {
+                plan.encode_autonomous_accepted_state_copy(encoder, target_slot)
+            }
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(_) => {
+                Err("autonomous accepted-state copy requires the GPU backend".to_string())
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn autonomous_frame_copy_bind_group_count(&self) -> usize {
+        match &self.backend {
+            SolverBackend::Gpu(plan) => plan.autonomous_frame_copy_bind_group_count(),
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(_) => 0,
+        }
+    }
+
+    pub(crate) fn autonomous_explicit_capabilities(
+        &self,
+    ) -> Option<crate::solver::gpu::modules::explicit_control::ExplicitControlCapabilities> {
+        match &self.backend {
+            SolverBackend::Gpu(plan) => plan.autonomous_explicit_capabilities(),
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(_) => None,
+        }
     }
 
     pub(crate) fn set_plan_named_param(
@@ -767,10 +890,7 @@ impl GpuUnifiedSolver {
     /// the soft start.
     pub fn set_inlet_ramp(&mut self, velocity: f32, duration: f32) {
         let _ = self.set_named_param("inlet_velocity", PlanParamValue::F32(velocity));
-        let _ = self.set_named_param(
-            "inlet_ramp_time",
-            PlanParamValue::F32(duration.max(0.0)),
-        );
+        let _ = self.set_named_param("inlet_ramp_time", PlanParamValue::F32(duration.max(0.0)));
     }
 
     pub fn set_advection_scheme(&mut self, scheme: Scheme) {
@@ -828,6 +948,195 @@ impl GpuUnifiedSolver {
         // bridge / on the GPU backend).
         #[cfg(feature = "cpu")]
         self.sync_cpu_render();
+    }
+
+    /// Encode and submit a bounded batch of static-mesh, fixed-`dt` explicit
+    /// RK4 steps without waiting for, polling, or reading back GPU state.
+    ///
+    /// The returned submission index is the batch completion fence.  The
+    /// solver's host clock advances at submission time, so callers must use
+    /// that fence before presenting `metadata.end_time` as completed progress.
+    /// This path intentionally does not run the ordinary per-step finite-state
+    /// audit; an autonomous caller must pair batches with its GPU-side health
+    /// and presentation policy.
+    ///
+    /// Batching is rejected for the CPU backend, an empty batch, and whenever
+    /// SRD is enabled: applying redistribution only after the whole batch would
+    /// change the method, while applying it after every encoded step is not yet
+    /// part of the batch command graph.  The program-plan layer supplies the
+    /// remaining authoritative guards for implicit stepping, ALE, tracing, and
+    /// profiling.
+    pub(crate) fn submit_explicit_gpu_batch<F>(
+        &mut self,
+        steps: u32,
+        on_completed: F,
+    ) -> Result<ExplicitGpuBatchSubmission, String>
+    where
+        F: FnOnce(ExplicitGpuBatchMetadata) + Send + 'static,
+    {
+        if steps == 0 {
+            return Err("explicit GPU batch must contain at least one step".to_string());
+        }
+        if self.srd_enabled {
+            return Err(
+                "explicit GPU batching is unsupported while SRD is enabled; redistribution must run after every logical step"
+                    .to_string(),
+            );
+        }
+
+        let plan = match &mut self.backend {
+            SolverBackend::Gpu(plan) => plan,
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(_) => {
+                return Err("explicit GPU batching requires the GPU backend".to_string())
+            }
+        };
+        let start_time = plan.time();
+        let dt = plan.dt();
+        // This delegates eligibility checks which depend on the lowered plan
+        // (explicit recipe, static mesh, and disabled trace/profiling) and does
+        // not poll or read back the submitted work.
+        let submission_index = plan.step_explicit_batch(steps)?;
+        let end_time = plan.time();
+        let metadata = ExplicitGpuBatchMetadata {
+            steps,
+            dt,
+            start_time,
+            end_time,
+        };
+
+        // Queue callbacks fence every submission preceding this registration,
+        // including the batch just accepted above.  Register before returning
+        // so the worker cannot accidentally attach completion to a later batch.
+        // Callback execution is driven separately by `poll_gpu_completions`;
+        // submission itself neither polls, waits, nor performs a readback.
+        plan.context
+            .queue
+            .on_submitted_work_done(move || on_completed(metadata));
+
+        // A successful static batch consumes the same sequencing slot as
+        // ordinary stepping.  ALE plans are rejected by `step_explicit_batch`
+        // before reaching this assignment.
+        self.ale_step_armed = false;
+        self.last_explicit_state = None;
+        Ok(ExplicitGpuBatchSubmission {
+            submission_index,
+            metadata,
+        })
+    }
+
+    /// Submit a health-audited fixed-or-adaptive production all-Mach
+    /// batch. Status is copied and mapped as part of the same submission; the
+    /// callback is driven by nonblocking device polling and reports accepted
+    /// rather than merely queued progress.
+    pub(crate) fn submit_autonomous_explicit_gpu_batch<F>(
+        &mut self,
+        steps: u32,
+        adaptive: bool,
+        target_cfl: f32,
+        dt_is_accepted_candidate: bool,
+        on_completed: F,
+    ) -> Result<AdaptiveExplicitGpuBatchSubmission, String>
+    where
+        F: FnOnce(Result<AdaptiveExplicitGpuBatchCompletion, String>) + Send + 'static,
+    {
+        if self.srd_enabled {
+            return Err(
+                "autonomous explicit GPU batching is unsupported while SRD is enabled".to_string(),
+            );
+        }
+        let plan = match &mut self.backend {
+            SolverBackend::Gpu(plan) => plan,
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(_) => {
+                return Err("autonomous explicit GPU batching requires the GPU backend".to_string())
+            }
+        };
+        let submission_index = plan.step_explicit_autonomous_batch_with_status_and_dt_ownership(
+            steps,
+            adaptive,
+            target_cfl,
+            dt_is_accepted_candidate,
+            move |result| {
+                on_completed(result.map(|status| AdaptiveExplicitGpuBatchCompletion {
+                    requested_steps: steps,
+                    accepted_batch: status.accepted_batch,
+                    accepted_total: status.accepted_total,
+                    time: status.time,
+                    last_dt: status.last_dt,
+                    next_dt: status.next_dt,
+                    halted: status.halted,
+                    invalid_count: status.invalid_count,
+                    max_base_rate: status.max_base_rate,
+                    max_rhie_chow_turnover: status.max_rhie_chow_turnover,
+                    total_rate: status.total_rate,
+                    control_status: status,
+                }));
+            },
+        )?;
+        self.ale_step_armed = false;
+        self.last_explicit_state = None;
+        Ok(AdaptiveExplicitGpuBatchSubmission {
+            submission_index,
+            requested_steps: steps,
+        })
+    }
+
+    /// Compatibility alias for callers that explicitly request adaptive mode.
+    pub(crate) fn submit_adaptive_explicit_gpu_batch<F>(
+        &mut self,
+        steps: u32,
+        target_cfl: f32,
+        on_completed: F,
+    ) -> Result<AdaptiveExplicitGpuBatchSubmission, String>
+    where
+        F: FnOnce(Result<AdaptiveExplicitGpuBatchCompletion, String>) + Send + 'static,
+    {
+        self.submit_autonomous_explicit_gpu_batch(steps, true, target_cfl, false, on_completed)
+    }
+
+    /// Normalize the host scalar shadows and logical ping-pong phase to an
+    /// accepted adaptive completion before any snapshot, parameter edit, or
+    /// subsequent batch is issued.
+    pub(crate) fn reconcile_autonomous_explicit_gpu_batch(
+        &mut self,
+        completion: AdaptiveExplicitGpuBatchCompletion,
+    ) -> Result<(), String> {
+        match &mut self.backend {
+            SolverBackend::Gpu(plan) => {
+                plan.reconcile_explicit_control_status(completion.control_status)
+            }
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(_) => {
+                Err("autonomous explicit GPU reconciliation requires the GPU backend".to_string())
+            }
+        }
+    }
+
+    /// Compatibility alias for older adaptive-only scheduling code.
+    pub(crate) fn reconcile_adaptive_explicit_gpu_batch(
+        &mut self,
+        completion: AdaptiveExplicitGpuBatchCompletion,
+    ) -> Result<(), String> {
+        self.reconcile_autonomous_explicit_gpu_batch(completion)
+    }
+
+    /// Drive registered GPU completion callbacks without blocking the calling
+    /// thread.  This is suitable for an event loop tick; unlike `PollType::Wait`
+    /// it returns immediately even while a submitted batch is still running.
+    pub(crate) fn poll_gpu_completions(&self) -> Result<(), String> {
+        match &self.backend {
+            SolverBackend::Gpu(plan) => plan
+                .context
+                .device
+                .poll(wgpu::PollType::Poll)
+                .map(|_| ())
+                .map_err(|error| format!("nonblocking GPU poll failed: {error}")),
+            #[cfg(feature = "cpu")]
+            SolverBackend::Cpu(_) => {
+                Err("GPU completion polling requires the GPU backend".to_string())
+            }
+        }
     }
 
     pub fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
@@ -1036,8 +1345,7 @@ impl GpuUnifiedSolver {
     /// Model-derived, hence backend-independent; empty for models whose
     /// unknowns don't map to state slots.
     pub fn unknown_state_offsets(&self) -> Vec<u32> {
-        crate::solver::model::kernel::model_unknown_state_offsets(&self.model)
-            .unwrap_or_default()
+        crate::solver::model::kernel::model_unknown_state_offsets(&self.model).unwrap_or_default()
     }
 
     /// ALE step entry: after the caller moved the mesh (topology-identical;
@@ -1195,7 +1503,8 @@ impl GpuUnifiedSolver {
         if let Some(c) = self.cpu_mut() {
             return c.write_state_f32(state);
         }
-        self.plan_mut().write_state_bytes(bytemuck::cast_slice(state))
+        self.plan_mut()
+            .write_state_bytes(bytemuck::cast_slice(state))
     }
 
     /// Set a scalar field with initial-condition semantics: the write propagates to all
@@ -1212,7 +1521,8 @@ impl GpuUnifiedSolver {
             return Ok(());
         }
         let state = self.state_with_scalar_field(field, values)?;
-        self.plan_mut().write_state_bytes(bytemuck::cast_slice(&state))
+        self.plan_mut()
+            .write_state_bytes(bytemuck::cast_slice(&state))
     }
 
     /// Set a scalar field in the current state only, preserving the time history.
@@ -1323,14 +1633,19 @@ impl GpuUnifiedSolver {
             state[base] = x as f32;
             state[base + 1] = y as f32;
         }
-        self.plan_mut().write_state_bytes(bytemuck::cast_slice(&state))
+        self.plan_mut()
+            .write_state_bytes(bytemuck::cast_slice(&state))
     }
 
     /// Set a Vector2 field in the current state only, preserving the time
     /// history (the Vector2 twin of [`Self::set_field_scalar_current`]). Use
     /// for mid-run updates of non-solved fields — e.g. a manufactured MMS
     /// source re-evaluated at moved cell centroids under ALE mesh motion.
-    pub fn set_field_vec2_current(&mut self, field: &str, values: &[(f64, f64)]) -> Result<(), String> {
+    pub fn set_field_vec2_current(
+        &mut self,
+        field: &str,
+        values: &[(f64, f64)],
+    ) -> Result<(), String> {
         #[cfg(feature = "cpu")]
         if self.is_cpu() {
             if let Some(c) = self.cpu_mut() {
@@ -1492,7 +1807,12 @@ fn cpu_config_from_env() -> crate::solver::cpu::CpuBackendConfig {
         Ok("f32") | Ok("F32") => crate::solver::cpu::CpuPrecision::F32,
         _ => crate::solver::cpu::CpuPrecision::F64,
     };
-    CpuBackendConfig { engine, threads, simd, precision }
+    CpuBackendConfig {
+        engine,
+        threads,
+        simd,
+        precision,
+    }
 }
 
 /// Route a runtime named-param onto the CPU backend. Params that don't apply to
@@ -1513,7 +1833,7 @@ fn cpu_set_param(c: &mut crate::solver::cpu::CpuSolver, name: &str, value: PlanP
         ("time_scheme", PlanParamValue::TimeScheme(s)) => c.set_time_scheme(s),
         ("outer_iters", PlanParamValue::Usize(n)) => c.set_outer_iters(n),
         ("outer_iters", PlanParamValue::U32(n)) => c.set_outer_iters(n as usize),
-        // EOS runtime tuning (compressible): gamma/gm1/r/dp_drho/p_offset/theta_ref.
+        // EOS runtime tuning (compressible): gamma/gm1/r/dp_drho/p_ref/theta_ref/rho_ref.
         // Mirrors the GPU `set_eos` so the GUI's fluid controls affect the CPU too.
         (n, PlanParamValue::F32(v)) if n.starts_with("eos.") => {
             c.set_eos_param(n, v);
@@ -1524,5 +1844,116 @@ fn cpu_set_param(c: &mut crate::solver::cpu::CpuSolver, name: &str, value: PlanP
         // relative break and uses model-owned preconditioners (Schur / block-Jacobi),
         // so these GPU-solver-internal knobs are intentionally ignored.
         _ => {}
+    }
+}
+
+#[cfg(all(test, feature = "cpu"))]
+mod explicit_batch_contract_tests {
+    use super::*;
+    use crate::solver::mesh::{generate_structured_rect_mesh, BoundarySides};
+    use crate::solver::model::generic_diffusion_demo_mms_model;
+
+    fn explicit_cpu_solver() -> GpuUnifiedSolver {
+        let mesh = generate_structured_rect_mesh(2, 2, 1.0, 1.0, BoundarySides::wall());
+        let model = generic_diffusion_demo_mms_model().expect("diffusion MMS model");
+        GpuUnifiedSolver::new_forced_cpu_with_config(
+            &mesh,
+            model,
+            SolverConfig {
+                time_scheme: TimeScheme::RK4,
+                stepping: SteppingMode::Explicit,
+                ..SolverConfig::default()
+            },
+            crate::solver::cpu::CpuBackendConfig::default(),
+        )
+        .expect("explicit CPU solver")
+    }
+
+    #[test]
+    fn explicit_gpu_batch_rejects_empty_cpu_and_srd_routes_without_callback() {
+        let mut solver = explicit_cpu_solver();
+
+        let error = solver
+            .submit_explicit_gpu_batch(0, |_| panic!("rejected batch callback ran"))
+            .expect_err("empty batch must fail");
+        assert!(
+            error.contains("at least one step"),
+            "unexpected error: {error}"
+        );
+
+        let error = solver
+            .submit_explicit_gpu_batch(1, |_| panic!("rejected batch callback ran"))
+            .expect_err("CPU batch must fail");
+        assert!(error.contains("GPU backend"), "unexpected error: {error}");
+
+        solver.set_srd_enabled(true);
+        let error = solver
+            .submit_explicit_gpu_batch(1, |_| panic!("rejected batch callback ran"))
+            .expect_err("SRD batch must fail");
+        assert!(
+            error.contains("SRD is enabled"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn explicit_gpu_batch_completion_callback_reports_submitted_window() {
+        let mesh = generate_structured_rect_mesh(3, 2, 1.0, 1.0, BoundarySides::wall());
+        let model = generic_diffusion_demo_mms_model().expect("diffusion MMS model");
+        let mut solver = match pollster::block_on(GpuUnifiedSolver::new(
+            &mesh,
+            model,
+            SolverConfig {
+                time_scheme: TimeScheme::RK4,
+                stepping: SteppingMode::Explicit,
+                ..SolverConfig::default()
+            },
+            None,
+            None,
+        )) {
+            Ok(solver) if !solver.is_cpu() => solver,
+            Ok(_) => {
+                eprintln!("[explicit-batch-callback] CPU selected; skipping GPU contract");
+                return;
+            }
+            Err(error) => {
+                eprintln!("[explicit-batch-callback] no compatible GPU ({error}); skipping");
+                return;
+            }
+        };
+        solver.set_dt(0.0125);
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let submitted = solver
+            .submit_explicit_gpu_batch(2, move |metadata| {
+                let _ = tx.send(metadata);
+            })
+            .expect("submit explicit GPU batch");
+        assert_eq!(submitted.metadata.steps, 2);
+        assert_eq!(submitted.metadata.dt.to_bits(), 0.0125_f32.to_bits());
+        assert_eq!(submitted.metadata.start_time.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(submitted.metadata.end_time.to_bits(), 0.025_f32.to_bits());
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let completed = loop {
+            solver
+                .poll_gpu_completions()
+                .expect("drive nonblocking completion callback");
+            match rx.try_recv() {
+                Ok(metadata) => break metadata,
+                Err(std::sync::mpsc::TryRecvError::Empty)
+                    if std::time::Instant::now() < deadline =>
+                {
+                    std::thread::yield_now();
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    panic!("GPU completion callback did not run before timeout")
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    panic!("GPU completion callback channel disconnected")
+                }
+            }
+        };
+        assert_eq!(completed, submitted.metadata);
     }
 }

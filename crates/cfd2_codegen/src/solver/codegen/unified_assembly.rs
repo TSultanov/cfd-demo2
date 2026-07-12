@@ -30,10 +30,19 @@ fn unified_assembly_needs_fluxes(system: &DiscreteSystem) -> bool {
     })
 }
 
-fn validate_unified_assembly_inputs(needs_fluxes: bool, flux_stride: u32, coupled_stride: u32) {
-    if needs_fluxes && flux_stride != coupled_stride {
+fn validate_unified_assembly_inputs(
+    system: &DiscreteSystem,
+    needs_fluxes: bool,
+    flux_stride: u32,
+    coupled_stride: u32,
+) {
+    let face_channels =
+        super::explicit_liveness::ExplicitFaceChannelLiveness::from_discrete_system(system);
+    debug_assert_eq!(face_channels.coupled_stride(), coupled_stride);
+    let expected = face_channels.storage_stride();
+    if needs_fluxes && flux_stride != expected {
         panic!(
-            "unified_assembly requires flux_stride ({flux_stride}) == coupled_stride ({coupled_stride}) when convection ops are present"
+            "unified_assembly requires flux_stride ({flux_stride}) == live face-channel stride ({expected}) when convection ops are present (coupled stride {coupled_stride})"
         );
     }
 }
@@ -435,7 +444,12 @@ pub fn generate_unified_assembly_wgsl(
     impl typed::DispatchByStride<KernelWgsl> for Dispatch<'_> {
         fn call<Ax: typed::CoupledAxis>(&self) -> KernelWgsl {
             let needs_fluxes = unified_assembly_needs_fluxes(self.system);
-            validate_unified_assembly_inputs(needs_fluxes, self.flux_stride, Ax::STRIDE);
+            validate_unified_assembly_inputs(
+                self.system,
+                needs_fluxes,
+                self.flux_stride,
+                Ax::STRIDE,
+            );
 
             let mut module = Module::new();
             module.push(Item::Comment(
@@ -508,7 +522,12 @@ pub fn generate_unified_assembly_kernel_program(
     impl typed::DispatchByStride<Result<KernelProgram, String>> for Dispatch<'_> {
         fn call<Ax: typed::CoupledAxis>(&self) -> Result<KernelProgram, String> {
             let needs_fluxes = unified_assembly_needs_fluxes(self.system);
-            validate_unified_assembly_inputs(needs_fluxes, self.flux_stride, Ax::STRIDE);
+            validate_unified_assembly_inputs(
+                self.system,
+                needs_fluxes,
+                self.flux_stride,
+                Ax::STRIDE,
+            );
 
             let mut items = if self.system.topology() == TopologyMode::Structured2D {
                 base_assembly_items_structured(self.needs_gradients, needs_fluxes, self.eos_params)
@@ -588,7 +607,12 @@ pub fn generate_matrix_free_residual_kernel_program(
     impl typed::DispatchByStride<Result<KernelProgram, String>> for Dispatch<'_> {
         fn call<Ax: typed::CoupledAxis>(&self) -> Result<KernelProgram, String> {
             let needs_fluxes = unified_assembly_needs_fluxes(self.system);
-            validate_unified_assembly_inputs(needs_fluxes, self.flux_stride, Ax::STRIDE);
+            validate_unified_assembly_inputs(
+                self.system,
+                needs_fluxes,
+                self.flux_stride,
+                Ax::STRIDE,
+            );
             let mut items = super::coupled_common::base_matrix_free_residual_items(
                 self.system.topology(),
                 self.needs_gradients,
@@ -782,6 +806,8 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
     let coupled_stride = unknowns.len() as u32;
     let acc = typed::CoupledAccumulators::new(coupled_stride);
     let offsets = coupled_offsets(system);
+    let face_channels =
+        super::explicit_liveness::ExplicitFaceChannelLiveness::from_discrete_system(system);
 
     assert_eq!(
         Ax::STRIDE,
@@ -1959,12 +1985,11 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                 .iter()
                 .find(|op| op.kind == DiscreteOpKind::Convection)
             {
-                // Flux buffer is interpreted as a packed per-unknown-component face flux table.
-                // Indexing is `fluxes[face * flux_stride + u_idx]`, where `u_idx` is the packed
-                // unknown component index in the coupled system.
-                //
-                // Flux population is handled by an optional flux module kernel; assembly only
-                // assumes the packed `(face_idx, u_idx)` layout.
+                // Semantic `u_idx` remains the full coupled unknown index for
+                // row accumulation. Face storage uses the independent dense
+                // producer/consumer rank, so dead algebraic channels consume
+                // no buffer slot. The optional flux-module producer derives
+                // this same map from the lowered residual operations.
 
                 // `DivFlux` terms represent conservative flux divergence:
                 // the face flux is precomputed (e.g., KT) and should contribute RHS-only:
@@ -1973,11 +1998,14 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                 if conv_op.term_op == TermOp::DivFlux {
                     for component in 0..equation.target.kind().component_count() as u32 {
                         let u_idx = base_offset + component;
+                        let face_channel = face_channels
+                            .storage_rank_for_coupled(u_idx)
+                            .expect("DivFlux row must own a live face channel");
                         let flux_val_expr = dsl::array_access_linear(
                             "fluxes",
                             Expr::ident("face_idx"),
                             flux_stride,
-                            u_idx,
+                            face_channel,
                         );
                         let flux_val_expr = ale_relative_flux_expr(conv_op, flux_val_expr, slots);
 
@@ -2094,13 +2122,16 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                     // Reconstruct field at face (scalar convection operator)
                     for component in 0..equation.target.kind().component_count() as u32 {
                         let u_idx = base_offset + component;
+                        let face_channel = face_channels
+                            .storage_rank_for_coupled(u_idx)
+                            .expect("convection row must own a live face channel");
                         let field_name = equation.target.name();
 
                         let flux_val_expr = dsl::array_access_linear(
                             "fluxes",
                             Expr::ident("face_idx"),
                             flux_stride,
-                            u_idx,
+                            face_channel,
                         );
                         let flux_val_expr = ale_relative_flux_expr(conv_op, flux_val_expr, slots);
                         body.push(acc.declare_phi(u_idx, flux_val_expr));
@@ -2572,16 +2603,40 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
 #[cfg(test)]
 mod input_validation_tests {
     use super::validate_unified_assembly_inputs;
+    use crate::solver::codegen::ir::lower_system;
+    use crate::solver::ir::{
+        fvm, surface_scalar_dim, vol_scalar_dim, Equation, EquationSystem, SchemeRegistry,
+    };
+    use crate::solver::scheme::Scheme;
+    use cfd2_ir::dimensions::Dimensionless;
+
+    fn interleaved_flux_system() -> super::DiscreteSystem {
+        let q = vol_scalar_dim::<Dimensionless>("q");
+        let closure = vol_scalar_dim::<Dimensionless>("closure");
+        let r = vol_scalar_dim::<Dimensionless>("r");
+        let phi = surface_scalar_dim::<Dimensionless>("phi");
+        let mut q_eq = Equation::new(q);
+        q_eq.add_term(fvm::div(phi, q));
+        let closure_eq = Equation::new(closure);
+        let mut r_eq = Equation::new(r);
+        r_eq.add_term(fvm::div(phi, r));
+        let mut system = EquationSystem::new();
+        system.add_equation(q_eq);
+        system.add_equation(closure_eq);
+        system.add_equation(r_eq);
+        lower_system(&system, &SchemeRegistry::new(Scheme::Upwind)).unwrap()
+    }
 
     #[test]
-    #[should_panic(expected = "flux_stride (2) == coupled_stride (3)")]
+    #[should_panic(expected = "flux_stride (1) == live face-channel stride (2)")]
     fn rejects_nonzero_but_undersized_flux_stride() {
-        validate_unified_assembly_inputs(true, 2, 3);
+        validate_unified_assembly_inputs(&interleaved_flux_system(), true, 1, 3);
     }
 
     #[test]
     fn accepts_exact_or_unused_flux_stride() {
-        validate_unified_assembly_inputs(true, 3, 3);
-        validate_unified_assembly_inputs(false, 0, 3);
+        let system = interleaved_flux_system();
+        validate_unified_assembly_inputs(&system, true, 2, 3);
+        validate_unified_assembly_inputs(&system, false, 0, 3);
     }
 }

@@ -8,8 +8,9 @@ pub(crate) fn handler_for_key(key: &'static str) -> Option<ProgramParamHandler> 
         "eos.gm1" => Some(generic_coupled::param_eos_gm1),
         "eos.r" => Some(generic_coupled::param_eos_r),
         "eos.dp_drho" => Some(generic_coupled::param_eos_dp_drho),
-        "eos.p_offset" => Some(generic_coupled::param_eos_p_offset),
+        "eos.p_ref" => Some(generic_coupled::param_eos_p_ref),
         "eos.theta_ref" => Some(generic_coupled::param_eos_theta_ref),
+        "eos.rho_ref" => Some(generic_coupled::param_eos_rho_ref),
         "low_mach.model" => Some(generic_coupled::param_low_mach_model),
         "low_mach.theta_floor" => Some(generic_coupled::param_low_mach_theta_floor),
         "low_mach.pressure_coupling_alpha" => {

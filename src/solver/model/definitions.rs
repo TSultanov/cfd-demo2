@@ -1211,8 +1211,9 @@ fn coefficient_mass_polynomial(
         let uniform = match name {
             "rho" => "density",
             "mu" | "nu" => "viscosity",
-            "eos_gamma" | "eos_gm1" | "eos_r" | "eos_dp_drho" | "eos_p_offset"
-            | "eos_theta_ref" | "buoyant_beta_g" | "buoyant_t0" | "buoyant_k_over_cp" => name,
+            "eos_gamma" | "eos_gm1" | "eos_r" | "eos_dp_drho" | "eos_p_ref"
+            | "eos_theta_ref" | "eos_rho_ref" | "buoyant_beta_g" | "buoyant_t0"
+            | "buoyant_k_over_cp" => name,
             // These lower to compound runtime expressions rather than one
             // independently varying scalar atom. Reject instead of inventing
             // a symbolic identity that differs from generated WGSL.

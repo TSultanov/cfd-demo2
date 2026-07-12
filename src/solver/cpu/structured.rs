@@ -25,6 +25,7 @@ use crate::solver::cpu::lowering::model_kernel_programs;
 use crate::solver::gpu::recipe::{KernelPhase, SolverRecipe, SteppingMode};
 use crate::solver::gpu::structs::GpuConstants;
 use crate::solver::model::backend::SchemeRegistry;
+use crate::solver::model::eos::EosRuntimeParams;
 use crate::solver::model::ModelSpec;
 use crate::solver::scheme::Scheme;
 use crate::solver::{PreconditionerType, TimeScheme};
@@ -826,8 +827,9 @@ impl StructuredModelSolver {
             .with_constant("constants", "eos_gm1", Value::F32(c.eos_gm1))
             .with_constant("constants", "eos_r", Value::F32(c.eos_r))
             .with_constant("constants", "eos_dp_drho", Value::F32(c.eos_dp_drho))
-            .with_constant("constants", "eos_p_offset", Value::F32(c.eos_p_offset))
+            .with_constant("constants", "eos_p_ref", Value::F32(c.eos_p_ref))
             .with_constant("constants", "eos_theta_ref", Value::F32(c.eos_theta_ref))
+            .with_constant("constants", "eos_rho_ref", Value::F32(c.eos_rho_ref))
             .with_constant("constants", "buoyant_beta_g", Value::F32(c.buoyant_beta_g))
             .with_constant("constants", "buoyant_t0", Value::F32(c.buoyant_t0))
             .with_constant(
@@ -1367,6 +1369,36 @@ impl StructuredModelSolver {
     pub fn set_fluid(&mut self, density: f64, viscosity: f64) {
         self.constants.density = density as f32;
         self.constants.viscosity = viscosity as f32;
+    }
+
+    /// Apply the complete runtime EOS block consumed by the generated
+    /// structured interpreter/transpiled kernels.
+    pub fn set_eos(&mut self, params: EosRuntimeParams) {
+        self.constants.eos_gamma = params.gamma;
+        self.constants.eos_gm1 = params.gm1;
+        self.constants.eos_r = params.r;
+        self.constants.eos_dp_drho = params.dp_drho;
+        self.constants.eos_p_ref = params.p_ref;
+        self.constants.eos_theta_ref = params.theta_ref;
+        self.constants.eos_rho_ref = params.rho_ref;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn runtime_eos_for_test(&self) -> EosRuntimeParams {
+        EosRuntimeParams {
+            gamma: self.constants.eos_gamma,
+            gm1: self.constants.eos_gm1,
+            r: self.constants.eos_r,
+            dp_drho: self.constants.eos_dp_drho,
+            p_ref: self.constants.eos_p_ref,
+            theta_ref: self.constants.eos_theta_ref,
+            rho_ref: self.constants.eos_rho_ref,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn inlet_velocity_for_test(&self) -> f32 {
+        self.constants.inlet_velocity
     }
 
     /// Seed a named state field from a closure of the cell-centre coords (writes

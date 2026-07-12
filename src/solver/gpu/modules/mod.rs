@@ -1,5 +1,7 @@
 pub mod constants;
+pub(crate) mod compressible_explicit_control;
 pub mod coupled_schur;
+pub mod explicit_control;
 pub mod generated_kernels;
 pub mod generic_coupled_schur;
 pub mod generic_linear_solver;

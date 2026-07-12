@@ -893,8 +893,9 @@ impl CpuSolver {
             "eos.gm1" => self.constants.eos_gm1 = v,
             "eos.r" => self.constants.eos_r = v,
             "eos.dp_drho" => self.constants.eos_dp_drho = v,
-            "eos.p_offset" => self.constants.eos_p_offset = v,
+            "eos.p_ref" => self.constants.eos_p_ref = v,
             "eos.theta_ref" => self.constants.eos_theta_ref = v,
+            "eos.rho_ref" => self.constants.eos_rho_ref = v,
             _ => return false,
         }
         true
@@ -2137,8 +2138,9 @@ fn constants_ctx(c: &GpuConstants, lm: &GpuLowMachParams) -> Ctx {
         .with_constant("constants", "eos_gm1", Value::F32(c.eos_gm1))
         .with_constant("constants", "eos_r", Value::F32(c.eos_r))
         .with_constant("constants", "eos_dp_drho", Value::F32(c.eos_dp_drho))
-        .with_constant("constants", "eos_p_offset", Value::F32(c.eos_p_offset))
+        .with_constant("constants", "eos_p_ref", Value::F32(c.eos_p_ref))
         .with_constant("constants", "eos_theta_ref", Value::F32(c.eos_theta_ref))
+        .with_constant("constants", "eos_rho_ref", Value::F32(c.eos_rho_ref))
         // Buoyant Boussinesq tail (mirrors the buoyant uniform port manifest).
         .with_constant("constants", "buoyant_beta_g", Value::F32(c.buoyant_beta_g))
         .with_constant("constants", "buoyant_t0", Value::F32(c.buoyant_t0))

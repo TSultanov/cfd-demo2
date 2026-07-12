@@ -98,16 +98,21 @@ const EOS_GM1: TypedParamRef<Dimensionless> = TypedParamRef::new("eos_gm1");
 const EOS_R: TypedParamRef<DivDim<Pressure, MulDim<Density, Temperature>>> =
     TypedParamRef::new("eos_r");
 const EOS_DP_DRHO: TypedParamRef<DivDim<Pressure, Density>> = TypedParamRef::new("eos_dp_drho");
-const EOS_P_OFFSET: TypedParamRef<Pressure> = TypedParamRef::new("eos_p_offset");
+const EOS_P_REF: TypedParamRef<Pressure> = TypedParamRef::new("eos_p_ref");
+const EOS_RHO_REF: TypedParamRef<Density> = TypedParamRef::new("eos_rho_ref");
 
-/// Declared squared sound speed of the linearized EOS: `c^2 = gamma * R * T`.
+/// Declared squared sound speed of the runtime EOS:
+/// `c^2 = gamma * R * T + dp_drho`.
 ///
 /// The central-upwind flux derivation lowers this to the acoustic speed used
-/// in the Kurganov wave bounds (`sqrt(gamma * R * T)` over cell temperatures).
+/// in the Kurganov wave bounds. The affine barotropic contribution is
+/// constant, so the existing analytic `grad(c)` remains exact for both the
+/// ideal-gas (`dp_drho=0`) and linear-compressibility (`gamma=0`) families.
 pub fn compressible_wave_speed_sq() -> TypedAlgExpr<MulDim<Velocity, Velocity>, Scalar> {
     let t_typed = TypedFieldRef::<Temperature, Scalar>::new("T");
     (typed_alg::param(EOS_GAMMA) * typed_alg::param(EOS_R) * typed_alg::field(t_typed))
         .cast_to::<MulDim<Velocity, Velocity>>()
+        + typed_alg::param(EOS_DP_DRHO).cast_to::<MulDim<Velocity, Velocity>>()
 }
 
 /// Declared generalized squared wave speed: `c^2 = gamma * p / rho + dp_drho`.
@@ -124,13 +129,30 @@ pub fn compressible_generalized_wave_speed_sq() -> TypedAlgExpr<DivDim<Pressure,
 }
 
 /// Central-upwind flux declaration for this model: which fields play which
-/// conserved/primitive role, plus the EOS relations as math. The face
-/// pressure relation `rho * R * T` is the same algebra as the temperature
-/// recovery row (`rho * R * T = p`), declared here in the direction the flux
-/// needs it.
+/// conserved/primitive role, plus the EOS relations as math. Face pressure is
+/// closed from one reconstructed conserved state:
+///
+/// `p_f = gm1 * (rho_e_f - |rho_u_f|^2/(2*rho_f))`
+/// `      + dp_drho*(rho_f-rho_ref) + p_ref`.
+///
+/// This is exact for both runtime EOS families: ideal gas sets the affine
+/// terms to zero, while linear compressibility sets `gm1=0`. Temperature
+/// remains available independently for heat conduction and acoustic-speed
+/// reconstruction, but it is not a second, potentially inconsistent pressure
+/// oracle at a high-order face.
 pub fn compressible_central_upwind_decl() -> crate::solver::model::flux_schemes::CentralUpwindDecl {
     let rho_typed = TypedFieldRef::<Density, Scalar>::new("rho");
-    let t_typed = TypedFieldRef::<Temperature, Scalar>::new("T");
+    let rho_u_typed = TypedFieldRef::<MomentumDensity, Vector2>::new("rho_u");
+    let rho_e_typed = TypedFieldRef::<EnergyDensity, Scalar>::new("rho_e");
+    let kinetic_energy = (typed_alg::constant(0.5) * typed_alg::mag_sqr(rho_u_typed)
+        / typed_alg::field(rho_typed))
+    .cast_to::<EnergyDensity>();
+    let ideal_pressure = (typed_alg::param(EOS_GM1)
+        * (typed_alg::field(rho_e_typed) - kinetic_energy))
+        .cast_to::<Pressure>();
+    let barotropic_pressure = (typed_alg::param(EOS_DP_DRHO)
+        * (typed_alg::field(rho_typed) - typed_alg::param(EOS_RHO_REF)))
+    .cast_to::<Pressure>();
     crate::solver::model::flux_schemes::CentralUpwindDecl {
         density: "rho",
         momentum: "rho_u",
@@ -138,11 +160,8 @@ pub fn compressible_central_upwind_decl() -> crate::solver::model::flux_schemes:
         temperature: "T",
         velocity: "u",
         pressure_field: "p",
-        pressure: (typed_alg::field(rho_typed)
-            * typed_alg::param(EOS_R)
-            * typed_alg::field(t_typed))
-        .cast_to::<Pressure>()
-        .to_untyped(),
+        pressure: (ideal_pressure + barotropic_pressure + typed_alg::param(EOS_P_REF))
+            .to_untyped(),
         wave_speed_sq: compressible_wave_speed_sq().to_untyped(),
         generalized_wave_speed_sq: compressible_generalized_wave_speed_sq().to_untyped(),
     }
@@ -278,9 +297,10 @@ fn build_compressible_system_impl(
     );
 
     // Linearized EOS: p = (gamma-1)*rho_e - (gamma-1)/2*|u|^2*rho
-    //                     + dp_drho*rho + p_offset.
-    // Ideal gas sets dp_drho = p_offset = 0; linear compressibility sets
-    // gamma-1 = 0 (the uniform params absorb the EOS variant).
+    //                     + dp_drho*(rho-rho_ref) + p_ref.
+    // The reference-centered form avoids subtracting O(K) affine terms to
+    // recover an O(p_ref) liquid pressure in f32. Ideal gas sets
+    // dp_drho = rho_ref = p_ref = 0; linear compressibility sets gamma-1 = 0.
     let pressure_eos = typed_alg::equation(
         p_typed,
         typed_alg::field(p_typed),
@@ -290,8 +310,10 @@ fn build_compressible_system_impl(
                 * typed_alg::mag_sqr(u_typed)
                 * typed_alg::field(rho_typed))
             .cast_to::<Pressure>()
-            + (typed_alg::param(EOS_DP_DRHO) * typed_alg::field(rho_typed)).cast_to::<Pressure>()
-            + typed_alg::param(EOS_P_OFFSET),
+            + (typed_alg::param(EOS_DP_DRHO)
+                * (typed_alg::field(rho_typed) - typed_alg::param(EOS_RHO_REF)))
+            .cast_to::<Pressure>()
+            + typed_alg::param(EOS_P_REF),
     );
 
     // Temperature recovery: rho * R * T = p.
@@ -519,7 +541,9 @@ fn compressible_model_impl_topo(
     let r_safe = || B::param(EOS_R.to_untyped()).max(B::lit(1.0e-12));
 
     // Inlet: kinetic energy of the prescribed state; total energy follows
-    // the interior pressure (ideal gas) or is purely kinetic (barotropic).
+    // the interior pressure for an ideal gas, while a barotropic EOS preserves
+    // the thermodynamically compatible conserved-energy value seeded by the
+    // host EOS oracle.
     let inlet_ke = || {
         B::lit(0.5)
             * B::bc(fields.rho)
@@ -528,7 +552,14 @@ fn compressible_model_impl_topo(
     };
     let inlet_p = p_owner();
     let inlet_t = p_owner() / (B::bc(fields.rho).max(B::lit(1.0e-6)) * r_safe());
-    let inlet_rho_e = gm1().select_gt(B::lit(0.0), p_owner() / gm1_safe() + inlet_ke(), inlet_ke());
+    let inlet_rho_e = gm1().select_gt(
+        B::lit(0.0),
+        p_owner() / gm1_safe() + inlet_ke(),
+        // For a barotropic EOS, the host seeds the thermodynamic conserved
+        // energy from EosSpec. Preserve that prescribed table entry under the
+        // bc_expr kernel's snapshot semantics instead of overwriting it with KE.
+        B::bc(fields.rho_e),
+    );
     let inlet_rho_u = |component: u32| B::bc(fields.rho) * B::bc_comp(fields.u, component);
 
     // Outlet: extrapolate the non-pressure state from the interior.
@@ -940,8 +971,10 @@ mod tests {
             cfd2_ir::dimensions::DivDim<Pressure, Density>,
             Scalar,
         >::new("eos_dp_drho"));
-        let p_offset_typed =
-            TypedCoeff::from_field(TypedFieldRef::<Pressure, Scalar>::new("eos_p_offset"));
+        let p_ref_typed =
+            TypedCoeff::from_field(TypedFieldRef::<Pressure, Scalar>::new("eos_p_ref"));
+        let rho_ref_typed =
+            TypedCoeff::from_field(TypedFieldRef::<Density, Scalar>::new("eos_rho_ref"));
         let half_coeff: TypedCoeff<Dimensionless> = TypedCoeff::constant(0.5);
 
         let minus_gm1 = minus_one_coeff.clone().multiply(gm1_typed.clone());
@@ -953,23 +986,29 @@ mod tests {
             .multiply(inv_dt_coeff.clone());
         let rho_coeff_term = half_gm1_over_dt.multiply(u2);
 
+        let dp_drho_rho_ref_over_dt = dp_drho_typed
+            .clone()
+            .multiply(rho_ref_typed)
+            .multiply(inv_dt_coeff.clone());
         let minus_dp_drho = minus_one_coeff.clone().multiply(dp_drho_typed);
         let minus_dp_drho_over_dt = minus_dp_drho.multiply(inv_dt_coeff.clone());
 
-        let minus_p_offset = minus_one_coeff.clone().multiply(p_offset_typed);
-        let minus_p_offset_over_dt = minus_p_offset.multiply(inv_dt_coeff.clone());
+        let minus_p_ref = minus_one_coeff.clone().multiply(p_ref_typed);
+        let minus_p_ref_over_dt = minus_p_ref.multiply(inv_dt_coeff.clone());
 
         let p_source_1 = typed_fvm::source_coeff(inv_dt_coeff.clone(), p_typed);
         let p_source_2 = typed_fvm::source_coeff(minus_gm1_over_dt, rho_e_typed);
         let p_source_3 = typed_fvm::source_coeff(rho_coeff_term, rho_typed);
         let p_source_4 = typed_fvm::source_coeff(minus_dp_drho_over_dt, rho_typed);
-        let p_source_5 = typed_fvc::source_coeff(minus_p_offset_over_dt, p_typed);
+        let p_source_5 = typed_fvc::source_coeff(dp_drho_rho_ref_over_dt, p_typed);
+        let p_source_6 = typed_fvc::source_coeff(minus_p_ref_over_dt, p_typed);
 
         let p_eqn = (p_source_1.cast_to::<Power>()
             + p_source_2.cast_to::<Power>()
             + p_source_3.cast_to::<Power>()
             + p_source_4.cast_to::<Power>()
-            + p_source_5.cast_to::<Power>())
+            + p_source_5.cast_to::<Power>()
+            + p_source_6.cast_to::<Power>())
         .eqn(p_typed);
 
         // Temperature recovery: T = p / (rho * R)
@@ -1013,7 +1052,8 @@ mod tests {
                 DivDim::<Pressure, MulDim<Density, Temperature>>::UNIT,
             ),
             (EOS_DP_DRHO.name(), DivDim::<Pressure, Density>::UNIT),
-            (EOS_P_OFFSET.name(), Pressure::UNIT),
+            (EOS_P_REF.name(), Pressure::UNIT),
+            (EOS_RHO_REF.name(), Density::UNIT),
         ];
         for (name, unit) in declared {
             let spec = manifest
@@ -1026,22 +1066,28 @@ mod tests {
     }
 
     #[test]
-    fn wave_speed_sq_declares_gamma_r_t() {
+    fn wave_speed_sq_declares_ideal_and_barotropic_contributions() {
         // cast_to inside the constructor already asserts the runtime unit is
         // Velocity^2; here we pin the declared structure.
         let expr = compressible_wave_speed_sq().to_untyped();
-        let expected = AlgExpr::Mul(
+        let expected = AlgExpr::Add(
             Box::new(AlgExpr::Mul(
-                Box::new(AlgExpr::Param(ParamRef::new(
-                    "eos_gamma",
-                    Dimensionless::UNIT,
-                ))),
-                Box::new(AlgExpr::Param(ParamRef::new(
-                    "eos_r",
-                    DivDim::<Pressure, MulDim<Density, Temperature>>::UNIT,
-                ))),
+                Box::new(AlgExpr::Mul(
+                    Box::new(AlgExpr::Param(ParamRef::new(
+                        "eos_gamma",
+                        Dimensionless::UNIT,
+                    ))),
+                    Box::new(AlgExpr::Param(ParamRef::new(
+                        "eos_r",
+                        DivDim::<Pressure, MulDim<Density, Temperature>>::UNIT,
+                    ))),
+                )),
+                Box::new(AlgExpr::Field(vol_scalar_dim::<Temperature>("T"))),
             )),
-            Box::new(AlgExpr::Field(vol_scalar_dim::<Temperature>("T"))),
+            Box::new(AlgExpr::Param(ParamRef::new(
+                "eos_dp_drho",
+                DivDim::<Pressure, Density>::UNIT,
+            ))),
         );
         assert_eq!(expr, expected);
     }

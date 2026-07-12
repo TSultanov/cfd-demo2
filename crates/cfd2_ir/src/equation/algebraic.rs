@@ -158,6 +158,28 @@ fn flatten_sum(expr: &AlgExpr, negate: bool, out: &mut Vec<Summand>) -> Result<(
             flatten_sum(b, !negate, out)
         }
         AlgExpr::Neg(a) => flatten_sum(a, !negate, out),
+        AlgExpr::Mul(a, b) => {
+            // Preserve the declaration's mathematically stable grouped form
+            // (for example dp_drho*(rho-rho_ref)) while distributing only in
+            // the coupled-row representation, where each unknown/source must
+            // become its own matrix term. Cartesian expansion also retains
+            // factor order within every product.
+            let mut lhs = Vec::new();
+            let mut rhs = Vec::new();
+            flatten_sum(a, false, &mut lhs)?;
+            flatten_sum(b, false, &mut rhs)?;
+            for left in &lhs {
+                for right in &rhs {
+                    let mut factors = left.factors.clone();
+                    factors.extend(right.factors.iter().cloned());
+                    out.push(Summand {
+                        negative: negate ^ left.negative ^ right.negative,
+                        factors,
+                    });
+                }
+            }
+            Ok(())
+        }
         product => {
             let mut negative = negate;
             let mut factors = Vec::new();
@@ -806,8 +828,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_sum_inside_product() {
-        let bad = AlgebraicEquation {
+    fn distributes_sum_inside_product() {
+        let equation = AlgebraicEquation {
             target: vol_scalar_dim::<Pressure>("p"),
             lhs: AlgExpr::Field(vol_scalar_dim::<Pressure>("p")),
             rhs: AlgExpr::Mul(
@@ -821,8 +843,10 @@ mod tests {
                 }),
             ),
         };
-        let err = lower_algebraic_equation(&bad, &[]).unwrap_err();
-        assert!(err.contains("non-affine"), "{err}");
+        let lowered = lower_algebraic_equation(&equation, &[]).expect("distributive lowering");
+        assert_eq!(lowered.terms().len(), 3, "target plus two explicit summands");
+        assert_eq!(lowered.terms()[1].field.name(), "p");
+        assert_eq!(lowered.terms()[2].field.name(), "p");
     }
 
     #[test]

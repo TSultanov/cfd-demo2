@@ -33,10 +33,13 @@ pub struct EosRuntimeParams {
     pub r: f32,
     /// dp/drho contribution for barotropic closures (e.g. linear compressibility).
     pub dp_drho: f32,
-    /// p offset for barotropic closures: p = dp_drho * rho - p_offset.
-    pub p_offset: f32,
+    /// Reference pressure for a reference-centered barotropic closure:
+    /// `p = dp_drho * (rho - rho_ref) + p_ref`.
+    pub p_ref: f32,
     /// Reference theta = R*T (units of p/rho) so that p = rho*theta for an isothermal ideal gas.
     pub theta_ref: f32,
+    /// Reference density for the centered barotropic pressure evaluation.
+    pub rho_ref: f32,
 }
 
 impl EosSpec {
@@ -66,15 +69,21 @@ impl EosSpec {
         }
     }
 
-    pub fn sound_speed(&self, rho: f64) -> f64 {
+    pub fn sound_speed(&self, _rho: f64) -> f64 {
         match *self {
             EosSpec::IdealGas {
                 gamma,
                 gas_constant,
                 temperature,
             } => (gamma * gas_constant * temperature).sqrt(),
-            EosSpec::LinearCompressibility { bulk_modulus, .. } => {
-                (bulk_modulus / rho.abs().max(1e-12)).sqrt()
+            EosSpec::LinearCompressibility {
+                bulk_modulus,
+                rho_ref,
+                ..
+            } => {
+                // dp/drho is constant for the declared affine EOS and is set
+                // by its reference density, not by the queried state.
+                (bulk_modulus / rho_ref.abs().max(1e-12)).sqrt()
             }
             EosSpec::Constant => 0.0,
         }
@@ -96,6 +105,67 @@ impl EosSpec {
         }
     }
 
+    /// Thermodynamically compatible internal-energy density for a barotropic
+    /// linear EOS, including an explicit density-linear energy gauge.
+    ///
+    /// For `p(rho) = a*rho + b`, barotropic total-energy conservation requires
+    /// the specific internal energy to satisfy
+    ///
+    /// `d(e)/d(rho) = p(rho)/rho^2`.
+    ///
+    /// Taking the positive reference density `rho0 = abs(rho_ref)`, the
+    /// returned energy density is
+    ///
+    /// `rho*e = a*rho*ln(rho/rho0) + b*(rho/rho0 - 1) + gauge*rho`.
+    ///
+    /// The final term is the unavoidable density-linear gauge: adding it
+    /// shifts specific energy by a constant and therefore leaves the defining
+    /// derivative and the conservative dynamics unchanged. `gauge = 0`
+    /// chooses zero internal-energy density at the reference state. Returns
+    /// `None` for non-barotropic EOS families; a non-positive or non-finite
+    /// density deliberately produces a non-finite `Some` value so downstream
+    /// state-health checks cannot mistake an invalid state for an ideal gas.
+    pub fn barotropic_internal_energy_density(
+        &self,
+        rho: f64,
+        density_linear_gauge: f64,
+    ) -> Option<f64> {
+        let EosSpec::LinearCompressibility {
+            bulk_modulus,
+            rho_ref,
+            p_ref,
+        } = *self
+        else {
+            return None;
+        };
+
+        let rho0 = rho_ref.abs().max(1e-12);
+        let a = bulk_modulus / rho0;
+        let b = p_ref - a * rho_ref;
+        let delta = rho / rho0 - 1.0;
+
+        // Evaluate (1+d)*ln(1+d)-d by series near d=0. The direct form
+        // subtracts two O(d) terms and loses precisely the small liquid-energy
+        // perturbation this oracle is meant to preserve.
+        let shape = if delta.abs() < 1.0e-4 {
+            let d2 = delta * delta;
+            d2 * (0.5
+                + delta
+                    * (-1.0 / 6.0
+                        + delta
+                            * (1.0 / 12.0
+                                + delta * (-1.0 / 20.0 + delta * (1.0 / 30.0)))))
+        } else {
+            (1.0 + delta) * delta.ln_1p() - delta
+        };
+        let p_at_rho0 = a * rho0 + b;
+        Some(
+            a * rho0 * shape
+                + p_at_rho0 * delta
+                + density_linear_gauge * rho,
+        )
+    }
+
     pub fn runtime_params(&self) -> EosRuntimeParams {
         match *self {
             EosSpec::IdealGas {
@@ -107,8 +177,9 @@ impl EosSpec {
                 gm1: (gamma - 1.0) as f32,
                 r: gas_constant as f32,
                 dp_drho: 0.0,
-                p_offset: 0.0,
+                p_ref: 0.0,
                 theta_ref: (gas_constant * temperature) as f32,
+                rho_ref: 0.0,
             },
             EosSpec::LinearCompressibility {
                 bulk_modulus,
@@ -117,14 +188,14 @@ impl EosSpec {
             } => {
                 let denom = rho_ref.abs().max(1e-12);
                 let dp_drho = bulk_modulus / denom;
-                let p_offset = dp_drho * rho_ref - p_ref;
                 EosRuntimeParams {
                     gamma: 0.0,
                     gm1: 0.0,
                     r: 1.0,
                     dp_drho: dp_drho as f32,
-                    p_offset: p_offset as f32,
+                    p_ref: p_ref as f32,
                     theta_ref: 0.0,
+                    rho_ref: rho_ref as f32,
                 }
             }
             EosSpec::Constant => EosRuntimeParams {
@@ -132,9 +203,104 @@ impl EosSpec {
                 gm1: 0.0,
                 r: 1.0,
                 dp_drho: 0.0,
-                p_offset: 0.0,
+                p_ref: 0.0,
                 theta_ref: 0.0,
+                rho_ref: 0.0,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn water_runtime_centered_pressure_matches_declared_eos_without_intercept_cancellation() {
+        let eos = EosSpec::LinearCompressibility {
+            bulk_modulus: 2.2e9,
+            rho_ref: 1000.0,
+            p_ref: 1.0e5,
+        };
+        let params = eos.runtime_params();
+        for rho in [1000.0_f32, 1000.0001, 1000.125] {
+            let runtime_pressure = params.dp_drho * (rho - params.rho_ref) + params.p_ref;
+            let declared_pressure = eos.pressure_for_density(f64::from(rho)) as f32;
+            assert!(
+                (runtime_pressure - declared_pressure).abs() <= 1.0,
+                "runtime centered pressure drift at rho={rho}: {runtime_pressure} vs {declared_pressure}"
+            );
+        }
+        assert_eq!(
+            (params.dp_drho * (1000.0 - params.rho_ref) + params.p_ref).to_bits(),
+            100_000.0_f32.to_bits(),
+        );
+        let runtime_sound = params.dp_drho.sqrt();
+        let declared_sound = eos.sound_speed(1000.0) as f32;
+        assert!((runtime_sound - declared_sound).abs() <= declared_sound * 2.0e-7);
+        assert_eq!(
+            eos.sound_speed(1000.125).to_bits(),
+            eos.sound_speed(1000.0).to_bits(),
+            "affine EOS sound speed must equal its constant dp/drho"
+        );
+    }
+
+    #[test]
+    fn ideal_gas_runtime_parameters_remain_unchanged_by_affine_convention() {
+        let eos = EosSpec::IdealGas {
+            gamma: 1.4,
+            gas_constant: 287.0,
+            temperature: 300.0,
+        };
+        let params = eos.runtime_params();
+        assert_eq!(params.gamma.to_bits(), 1.4_f32.to_bits());
+        assert_eq!(params.gm1.to_bits(), 0.4_f32.to_bits());
+        assert_eq!(params.r.to_bits(), 287.0_f32.to_bits());
+        assert_eq!(params.dp_drho.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(params.p_ref.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(params.theta_ref.to_bits(), 86_100.0_f32.to_bits());
+        assert_eq!(params.rho_ref.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(
+            eos.barotropic_internal_energy_density(1.2, 0.0),
+            None,
+            "the barotropic oracle must not alter ideal-gas seeding"
+        );
+    }
+
+    #[test]
+    fn barotropic_energy_has_reference_gauge_and_pressure_derivative() {
+        let eos = EosSpec::LinearCompressibility {
+            bulk_modulus: 2.2e9,
+            rho_ref: 1000.0,
+            p_ref: 1.0e5,
+        };
+        let rho_ref = 1000.0;
+        assert_eq!(
+            eos.barotropic_internal_energy_density(rho_ref, 0.0),
+            Some(0.0),
+            "zero gauge must pin the reference internal energy exactly"
+        );
+
+        let rho = 1000.125;
+        let h = 1.0e-3;
+        let specific_energy = |r: f64| {
+            eos.barotropic_internal_energy_density(r, 37.0)
+                .expect("linear EOS energy")
+                / r
+        };
+        let derivative = (specific_energy(rho + h) - specific_energy(rho - h)) / (2.0 * h);
+        let expected = eos.pressure_for_density(rho) / (rho * rho);
+        assert!(
+            (derivative - expected).abs() <= expected.abs() * 2.0e-8,
+            "de/drho={derivative:e}, p/rho^2={expected:e}"
+        );
+
+        let zero_gauge = eos
+            .barotropic_internal_energy_density(rho, 0.0)
+            .expect("linear EOS energy");
+        let shifted = eos
+            .barotropic_internal_energy_density(rho, 37.0)
+            .expect("linear EOS energy");
+        assert!((shifted - zero_gauge - 37.0 * rho).abs() <= 1.0e-8);
     }
 }

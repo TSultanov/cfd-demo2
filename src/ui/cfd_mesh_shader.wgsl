@@ -12,11 +12,24 @@ struct Uniforms {
     offset: u32,
     // Mode: 0=value, 1=magnitude
     mode: u32,
-    _padding: u32,
+    // Index into FieldRanges: 0=pressure, 1=Ux, 2=Uy, 3=|U|.
+    range_index: u32,
+};
+
+struct FieldRanges {
+    minimum: vec4<f32>,
+    maximum: vec4<f32>,
+    // The sequence travels through the GPU metadata/readback path. Rendering
+    // does not need to inspect it because the host binds field + range buffers
+    // from one mailbox slot atomically.
+    sequence_lo: u32,
+    sequence_hi: u32,
+    _padding: vec2<u32>,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
 @group(0) @binding(1) var<storage, read> field_data: array<f32>;
+@group(0) @binding(2) var<storage, read> field_ranges: FieldRanges;
 
 struct VertexInput {
     @location(0) position: vec2<f32>,
@@ -54,11 +67,14 @@ fn vs_main(in: VertexInput) -> VertexOutput {
         val = field_data[idx];
     }
 
-    let range = uniforms.range.y - uniforms.range.x;
+    let range_index = min(uniforms.range_index, 3u);
+    let range_min = field_ranges.minimum[range_index];
+    let range_max = field_ranges.maximum[range_index];
+    let range = range_max - range_min;
     // Avoid division by zero
     let safe_range = select(range, 1.0, abs(range) < 1e-10);
     
-    let normalized = clamp((val - uniforms.range.x) / safe_range, 0.0, 1.0);
+    let normalized = clamp((val - range_min) / safe_range, 0.0, 1.0);
     out.field_value = normalized;
     
     return out;

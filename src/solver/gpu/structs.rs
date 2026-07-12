@@ -106,8 +106,9 @@ pub struct GpuConstants {
     pub eos_gm1: f32,
     pub eos_r: f32,
     pub eos_dp_drho: f32,
-    pub eos_p_offset: f32,
+    pub eos_p_ref: f32,
     pub eos_theta_ref: f32,
+    pub eos_rho_ref: f32,
 
     // --- Buoyant Boussinesq model (runtime) ---
     // LAYOUT CONTRACT: tail fields must mirror the buoyant port manifest
@@ -141,8 +142,9 @@ impl Default for GpuConstants {
             eos_gm1: 0.4,
             eos_r: 1.0,
             eos_dp_drho: 0.0,
-            eos_p_offset: 0.0,
+            eos_p_ref: 0.0,
             eos_theta_ref: 1.0,
+            eos_rho_ref: 0.0,
             buoyant_beta_g: crate::solver::model::BUOYANT_BETA_G as f32,
             buoyant_t0: crate::solver::model::BUOYANT_T0 as f32,
             buoyant_k_over_cp: crate::solver::model::BUOYANT_K_OVER_CP as f32,

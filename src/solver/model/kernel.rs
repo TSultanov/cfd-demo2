@@ -752,7 +752,12 @@ fn generate_generic_coupled_assembly_kernel_program_impl(
     let flux_stride = model
         .flux_module()
         .map_err(|e| e.to_string())?
-        .map(|_| model.system.unknowns_per_cell())
+        .map(|_| {
+            cfd2_codegen::solver::codegen::explicit_liveness::ExplicitFaceChannelLiveness::from_discrete_system(
+                &discrete,
+            )
+            .storage_stride()
+        })
         .unwrap_or(0);
     let slots = resolved_slots_from_layout(&model.state_layout);
     let eos_params = extract_eos_params(model);
@@ -840,7 +845,12 @@ fn generate_explicit_residual_kernel_program_impl(
     let flux_stride = model
         .flux_module()
         .map_err(|e| e.to_string())?
-        .map(|_| model.system.unknowns_per_cell())
+        .map(|_| {
+            cfd2_codegen::solver::codegen::explicit_liveness::ExplicitFaceChannelLiveness::from_discrete_system(
+                &discrete,
+            )
+            .storage_stride()
+        })
         .unwrap_or(0);
     let slots = resolved_slots_from_layout(&model.state_layout);
     let eos_params = extract_eos_params(model);
@@ -2081,6 +2091,230 @@ mod tests {
             wgsl.contains("1e-8") || wgsl.contains("0.00000001"),
             "expected VanLeer epsilon literal to appear in flux_module WGSL"
         );
+    }
+
+    #[test]
+    fn face_channel_projection_is_exact_and_only_compacts_compressible_models() {
+        use cfd2_codegen::solver::codegen::explicit_liveness::ExplicitFaceChannelLiveness;
+        use cfd2_codegen::solver::codegen::ir::DiscreteOpKind;
+
+        let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
+        let mut compacted = Vec::new();
+
+        for model in crate::solver::model::all_models().expect("model registry") {
+            if model.flux_module().expect("flux-module query").is_none() {
+                continue;
+            }
+
+            let discrete = cfd2_codegen::solver::codegen::lower_system_unchecked(
+                &model.system,
+                &schemes,
+            );
+            let channels = ExplicitFaceChannelLiveness::from_discrete_system(&discrete);
+
+            // Derive the consumer set independently from the lowered residual
+            // operations. This is the proof obligation for every omitted
+            // implicit/explicit face channel, including moving-mesh models.
+            let mut coupled_rank = 0u32;
+            let mut residual_consumers = Vec::new();
+            for equation in &discrete.equations {
+                let consumes = equation
+                    .ops
+                    .iter()
+                    .any(|op| op.kind == DiscreteOpKind::Convection);
+                for _ in 0..equation.target.kind().component_count() {
+                    if consumes {
+                        residual_consumers.push(coupled_rank);
+                    }
+                    coupled_rank += 1;
+                }
+            }
+            let stored = channels
+                .stored_components()
+                .iter()
+                .map(|component| component.coupled_rank)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                stored, residual_consumers,
+                "{} face producer must store exactly the channels read by assembly",
+                model.id
+            );
+
+            if channels.storage_stride() != channels.coupled_stride() {
+                let omitted = channels
+                    .components()
+                    .iter()
+                    .filter(|component| component.storage_rank.is_none())
+                    .map(|component| component.coupled_rank)
+                    .collect::<Vec<_>>();
+                compacted.push((
+                    model.id,
+                    channels.coupled_stride(),
+                    channels.storage_stride(),
+                    omitted,
+                ));
+            }
+
+            if model.system.is_ale() {
+                assert_eq!(
+                    channels.storage_stride(),
+                    channels.coupled_stride(),
+                    "{} ALE layout changed despite every semantic channel having a consumer",
+                    model.id
+                );
+            }
+        }
+
+        assert_eq!(
+            compacted,
+            vec![
+                ("compressible", 8, 4, vec![4, 5, 6, 7]),
+                ("compressible_mms", 8, 4, vec![4, 5, 6, 7]),
+                (
+                    "compressible_mms_biharmonic",
+                    12,
+                    4,
+                    vec![4, 5, 6, 7, 8, 9, 10, 11]
+                ),
+                ("compressible_structured", 8, 4, vec![4, 5, 6, 7]),
+            ],
+            "non-compressible and ALE face layouts must remain identity maps"
+        );
+    }
+
+    #[test]
+    fn compressible_face_projection_matches_every_producer_and_consumer() {
+        use cfd2_codegen::solver::codegen::explicit_liveness::{
+            ExplicitFaceChannelLiveness, ExplicitRkLayout,
+        };
+
+        let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
+        let models = [
+            crate::solver::model::compressible_model().expect("unstructured compressible"),
+            crate::solver::model::compressible_structured_model()
+                .expect("structured compressible"),
+        ];
+
+        for model in models {
+            let discrete = cfd2_codegen::solver::codegen::lower_system_unchecked(
+                &model.system,
+                &schemes,
+            );
+            let channels = ExplicitFaceChannelLiveness::from_discrete_system(&discrete);
+            let rk = ExplicitRkLayout::from_discrete_system(&discrete);
+            let stored_coupled_ranks = channels
+                .stored_components()
+                .iter()
+                .map(|component| component.coupled_rank)
+                .collect::<Vec<_>>();
+            let differential_coupled_ranks = rk
+                .differential_components()
+                .iter()
+                .map(|component| component.coupled_rank)
+                .collect::<Vec<_>>();
+
+            assert_eq!(channels.coupled_stride(), 8, "{} semantic stride", model.id);
+            assert_eq!(channels.storage_stride(), 4, "{} storage stride", model.id);
+            assert_eq!(stored_coupled_ranks, vec![0, 1, 2, 3]);
+            assert_eq!(
+                differential_coupled_ranks,
+                vec![0, 1, 2, 3],
+                "{} differential residual/RK mapping must not change",
+                model.id
+            );
+
+            let producer = generate_kernel_wgsl_for_model_by_id(
+                &model,
+                &schemes,
+                KernelId::FLUX_MODULE,
+            )
+            .expect("flux producer WGSL");
+            let producer_face = if model.system.topology()
+                == crate::solver::ir::TopologyMode::Structured2D
+            {
+                "sfd_face_id"
+            } else {
+                "idx"
+            };
+            for storage_rank in 0..4 {
+                let store = format!(
+                    "fluxes[{producer_face} * 4u + {storage_rank}u] = phi_{storage_rank};"
+                );
+                assert_eq!(
+                    producer.matches(&store).count(),
+                    1,
+                    "{} producer must write compact rank {storage_rank} exactly once",
+                    model.id
+                );
+            }
+            assert!(
+                !producer.contains(&format!("fluxes[{producer_face} * 8u")),
+                "{} producer retained the old eight-float face stride",
+                model.id
+            );
+            for omitted_rank in 4..8 {
+                assert!(
+                    !producer.contains(&format!(
+                        "fluxes[{producer_face} * 4u + {omitted_rank}u]"
+                    )),
+                    "{} producer writes omitted semantic rank {omitted_rank}",
+                    model.id
+                );
+            }
+            assert!(
+                producer.contains("bc_kind[") && producer.contains(" * 8u + 7u]"),
+                "{} compact storage must not alter the eight-rank semantic BC table",
+                model.id
+            );
+
+            for consumer_id in [
+                KernelId::GENERIC_COUPLED_ASSEMBLY,
+                KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE,
+                KernelId::GENERIC_COUPLED_ASSEMBLY_RHS_ONLY,
+                KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE_RHS_ONLY,
+                KernelId::EXPLICIT_RESIDUAL,
+                KernelId::EXPLICIT_RESIDUAL_GRAD_STATE,
+            ] {
+                let consumer = generate_kernel_wgsl_for_model_by_id(
+                    &model,
+                    &schemes,
+                    consumer_id,
+                )
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "{} {} consumer generation failed: {error}",
+                        model.id,
+                        consumer_id.as_str()
+                    )
+                });
+                for storage_rank in 0..4 {
+                    let load = format!("fluxes[face_idx * 4u + {storage_rank}u]");
+                    assert_eq!(
+                        consumer.matches(&load).count(),
+                        1,
+                        "{} {} must read compact rank {storage_rank} exactly once",
+                        model.id,
+                        consumer_id.as_str()
+                    );
+                }
+                assert!(
+                    !consumer.contains("fluxes[face_idx * 8u"),
+                    "{} {} retained the old eight-float face stride",
+                    model.id,
+                    consumer_id.as_str()
+                );
+                for omitted_rank in 4..8 {
+                    assert!(
+                        !consumer.contains(&format!(
+                            "fluxes[face_idx * 4u + {omitted_rank}u]"
+                        )),
+                        "{} {} reads omitted semantic rank {omitted_rank}",
+                        model.id,
+                        consumer_id.as_str()
+                    );
+                }
+            }
+        }
     }
 
     #[test]

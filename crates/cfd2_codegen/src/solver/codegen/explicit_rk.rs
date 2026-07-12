@@ -128,15 +128,43 @@ fn safe_scaled_rate(
     extra_invalid: Option<Expr>,
 ) -> Expr {
     let invalid = dsl::bitcast("f32", 0x7fc0_0000u32);
+    let min_normal = dsl::bitcast("f32", 0x0080_0000u32);
+    let min_subnormal = dsl::bitcast("f32", 1u32);
     let magnitude = dsl::abs(value.clone());
-    let mut is_invalid = value.clone().ne(0.0)
-        & magnitude.clone().lt(dsl::bitcast("f32", 0x0080_0000u32))
-        & (magnitude / dsl::max(solution_scale, dsl::bitcast("f32", 1u32)))
-            .ge(dsl::bitcast("f32", 0x0080_0000u32));
+    // Callers pass an absolute scalar mass / non-negative conditioning scale.
+    let scale = dsl::max(solution_scale, min_subnormal);
+    // A derivative is not by itself a material RK update.  Compact
+    // stencils generate retained-CPU subnormal tails that an FTZ GPU reads as
+    // zero.  Reject only when mass inversion and dt together promote the lost-
+    // precision derivative into a normal stored increment.  The post-solve
+    // canonicalizer handles every immaterial result.  This single short-
+    // circuited predicate also keeps the normal hot path to comparisons only.
+    let recovered_increment = magnitude.clone() / scale.clone()
+        * dsl::abs(Expr::ident("constants").field("dt"));
+    let mut material = value.clone().ne(0.0)
+        & magnitude.lt(min_normal.clone())
+        & recovered_increment.ge(min_normal);
     if let Some(extra) = extra_invalid {
-        is_invalid = is_invalid | extra;
+        // `extra` means rhs/volume may already have lost a nonzero subnormal
+        // quantum.  Its worst possible recovered increment is bounded by
+        // MIN_NORMAL*|dt|/scale.  Only reject when that bound can be normal;
+        // otherwise the loss is below the representable integration scale.
+        let lost_quantum_material =
+            dsl::abs(Expr::ident("constants").field("dt")).ge(scale);
+        material = material | (extra & lost_quantum_material);
     }
-    dsl::select(value, invalid, is_invalid)
+    dsl::select(value, invalid, material)
+}
+
+/// Make CPU retained-subnormal arithmetic and GPU flush-to-zero arithmetic
+/// agree at the quantity RK actually stores.  The full `dt*rate` is a
+/// conservative bound for every classical-RK4 stage coefficient (<= 1).
+fn canonicalize_subnormal_rk_increment(rate: Expr) -> Expr {
+    let min_normal = dsl::bitcast("f32", 0x0080_0000u32);
+    let increment = dsl::abs(rate.clone())
+        * dsl::abs(Expr::ident("constants").field("dt"));
+    let negligible = rate.clone().ne(0.0) & increment.lt(min_normal);
+    dsl::select(rate, Expr::lit_f32(0.0), negligible)
 }
 
 /// Structural partial pivoting. Codegen emits comparisons only for lower rows
@@ -635,10 +663,24 @@ pub fn generate_rk4_stage_kernel_program_with_mass_floor(
         ));
         let conditioning_unsafe = Expr::ident(component_conditioning_scale_name(component))
             .lt(Expr::lit_f32(mass_equilibration_floor));
+        let volume_conditioning_scale =
+            Expr::ident(component_volume_conditioning_scale_name(component));
+        // If rhs/volume lost a subnormal quantum, its worst-case contribution
+        // to the stored RK state is bounded by
+        // MIN_NORMAL*|dt|/volume_conditioning_scale.  A scale larger than dt
+        // keeps that uncertainty subnormal; rejecting it would make retained-
+        // subnormal CPU execution diverge from an FTZ GPU for a numerically
+        // irrelevant stencil tail.
+        let lost_quantum_material =
+            dsl::abs(Expr::ident("constants").field("dt")).ge(dsl::max(
+                dsl::abs(volume_conditioning_scale.clone()),
+                dsl::bitcast("f32", 1u32),
+            ));
         let material_risk = conditioning_unsafe.clone()
             | (volume_precision_risk
-                & Expr::ident(component_volume_conditioning_scale_name(component))
-                    .lt(Expr::lit_f32(MASS_QUANTUM_AMPLIFICATION_FLOOR)));
+                & volume_conditioning_scale
+                    .lt(Expr::lit_f32(MASS_QUANTUM_AMPLIFICATION_FLOOR))
+                & lost_quantum_material);
         for &row in members {
             let rate = Expr::ident(rate_name(row));
             body.push(dsl::assign_expr(
@@ -747,6 +789,18 @@ pub fn generate_rk4_stage_kernel_program_with_mass_floor(
         ));
     }
 
+    // Backends are permitted to flush f32 subnormals.  Canonicalize at the
+    // integration increment, rather than at the derivative, so a small mass
+    // may still amplify a tiny residual whenever it can change a normal-scale
+    // RK state.  This is applied after every scalar/coupled mass solve.
+    for row in 0..stride {
+        let rate = Expr::ident(rate_name(row));
+        body.push(dsl::assign_expr(
+            rate.clone(),
+            canonicalize_subnormal_rk_increment(rate),
+        ));
+    }
+
     // Classical RK4 low-storage form. `rk_base` and `rk_accum` contain only
     // differential components; full state retains algebraic/derived storage.
     for component in layout.differential_components() {
@@ -825,6 +879,105 @@ mod tests {
     use crate::solver::ir::{fvm, vol_scalar_dim, Equation, EquationSystem, SchemeRegistry};
     use crate::solver::scheme::Scheme;
     use cfd2_ir::dimensions::Dimensionless;
+
+    fn canonicalized_rate(rate: f32, dt: f32) -> f32 {
+        if rate != 0.0 && rate.abs() * dt.abs() < f32::MIN_POSITIVE {
+            0.0
+        } else {
+            rate
+        }
+    }
+
+    /// Scalar executable oracle for the emitted materiality/canonicalization
+    /// predicates.  Keep the operation ordering identical to the generated
+    /// expressions so the exact f32 counterexamples remain reproducible.
+    fn guarded_scalar_rate(raw_rhs: f32, volume: f32, mass: f32, dt: f32) -> f32 {
+        let initial = raw_rhs / volume.max(1.0e-30);
+        let scale = mass.abs().max(f32::from_bits(1));
+        let recovered = initial.abs() / scale;
+        let amplification_material = initial != 0.0
+            && initial.abs() < f32::MIN_POSITIVE
+            && recovered * dt.abs() >= f32::MIN_POSITIVE;
+        let volume_precision_risk = raw_rhs != 0.0 && initial.abs() < f32::MIN_POSITIVE;
+        let extra = volume_precision_risk && mass.abs() < MASS_QUANTUM_AMPLIFICATION_FLOOR;
+        let lost_quantum_material = dt.abs() >= scale;
+        if amplification_material || (extra && lost_quantum_material) {
+            return f32::NAN;
+        }
+        let rate = initial / mass;
+        canonicalized_rate(rate, dt)
+    }
+
+    #[test]
+    fn scalar_subnormal_guard_measures_the_rk_increment_not_only_the_rate() {
+        // Exact first failing GUI cell before this fix: a retained CPU
+        // subnormal pressure residual is amplified by psi_precond=0.25 into a
+        // normal derivative, but the dt=5e-6 RK increment is still subnormal.
+        let raw_rhs = -3.238_260_6e-40_f32;
+        let volume = 6.25e-2_f32;
+        let mass = 2.5e-1_f32;
+        let initial = raw_rhs / volume;
+        let recovered = initial / mass;
+        assert!(initial != 0.0 && initial.abs() < f32::MIN_POSITIVE);
+        assert!(recovered.abs() >= f32::MIN_POSITIVE);
+        assert!(recovered.abs() * 5.0e-6 < f32::MIN_POSITIVE);
+        assert_eq!(
+            guarded_scalar_rate(raw_rhs, volume, mass, 5.0e-6).to_bits(),
+            0.0_f32.to_bits(),
+            "a GPU-FTZ-equivalent subnormal RK update must canonicalize to zero"
+        );
+
+        // The same derivative becomes a representable state update at an
+        // ordinary unit timestep, so dropping it would be a finite wrong step.
+        assert!(guarded_scalar_rate(raw_rhs, volume, mass, 1.0).is_nan());
+
+        // A recovered derivative can itself remain subnormal while a large dt
+        // makes its stored state increment normal.  The integration-scale
+        // predicate must reject this case too (a rate-only promotion test would
+        // miss it and the post-solve canonicalizer would correctly preserve it).
+        assert!(guarded_scalar_rate(
+            f32::MIN_POSITIVE * 0.5,
+            1.0,
+            10.0,
+            100.0
+        )
+        .is_nan());
+
+        // Preserve the pre-existing adversarial rhs/volume-underflow gate: the
+        // division loses a nonzero raw RHS and a tiny mass can recover a normal,
+        // material update at dt=1.
+        let lost = guarded_scalar_rate(f32::MIN_POSITIVE, 1.0e8, 1.0e-30, 1.0);
+        assert!(lost.is_nan());
+
+        // Conversely, if rhs/volume rounds all the way to zero but the
+        // timestep is smaller than the tiny mass, the largest possible lost
+        // state increment is still subnormal and is safely canonicalized.
+        let harmless_lost =
+            guarded_scalar_rate(f32::MIN_POSITIVE, 1.0e8, 1.0e-8, 1.0e-9);
+        assert_eq!(harmless_lost.to_bits(), 0.0_f32.to_bits());
+    }
+
+    #[test]
+    fn coupled_solve_canonicalizes_only_subnormal_rk_updates() {
+        // A regular coupled block can propagate a retained subnormal RHS into
+        // both solved rates.  The post-solve rule is component-wise: both tiny
+        // RK increments become deterministic zero, while a normal update in a
+        // sibling component is preserved.
+        let a00 = 1.0_f32;
+        let a01 = 0.25_f32;
+        let a10 = 0.5_f32;
+        let a11 = 1.0_f32;
+        let b0 = 1.0e-40_f32;
+        let b1 = -2.0e-40_f32;
+        let det = a00 * a11 - a01 * a10;
+        let x0 = (b0 * a11 - a01 * b1) / det;
+        let x1 = (a00 * b1 - b0 * a10) / det;
+        assert!(x0 != 0.0 && x0.abs() < f32::MIN_POSITIVE);
+        assert!(x1 != 0.0 && x1.abs() < f32::MIN_POSITIVE);
+        assert_eq!(canonicalized_rate(x0, 1.0).to_bits(), 0.0_f32.to_bits());
+        assert_eq!(canonicalized_rate(x1, 1.0).to_bits(), 0.0_f32.to_bits());
+        assert_eq!(canonicalized_rate(2.0 * f32::MIN_POSITIVE, 1.0), 2.0 * f32::MIN_POSITIVE);
+    }
 
     #[test]
     fn stage_uses_compact_differential_rhs_and_history() {
@@ -976,6 +1129,13 @@ mod tests {
             wgsl.contains("bitcast<f32>(2143289344u)"),
             "singular runtime mass block is not routed to the non-finite gate:\n{wgsl}"
         );
+        let unscale = wgsl
+            .find("rate_0 = rate_0 / mass_column_scale_0")
+            .expect("coupled solve must restore the physical rate");
+        let canonical = wgsl[unscale..]
+            .find("select(rate_0, 0.0")
+            .expect("coupled solve must canonicalize at the final RK increment");
+        assert!(canonical > 0);
     }
 
     #[test]
@@ -1020,5 +1180,14 @@ mod tests {
         assert!(wgsl.contains("rate_0 / select(mass_0_0"));
         assert!(wgsl.contains("rate_1 / select(mass_1_1"));
         assert!(wgsl.contains("rate_2 / select(mass_2_2"));
+        assert!(
+            wgsl.contains("abs(constants.dt)"),
+            "scalar subnormal materiality lost the RK integration scale:\n{wgsl}"
+        );
+        assert!(
+            wgsl.contains("select(rate_0, 0.0")
+                && wgsl.contains("abs(rate_0) * abs(constants.dt)"),
+            "stage lost deterministic subnormal-increment canonicalization:\n{wgsl}"
+        );
     }
 }

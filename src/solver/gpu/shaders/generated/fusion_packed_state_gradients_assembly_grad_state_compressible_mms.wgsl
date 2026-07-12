@@ -25,8 +25,9 @@ struct Constants {
     eos_gm1: f32,
     eos_r: f32,
     eos_dp_drho: f32,
-    eos_p_offset: f32,
+    eos_p_ref: f32,
     eos_theta_ref: f32,
+    eos_rho_ref: f32,
 }
 
 
@@ -325,7 +326,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     matrix_values[k1_start_row_6 + k1_diag_rank * 8u + 3u] -= -constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
     matrix_values[k1_start_row_6 + k1_diag_rank * 8u + 0u] -= 0.5 * constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * dot(vec2<f32>(state[idx * 26u + 10u], state[idx * 26u + 11u]), vec2<f32>(state[idx * 26u + 10u], state[idx * 26u + 11u])) * k1_vol;
     matrix_values[k1_start_row_6 + k1_diag_rank * 8u + 0u] -= -constants.eos_dp_drho * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
-    k1_rhs_6 += -constants.eos_p_offset * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
+    k1_rhs_6 += constants.eos_dp_drho * constants.eos_rho_ref * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
+    k1_rhs_6 += -constants.eos_p_ref * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
     k1_diag_7 -= state[idx * 26u + 0u] * constants.eos_r * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * k1_vol;
     matrix_values[k1_start_row_7 + k1_diag_rank * 8u + 6u] -= -(1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * k1_vol;
     for (var k1_k = k1_start; k1_k < k1_end; k1_k++) {
@@ -380,7 +382,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         let k1_scalar_mat_idx = cell_face_matrix_indices[k1_k];
         let k1_neighbor_rank = k1_scalar_mat_idx - k1_scalar_offset;
-        var k1_phi_0: f32 = fluxes[k1_face_idx * 8u + 0u];
+        var k1_phi_0: f32 = fluxes[k1_face_idx * 4u + 0u];
         if (k1_owner != idx) {
             k1_phi_0 -= k1_phi_0 * 2.0;
         }
@@ -422,12 +424,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        var k1_phi_1: f32 = fluxes[k1_face_idx * 8u + 1u];
+        var k1_phi_1: f32 = fluxes[k1_face_idx * 4u + 1u];
         if (k1_owner != idx) {
             k1_phi_1 -= k1_phi_1 * 2.0;
         }
         k1_rhs_1 -= k1_phi_1;
-        var k1_phi_2: f32 = fluxes[k1_face_idx * 8u + 2u];
+        var k1_phi_2: f32 = fluxes[k1_face_idx * 4u + 2u];
         if (k1_owner != idx) {
             k1_phi_2 -= k1_phi_2 * 2.0;
         }
@@ -446,7 +448,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        var k1_phi_3: f32 = fluxes[k1_face_idx * 8u + 3u];
+        var k1_phi_3: f32 = fluxes[k1_face_idx * 4u + 3u];
         if (k1_owner != idx) {
             k1_phi_3 -= k1_phi_3 * 2.0;
         }

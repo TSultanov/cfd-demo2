@@ -40,9 +40,10 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let bcv_rho_c0 = bc_value[idx * 12u + 0u];
         let bcv_u_c0 = bc_value[idx * 12u + 4u];
         let bcv_u_c1 = bc_value[idx * 12u + 5u];
+        let bcv_rho_e_c0 = bc_value[idx * 12u + 3u];
         bc_value[idx * 12u + 1u] = bcv_rho_c0 * bcv_u_c0;
         bc_value[idx * 12u + 2u] = bcv_rho_c0 * bcv_u_c1;
-        bc_value[idx * 12u + 3u] = select(0.5 * bcv_rho_c0 * (bcv_u_c0 * bcv_u_c0 + bcv_u_c1 * bcv_u_c1), max(in_p_c0, 0.000001) / max(constants.eos_gm1, 0.000001) + 0.5 * bcv_rho_c0 * (bcv_u_c0 * bcv_u_c0 + bcv_u_c1 * bcv_u_c1), constants.eos_gm1 > 0.0);
+        bc_value[idx * 12u + 3u] = select(bcv_rho_e_c0, max(in_p_c0, 0.000001) / max(constants.eos_gm1, 0.000001) + 0.5 * bcv_rho_c0 * (bcv_u_c0 * bcv_u_c0 + bcv_u_c1 * bcv_u_c1), constants.eos_gm1 > 0.0);
         bc_value[idx * 12u + 6u] = max(in_p_c0, 0.000001);
         bc_value[idx * 12u + 7u] = max(in_p_c0, 0.000001) / (max(bcv_rho_c0, 0.000001) * max(constants.eos_r, 0.000000000001));
     }

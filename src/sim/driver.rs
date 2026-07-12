@@ -52,6 +52,12 @@ pub struct SolverDriver {
     /// Maximum local acoustic + diffusive rate sampled from the last accepted
     /// explicit all-Mach state. The next step is pinned from this value.
     prev_explicit_rate: Option<f64>,
+    /// Whether the solver's live `dt` is already the candidate derived from
+    /// the current accepted explicit state.  This distinguishes a raw GUI
+    /// seed (which the density controller must bootstrap before stage 1) from
+    /// a completion/ordinary-step candidate (which must not receive the 1.2x
+    /// growth limiter a second time at a Plot/Direct transition).
+    explicit_dt_is_accepted_candidate: bool,
     /// A live parameter edit can make the explicit mass block invalid before a
     /// step is attempted. Preserve that diagnostic so `step` can reject the
     /// transition without advancing time or corrupting RK history.
@@ -146,6 +152,36 @@ const ALLMACH_ABS_PRESSURE_FLOOR: f64 = 1.0e-5;
 /// control; this factor accounts for non-normal/skew FV corrections.
 const EXPLICIT_RK_SAFETY: f64 = 0.8;
 
+fn explicit_allmach_dt_from_rate(current_dt: f32, target_cfl: f64, rate: f64) -> Option<f32> {
+    if !(current_dt.is_finite() && current_dt > 0.0 && rate.is_finite() && rate > 0.0) {
+        return None;
+    }
+    let stable = EXPLICIT_RK_SAFETY * target_cfl.clamp(1.0e-6, 1.0) / rate;
+    let next = stable.min(f64::from(current_dt) * 1.2).min(100.0);
+    (next.is_finite() && next > 0.0).then_some(next as f32)
+}
+
+fn explicit_compressible_dt_from_rate(
+    current_dt: f32,
+    target_cfl: f64,
+    rate: f64,
+) -> Option<f32> {
+    if !(current_dt.is_finite()
+        && current_dt > 0.0
+        && target_cfl.is_finite()
+        && target_cfl > 0.0
+        && rate.is_finite()
+        && rate > 0.0)
+    {
+        return None;
+    }
+    let stable = target_cfl / rate;
+    let next = stable
+        .min(f64::from(current_dt) * 1.2)
+        .clamp(1.0e-9, 100.0);
+    (next.is_finite() && next > 0.0).then_some(next as f32)
+}
+
 /// Resolve an imposed velocity inlet over this many pseudo-acoustic cell
 /// crossing times. Rhie--Chow damping is fourth-order in wave number, so an
 /// instantaneous start excites broad 10--20-cell waves that are not a literal
@@ -177,7 +213,7 @@ pub(crate) fn explicit_allmach_inlet_ramp_time(
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-struct ExplicitCellMetric {
+pub(crate) struct ExplicitCellMetric {
     /// `0.5 * sum(A_f) / V`, equal to `1/dx + 1/dy` on a Cartesian cell.
     hyperbolic: f64,
     /// `sum(A_f/d_n) / V`, equal to `2/dx^2 + 2/dy^2` on a Cartesian cell.
@@ -185,13 +221,13 @@ struct ExplicitCellMetric {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-struct ExplicitStateSample {
-    max_rate: f64,
-    max_vel: f64,
-    invalid: usize,
+pub(crate) struct ExplicitStateSample {
+    pub(crate) max_rate: f64,
+    pub(crate) max_vel: f64,
+    pub(crate) invalid: usize,
 }
 
-fn explicit_cell_metrics(mesh: &Mesh) -> Vec<ExplicitCellMetric> {
+pub(crate) fn explicit_cell_metrics(mesh: &Mesh) -> Vec<ExplicitCellMetric> {
     (0..mesh.num_cells())
         .map(|cell| {
             let volume = mesh.cell_vol[cell].abs().max(1.0e-30);
@@ -509,7 +545,7 @@ fn explicit_rhie_chow_turnover_rate(
         .fold(0.0, f64::max)
 }
 
-fn sample_allmach_explicit_state(
+pub(crate) fn sample_allmach_explicit_state(
     state: &[f32],
     layout: &crate::solver::model::backend::state_layout::StateLayout,
     metrics: &[ExplicitCellMetric],
@@ -649,6 +685,119 @@ fn sample_allmach_explicit_state(
     sample
 }
 
+/// Accepted-state stability oracle for the density-based explicit controller.
+///
+/// This deliberately reconstructs pressure and sound speed from the conserved
+/// state (`rho`, `rho_u`, `rho_e`), never from the auxiliary `p`/`T` caches.
+/// Its rate is algebraically the controller's `target_cfl / proposed_dt`:
+///
+/// `R = max(max_i(|u_i| + c_i), |u_in| + c_ref) / h_min`
+///
+/// with the parabolic contribution `4*nu_ref/h_min^2`.  Density-based fluxes
+/// have no Rhie--Chow correction, so their controller turnover contribution is
+/// identically zero.
+fn sample_compressible_explicit_state(
+    state: &[f32],
+    layout: &crate::solver::model::backend::state_layout::StateLayout,
+    mesh: &Mesh,
+    params: &RuntimeParams,
+) -> ExplicitStateSample {
+    let stride = layout.stride() as usize;
+    let offset = |name: &str| layout.offset_for(name).map(|value| value as usize);
+    let (Some(rho_off), Some(momentum_off), Some(energy_off)) =
+        (offset("rho"), offset("rho_u"), offset("rho_e"))
+    else {
+        return ExplicitStateSample {
+            invalid: 1,
+            ..Default::default()
+        };
+    };
+    if state.len() < mesh.num_cells().saturating_mul(stride) {
+        return ExplicitStateSample {
+            invalid: mesh.num_cells().max(1),
+            ..Default::default()
+        };
+    }
+
+    let eos = params.eos.runtime_params();
+    let ideal_gas = eos.gamma > 0.0
+        && eos.gm1 > 0.0
+        && eos.r > 0.0
+        && eos.dp_drho == 0.0
+        && eos.rho_ref == 0.0;
+    let mut sample = ExplicitStateSample::default();
+    let mut max_characteristic = 0.0_f64;
+    let mut min_h = f64::INFINITY;
+    for cell in 0..mesh.num_cells() {
+        let base = cell * stride;
+        let row = &state[base..base + stride];
+        let volume = mesh.cell_vol[cell];
+        if row.iter().any(|value| !value.is_finite())
+            || !(volume.is_finite() && volume > 0.0)
+        {
+            sample.invalid += 1;
+            continue;
+        }
+
+        let rho = f64::from(row[rho_off]);
+        let mx = f64::from(row[momentum_off]);
+        let my = f64::from(row[momentum_off + 1]);
+        let total_energy = f64::from(row[energy_off]);
+        if !(rho.is_finite() && rho > 0.0) {
+            sample.invalid += 1;
+            continue;
+        }
+        let kinetic = 0.5 * (mx * mx + my * my) / rho;
+        let internal = total_energy - kinetic;
+        let pressure = f64::from(eos.gm1) * internal
+            + f64::from(eos.dp_drho) * (rho - f64::from(eos.rho_ref))
+            + f64::from(eos.p_ref);
+        let sound_sq = f64::from(eos.gamma) * pressure / rho + f64::from(eos.dp_drho);
+        let speed = mx.hypot(my) / rho;
+        let temperature = pressure / (rho * f64::from(eos.r).max(1.0e-30));
+        let closure_valid = pressure.is_finite()
+            && sound_sq.is_finite()
+            && sound_sq > 0.0
+            && speed.is_finite()
+            && (!ideal_gas
+                || (internal.is_finite()
+                    && internal > 0.0
+                    && pressure > 0.0
+                    && temperature.is_finite()
+                    && temperature > 0.0));
+        if !closure_valid {
+            sample.invalid += 1;
+            continue;
+        }
+        let h = volume.sqrt();
+        if !(h.is_finite() && h > 1.0e-12) {
+            sample.invalid += 1;
+            continue;
+        }
+        min_h = min_h.min(h);
+        sample.max_vel = sample.max_vel.max(speed);
+        max_characteristic = max_characteristic.max(speed + sound_sq.sqrt());
+    }
+
+    let reference_characteristic = params.inlet_velocity.abs() as f64
+        + params.eos.sound_speed(params.density as f64);
+    let wave_speed = max_characteristic.max(reference_characteristic);
+    if sample.invalid == 0
+        && min_h.is_finite()
+        && min_h > 1.0e-12
+        && wave_speed.is_finite()
+        && wave_speed > 1.0e-12
+    {
+        sample.max_rate = wave_speed / min_h;
+        let rho_ref = (params.density as f64).abs().max(1.0e-12);
+        let alpha = (params.viscosity as f64).abs() / rho_ref;
+        if alpha.is_finite() && alpha > 1.0e-14 {
+            sample.max_rate = sample.max_rate.max(4.0 * alpha / (min_h * min_h));
+        }
+    }
+    sample
+}
+
 /// Low-Mach preconditioned pseudo-compressibility for the all-Mach pressure model.
 ///
 /// Returns the per-cell `psi_precond` the pressure-row `ddt` term consumes, decoupled
@@ -778,6 +927,162 @@ fn forced_cpu_solver(
 }
 
 impl SolverDriver {
+    /// Submit a bounded static, fixed-timestep explicit GPU batch without a
+    /// host wait or state readback. The ordinary [`Self::step`] path remains
+    /// the correctness fallback for adaptive control, CPU execution, ALE,
+    /// tracing/profiling, and SRD until those capabilities are represented in
+    /// the autonomous command graph.
+    ///
+    /// Host time advances when the batch is queued. Consumers must publish
+    /// progress only from `on_completed`, which is driven by nonblocking device
+    /// polling in the worker.
+    pub(crate) fn submit_fixed_explicit_gpu_batch<F>(
+        &mut self,
+        steps: u32,
+        on_completed: F,
+    ) -> Result<crate::solver::gpu::unified_solver::ExplicitGpuBatchSubmission, String>
+    where
+        F: FnOnce(crate::solver::gpu::unified_solver::ExplicitGpuBatchMetadata) + Send + 'static,
+    {
+        if self.params.time_scheme != crate::solver::TimeScheme::RK4 {
+            return Err("autonomous batches require explicit RK4".to_string());
+        }
+        if self.params.adaptive_dt {
+            return Err(
+                "fixed explicit batch requested while adaptive timestep is enabled".to_string(),
+            );
+        }
+        if let Some(error) = &self.pending_explicit_error {
+            return Err(error.clone());
+        }
+        self.solver.submit_explicit_gpu_batch(steps, on_completed)
+    }
+
+    /// Submit the health-audited autonomous pressure-based all-Mach route using the current
+    /// [`RuntimeParams`] timestep policy. Fixed and adaptive runs share the
+    /// finite/thermodynamic/Rhie--Chow audits and rollback/freeze contract;
+    /// fixed mode simply keeps `next_dt == step_dt` after every acceptance.
+    pub(crate) fn submit_autonomous_explicit_gpu_batch<F>(
+        &mut self,
+        steps: u32,
+        on_completed: F,
+    ) -> Result<crate::solver::gpu::unified_solver::AdaptiveExplicitGpuBatchSubmission, String>
+    where
+        F: FnOnce(
+                Result<
+                    crate::solver::gpu::unified_solver::AdaptiveExplicitGpuBatchCompletion,
+                    String,
+                >,
+            ) + Send
+            + 'static,
+    {
+        let health_ready =
+            self.solver
+                .autonomous_explicit_capabilities()
+                .is_some_and(|capabilities| {
+                    if self.params.adaptive_dt {
+                        capabilities.adaptive_health
+                    } else {
+                        capabilities.fixed_health
+                    }
+                });
+        if self.params.time_scheme != crate::solver::TimeScheme::RK4 || !health_ready {
+            return Err(
+                "health-ready autonomous GPU batches require production allmach_pressure/allmach_thermal RK4"
+                    .to_string(),
+            );
+        }
+        if let Some(error) = &self.pending_explicit_error {
+            return Err(error.clone());
+        }
+        self.solver.submit_autonomous_explicit_gpu_batch(
+            steps,
+            self.params.adaptive_dt,
+            self.params.target_cfl as f32,
+            self.explicit_dt_is_accepted_candidate,
+            on_completed,
+        )
+    }
+
+    /// Compatibility alias for the previous adaptive-only API. Its behavior is
+    /// now governed by the current runtime policy and therefore also supports
+    /// fixed timestep all-Mach runs safely.
+    pub(crate) fn submit_adaptive_explicit_gpu_batch<F>(
+        &mut self,
+        steps: u32,
+        on_completed: F,
+    ) -> Result<crate::solver::gpu::unified_solver::AdaptiveExplicitGpuBatchSubmission, String>
+    where
+        F: FnOnce(
+                Result<
+                    crate::solver::gpu::unified_solver::AdaptiveExplicitGpuBatchCompletion,
+                    String,
+                >,
+            ) + Send
+            + 'static,
+    {
+        self.submit_autonomous_explicit_gpu_batch(steps, on_completed)
+    }
+
+    /// Must be called on the solver-owning worker after an adaptive completion
+    /// and before rendering/snapshotting or submitting the next batch.
+    pub(crate) fn reconcile_autonomous_explicit_gpu_batch(
+        &mut self,
+        completion: crate::solver::gpu::unified_solver::AdaptiveExplicitGpuBatchCompletion,
+    ) -> Result<(), String> {
+        self.prev_explicit_rate = (completion.total_rate.is_finite()
+            && completion.total_rate > 0.0)
+            .then_some(completion.total_rate as f64);
+        self.explicit_dt_is_accepted_candidate = completion.next_dt.is_finite()
+            && completion.next_dt > 0.0;
+        self.solver
+            .reconcile_autonomous_explicit_gpu_batch(completion)
+    }
+
+    /// Compatibility alias for the previous adaptive-only name.
+    pub(crate) fn reconcile_adaptive_explicit_gpu_batch(
+        &mut self,
+        completion: crate::solver::gpu::unified_solver::AdaptiveExplicitGpuBatchCompletion,
+    ) -> Result<(), String> {
+        self.reconcile_autonomous_explicit_gpu_batch(completion)
+    }
+
+    pub(crate) fn install_autonomous_frame_copy_targets(
+        &mut self,
+        destinations: &[wgpu::Buffer; 3],
+    ) -> Result<(), String> {
+        self.solver
+            .install_autonomous_frame_copy_targets(destinations)
+    }
+
+    /// Encode a GPU-selected snapshot of the latest accepted autonomous state.
+    /// This is safe before host phase reconciliation and after multiple queued
+    /// batches; the controller selects the physical triple-buffer slot.
+    pub(crate) fn encode_autonomous_accepted_state_copy(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target_slot: usize,
+    ) -> Result<(), String> {
+        self.solver
+            .encode_autonomous_accepted_state_copy(encoder, target_slot)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn autonomous_frame_copy_bind_group_count(&self) -> usize {
+        self.solver.autonomous_frame_copy_bind_group_count()
+    }
+
+    pub(crate) fn autonomous_explicit_capabilities(
+        &self,
+    ) -> Option<crate::solver::gpu::modules::explicit_control::ExplicitControlCapabilities> {
+        self.solver.autonomous_explicit_capabilities()
+    }
+
+    /// Drive completion callbacks for autonomous GPU batches without waiting.
+    pub(crate) fn poll_gpu_batch_completions(&self) -> Result<(), String> {
+        self.solver.poll_gpu_completions()
+    }
+
     /// Build a configured solver (phase 1).
     ///
     /// Derives the `SolverConfig` (the `eos.gamma ? Implicit{1} : Coupled` stepping
@@ -1091,27 +1396,56 @@ impl SolverDriver {
         };
         solver.initialize_history();
 
-        let prev_explicit_rate = if allmach && params.time_scheme == crate::solver::TimeScheme::RK4
+        let explicit_state_sample = if params.time_scheme == crate::solver::TimeScheme::RK4
+            && (allmach || compressible)
         {
             let state = solver.read_state_f32().await;
-            let sample = sample_allmach_explicit_state(
-                &state,
-                &solver.model().state_layout,
-                &explicit_cell_metrics,
-                mesh,
-                params,
-                thermal,
-            );
+            let sample = if allmach {
+                sample_allmach_explicit_state(
+                    &state,
+                    &solver.model().state_layout,
+                    &explicit_cell_metrics,
+                    mesh,
+                    params,
+                    thermal,
+                )
+            } else {
+                sample_compressible_explicit_state(
+                    &state,
+                    &solver.model().state_layout,
+                    mesh,
+                    params,
+                )
+            };
             if sample.invalid > 0 || !(sample.max_rate > 0.0) {
                 return Err(format!(
-                    "invalid initial all-Mach RK4 state ({} invalid cells, max rate {})",
-                    sample.invalid, sample.max_rate
+                    "invalid initial explicit RK4 state for `{}` ({} invalid cells, max rate {})",
+                    solver.model().id, sample.invalid, sample.max_rate
                 ));
             }
-            Some(sample.max_rate)
+            Some(sample)
         } else {
             None
         };
+        let prev_explicit_rate = explicit_state_sample.map(|sample| sample.max_rate);
+        let mut explicit_dt_is_accepted_candidate = false;
+        if params.adaptive_dt {
+            let next_dt = prev_explicit_rate.and_then(|rate| {
+                if allmach {
+                    explicit_allmach_dt_from_rate(solver.dt(), params.target_cfl, rate)
+                } else if compressible {
+                    explicit_compressible_dt_from_rate(solver.dt(), params.target_cfl, rate)
+                } else {
+                    None
+                }
+            });
+            if let Some(dt) = next_dt {
+                // Seed the autonomous controller with the accepted-state CFL,
+                // never the potentially GUI-large requested timestep.
+                solver.set_dt(dt);
+                explicit_dt_is_accepted_candidate = true;
+            }
+        }
 
         Ok(DriverBuild {
             driver: SolverDriver {
@@ -1122,12 +1456,13 @@ impl SolverDriver {
                 explicit_cell_metrics,
                 explicit_mesh: mesh.clone(),
                 prev_explicit_rate,
+                explicit_dt_is_accepted_candidate,
                 pending_explicit_error: None,
                 supports_sound_speed,
                 compressible,
                 allmach,
                 thermal,
-                prev_max_vel: 0.0,
+                prev_max_vel: explicit_state_sample.map_or(0.0, |sample| sample.max_vel),
             },
             cached_u,
             cached_p,
@@ -1135,30 +1470,61 @@ impl SolverDriver {
     }
 
     fn resample_explicit_rate(&mut self) {
-        if self.params.time_scheme != crate::solver::TimeScheme::RK4 || !self.allmach {
+        self.explicit_dt_is_accepted_candidate = false;
+        if self.params.time_scheme != crate::solver::TimeScheme::RK4
+            || !(self.allmach || self.compressible)
+        {
             self.prev_explicit_rate = None;
             self.pending_explicit_error = None;
             return;
         }
         let state = pollster::block_on(self.solver.read_state_f32());
-        let sample = sample_allmach_explicit_state(
-            &state,
-            &self.solver.model().state_layout,
-            &self.explicit_cell_metrics,
-            &self.explicit_mesh,
-            &self.params,
-            self.thermal,
-        );
+        let sample = if self.allmach {
+            sample_allmach_explicit_state(
+                &state,
+                &self.solver.model().state_layout,
+                &self.explicit_cell_metrics,
+                &self.explicit_mesh,
+                &self.params,
+                self.thermal,
+            )
+        } else {
+            sample_compressible_explicit_state(
+                &state,
+                &self.solver.model().state_layout,
+                &self.explicit_mesh,
+                &self.params,
+            )
+        };
         if sample.invalid > 0 || !(sample.max_rate > 0.0) {
             self.prev_explicit_rate = None;
             self.pending_explicit_error = Some(format!(
-                "invalid all-Mach RK4 state after live parameter update ({} invalid cells)",
-                sample.invalid
+                "invalid explicit RK4 state for `{}` after live parameter update ({} invalid cells)",
+                self.solver.model().id, sample.invalid
             ));
         } else {
             self.prev_explicit_rate = Some(sample.max_rate);
             self.prev_max_vel = sample.max_vel;
             self.pending_explicit_error = None;
+            if self.params.adaptive_dt {
+                let next_dt = if self.allmach {
+                    explicit_allmach_dt_from_rate(
+                        self.solver.dt(),
+                        self.params.target_cfl,
+                        sample.max_rate,
+                    )
+                } else {
+                    explicit_compressible_dt_from_rate(
+                        self.solver.dt(),
+                        self.params.target_cfl,
+                        sample.max_rate,
+                    )
+                };
+                if let Some(dt) = next_dt {
+                    self.solver.set_dt(dt);
+                    self.explicit_dt_is_accepted_candidate = true;
+                }
+            }
         }
     }
 
@@ -1168,6 +1534,7 @@ impl SolverDriver {
     /// then re-apply the inlet boundary condition (compressible vs incompressible).
     pub fn apply_params(&mut self, params: &RuntimeParams) {
         self.params = *params;
+        self.explicit_dt_is_accepted_candidate = false;
         let solver = &mut self.solver;
         // Outer-convergence monitoring drives the GUI residual readout and the
         // opportunistic per-step break.
@@ -1355,23 +1722,16 @@ impl SolverDriver {
             };
         }
         if self.params.adaptive_dt {
-            if self.params.time_scheme == crate::solver::TimeScheme::RK4 && self.allmach {
-                if let Some(rate) = self
-                    .prev_explicit_rate
-                    .filter(|rate| rate.is_finite() && *rate > 0.0)
-                {
-                    let mut next_dt = EXPLICIT_RK_SAFETY
-                        * (self.params.target_cfl as f64).clamp(1.0e-6, 1.0)
-                        / rate;
-                    let current_dt = self.solver.dt() as f64;
-                    if next_dt > current_dt * 1.2 {
-                        next_dt = current_dt * 1.2;
-                    }
-                    if next_dt.is_finite() && next_dt > 0.0 {
-                        self.solver.set_dt(next_dt.min(100.0) as f32);
-                    }
-                }
-            } else {
+            if !(self.params.time_scheme == crate::solver::TimeScheme::RK4
+                && (self.allmach || self.compressible)
+                && self.explicit_dt_is_accepted_candidate)
+            {
+                // Explicit all-Mach and density-compressible RK4 are absent
+                // here once their current accepted state owns the timestep
+                // stored on the solver. Build/apply sampling sizes step zero,
+                // and the completion-fenced sample below sizes every next
+                // step. Growing it again here would apply the 1.2x slew limit
+                // twice to one state at a Direct/Plot transition.
                 let sound_speed = if self.supports_sound_speed {
                     self.params.eos.sound_speed(self.params.density as f64)
                 } else {
@@ -1501,7 +1861,9 @@ impl SolverDriver {
             None
         };
 
-        if self.params.time_scheme == crate::solver::TimeScheme::RK4 && self.allmach {
+        if self.params.time_scheme == crate::solver::TimeScheme::RK4
+            && (self.allmach || self.compressible)
+        {
             if completed_state.is_none() {
                 // CPU explicit steps do not need the GPU finite-audit transfer;
                 // take one compact host snapshot for the all-Mach stability
@@ -1511,22 +1873,54 @@ impl SolverDriver {
             let state = completed_state
                 .as_deref()
                 .expect("explicit all-Mach completed state");
-            let sample = sample_allmach_explicit_state(
-                state,
-                &self.solver.model().state_layout,
-                &self.explicit_cell_metrics,
-                &self.explicit_mesh,
-                &self.params,
-                self.thermal,
-            );
+            let sample = if self.allmach {
+                sample_allmach_explicit_state(
+                    state,
+                    &self.solver.model().state_layout,
+                    &self.explicit_cell_metrics,
+                    &self.explicit_mesh,
+                    &self.params,
+                    self.thermal,
+                )
+            } else {
+                sample_compressible_explicit_state(
+                    state,
+                    &self.solver.model().state_layout,
+                    &self.explicit_mesh,
+                    &self.params,
+                )
+            };
             if sample.invalid > 0 || !(sample.max_rate > 0.0) {
+                self.explicit_dt_is_accepted_candidate = false;
                 diverged = Some(DivergeReason::StepError(format!(
-                    "invalid all-Mach RK4 thermodynamic state ({} invalid cells)",
-                    sample.invalid
+                    "invalid explicit RK4 thermodynamic state for `{}` ({} invalid cells)",
+                    self.solver.model().id, sample.invalid
                 )));
             } else {
                 self.prev_explicit_rate = Some(sample.max_rate);
                 self.prev_max_vel = sample.max_vel;
+                if self.params.adaptive_dt {
+                    let next_dt = if self.allmach {
+                        explicit_allmach_dt_from_rate(
+                            dt,
+                            self.params.target_cfl,
+                            sample.max_rate,
+                        )
+                    } else {
+                        explicit_compressible_dt_from_rate(
+                            dt,
+                            self.params.target_cfl,
+                            sample.max_rate,
+                        )
+                    };
+                    if let Some(next_dt) = next_dt {
+                        // `dt` is the accepted step captured before this sample;
+                        // the returned StepOutcome continues to report it while
+                        // the solver stores `next_dt` for the following call.
+                        self.solver.set_dt(next_dt);
+                        self.explicit_dt_is_accepted_candidate = true;
+                    }
+                }
             }
         }
 
@@ -2014,6 +2408,239 @@ impl SolverDriver {
     /// unaffected.
     pub fn set_requested_dt(&mut self, dt: f32) {
         self.params.requested_dt = dt;
+        self.explicit_dt_is_accepted_candidate = false;
         self.solver.set_dt(dt);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::solver::mesh::{generate_structured_rect_mesh, BoundarySides};
+    use crate::solver::model::compressible_model_with_eos;
+
+    fn density_transition_params() -> RuntimeParams {
+        RuntimeParams {
+            adaptive_dt: true,
+            target_cfl: 0.5,
+            requested_dt: 1.0e-5,
+            dtau: 0.0,
+            log_convergence: false,
+            log_every_steps: 100,
+            advection_scheme: crate::solver::scheme::Scheme::Upwind,
+            time_scheme: crate::solver::TimeScheme::RK4,
+            preconditioner: crate::solver::PreconditionerType::Jacobi,
+            outer_iters: 1,
+            outer_auto_converge: false,
+            low_mach_model: crate::solver::GpuLowMachPrecondModel::Off,
+            low_mach_theta_floor: 1.0e-6,
+            low_mach_pressure_coupling_alpha: 1.0,
+            alpha_u: 1.0,
+            alpha_p: 1.0,
+            inlet_velocity: 0.0,
+            density: 1.0,
+            viscosity: 0.0,
+            eos: crate::solver::model::eos::EosSpec::IdealGas {
+                gamma: 1.4,
+                gas_constant: 1.0,
+                temperature: 1.0,
+            },
+            compressibility_psi: 0.0,
+            outlet_back_pressure: 0.0,
+            allmach_precond_uref_min: 1.0,
+            pressure_inlet: false,
+            inlet_pressure: 0.0,
+        }
+    }
+
+    fn submit_one_density_step(
+        driver: &mut SolverDriver,
+    ) -> crate::solver::gpu::unified_solver::AdaptiveExplicitGpuBatchCompletion {
+        let (tx, rx) = std::sync::mpsc::channel();
+        driver
+            .submit_autonomous_explicit_gpu_batch(1, move |result| {
+                let _ = tx.send(result);
+            })
+            .expect("submit density transition step");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            driver
+                .poll_gpu_batch_completions()
+                .expect("poll density transition step");
+            match rx.try_recv() {
+                Ok(result) => return result.expect("density transition status"),
+                Err(std::sync::mpsc::TryRecvError::Empty)
+                    if std::time::Instant::now() < deadline =>
+                {
+                    std::thread::yield_now();
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    panic!("density transition callback timed out")
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    panic!("density transition callback disconnected")
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn density_host_rate_uses_hot_conserved_state_not_stale_primitive_caches() {
+        let mesh = generate_structured_rect_mesh(6, 4, 1.0, 0.5, BoundarySides::wall());
+        let params = density_transition_params();
+        let model = compressible_model_with_eos(params.eos).expect("density model");
+        let stride = model.state_layout.stride() as usize;
+        let rho = model.state_layout.offset_for("rho").expect("rho") as usize;
+        let momentum = model
+            .state_layout
+            .offset_for("rho_u")
+            .expect("rho_u") as usize;
+        let energy = model
+            .state_layout
+            .offset_for("rho_e")
+            .expect("rho_e") as usize;
+        let pressure = model.state_layout.offset_for("p").expect("p") as usize;
+        let temperature = model.state_layout.offset_for("T").expect("T") as usize;
+        let mut state = vec![0.0_f32; mesh.num_cells() * stride];
+        for row in state.chunks_exact_mut(stride) {
+            row[rho] = 1.0;
+            row[momentum] = 0.0;
+            row[momentum + 1] = 0.0;
+            row[energy] = 250.0; // p=(gamma-1)*rho_e=100, c=sqrt(140)
+            row[pressure] = 1.0; // deliberately stale auxiliary cache
+            row[temperature] = 1.0; // deliberately stale auxiliary cache
+        }
+        let sample = sample_compressible_explicit_state(
+            &state,
+            &model.state_layout,
+            &mesh,
+            &params,
+        );
+        assert_eq!(sample.invalid, 0);
+        let min_h = mesh
+            .cell_vol
+            .iter()
+            .copied()
+            .map(f64::sqrt)
+            .fold(f64::INFINITY, f64::min);
+        let expected = 140.0_f64.sqrt() / min_h;
+        assert!(
+            (sample.max_rate - expected).abs() <= expected * 2.0e-7,
+            "conserved hot-state rate={} expected={expected}",
+            sample.max_rate
+        );
+    }
+
+    /// The accepted-state recurrence is
+    /// `D[n+1] = min(CFL/R(S[n+1]), 1.2*D[n])`.  A presentation or live-policy
+    /// boundary may transfer ownership of `D[n+1]`, but must never evaluate
+    /// the `1.2*` term again against the same `S[n+1]`.
+    #[test]
+    fn density_compressible_plot_direct_transitions_preserve_dt_ownership() {
+        let context = match pollster::block_on(
+            crate::solver::gpu::context::GpuContext::new(None, None),
+        ) {
+            Ok(context) => context,
+            Err(error) => {
+                eprintln!("[density-dt-transition] no compatible GPU ({error}); skipping");
+                return;
+            }
+        };
+        let mesh = generate_structured_rect_mesh(6, 4, 1.0, 0.5, BoundarySides::wall());
+        let n = mesh.num_cells();
+        let mut params = density_transition_params();
+        let mut build = pollster::block_on(SolverDriver::build(
+            &mesh,
+            compressible_model_with_eos(params.eos).expect("density model"),
+            &params,
+            &vec![(0.0, 0.0); n],
+            &vec![0.0; n],
+            Some(context.device),
+            Some(context.queue),
+        ))
+        .expect("density transition driver");
+
+        // Hot conserved state: c_local=sqrt(gamma*p/rho)=sqrt(140), while
+        // auxiliary p/T are regenerated by the same seeding seam.  Applying
+        // params turns the raw requested dt into a sampled candidate.
+        build
+            .driver
+            .solver_mut()
+            .set_uniform_state(1.0, [0.0, 0.0], 100.0);
+        build.driver.solver().initialize_history();
+        build.driver.apply_params(&params);
+        let direct_candidate = build.driver.solver().dt();
+        assert!(build.driver.explicit_dt_is_accepted_candidate);
+
+        // Direct -> Plot: reconciliation transfers the GPU candidate to the
+        // ordinary route. The next ordinary accepted step must use it exactly,
+        // rather than growing once before stage 1.
+        let direct = submit_one_density_step(&mut build.driver);
+        assert_eq!(direct.last_dt.to_bits(), direct_candidate.to_bits());
+        assert!(!direct.halted && direct.accepted_batch == 1, "{direct:?}");
+        build
+            .driver
+            .reconcile_autonomous_explicit_gpu_batch(direct)
+            .expect("reconcile Direct prefix");
+        let plot_candidate = direct.next_dt;
+        let plot = build.driver.step(false);
+        assert!(plot.diverged.is_none(), "Plot transition failed: {:?}", plot.diverged);
+        assert_eq!(
+            plot.dt.to_bits(),
+            plot_candidate.to_bits(),
+            "Direct -> Plot applied growth twice to one accepted state"
+        );
+
+        // Plot -> Direct: the ordinary step invalidates/reseeds the device
+        // controller, but its post-step candidate is already state-sized.
+        let back_to_direct_candidate = build.driver.solver().dt();
+        let back_to_direct = submit_one_density_step(&mut build.driver);
+        assert_eq!(
+            back_to_direct.last_dt.to_bits(),
+            back_to_direct_candidate.to_bits(),
+            "Plot -> Direct bootstrap applied growth twice"
+        );
+        build
+            .driver
+            .reconcile_autonomous_explicit_gpu_batch(back_to_direct)
+            .expect("reconcile Plot -> Direct step");
+
+        // A live target/requested edit deliberately creates a raw requested
+        // seed, then apply_params samples the accepted state exactly once.
+        params.target_cfl = 0.25;
+        params.requested_dt = 3.0e-6;
+        build.driver.apply_params(&params);
+        let edited_candidate = build.driver.solver().dt();
+        assert!(build.driver.explicit_dt_is_accepted_candidate);
+        let edited = submit_one_density_step(&mut build.driver);
+        assert_eq!(edited.last_dt.to_bits(), edited_candidate.to_bits());
+        build
+            .driver
+            .reconcile_autonomous_explicit_gpu_batch(edited)
+            .expect("reconcile live adaptive edit");
+
+        // Fixed mode owns requested_dt directly; switching back to adaptive
+        // must replace that raw policy with one accepted-state candidate.
+        params.adaptive_dt = false;
+        params.requested_dt = 7.0e-6;
+        build.driver.apply_params(&params);
+        assert!(!build.driver.explicit_dt_is_accepted_candidate);
+        let fixed = submit_one_density_step(&mut build.driver);
+        assert_eq!(fixed.last_dt.to_bits(), params.requested_dt.to_bits());
+        assert_eq!(fixed.next_dt.to_bits(), params.requested_dt.to_bits());
+        build
+            .driver
+            .reconcile_autonomous_explicit_gpu_batch(fixed)
+            .expect("reconcile fixed step");
+
+        params.adaptive_dt = true;
+        params.target_cfl = 0.4;
+        params.requested_dt = 2.0e-6;
+        build.driver.apply_params(&params);
+        let reenlisted_candidate = build.driver.solver().dt();
+        assert!(build.driver.explicit_dt_is_accepted_candidate);
+        let reenlisted = submit_one_density_step(&mut build.driver);
+        assert_eq!(reenlisted.last_dt.to_bits(), reenlisted_candidate.to_bits());
+        assert!(!reenlisted.halted && reenlisted.accepted_batch == 1, "{reenlisted:?}");
     }
 }

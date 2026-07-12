@@ -38,6 +38,7 @@ scope.
 | F3c | Generated stage-dataflow fusion | Privatize RHS and ping-pong generated stage state | 2 | **blocked pending live-complement proof** | root + adversary | A mechanically checked construction that preserves every next-stage-live packed slot without erasing the RHS traffic win |
 | F3d | Logical-state physicalization | Generate the ordered graph over differential, algebraic, producer, and immutable state; ping-pong only the written partition | 3 | new viable mechanism; implementation pending | root + fusion adversary | — |
 | F3e | Differential residual + sparse equilibrated mass graph | Project full local residuals to differential storage; prune impossible elimination/fill edges; solve coupled blocks in row/column-equilibrated coordinates with capped matching-quality and representability gates | 6 | **accepted; adversarial audit passed** | root | — |
+| F3f | Semantic face-channel liveness | Preserve the full coupled face layout for equations/BCs while routing producers and every consumer through a generated compact storage-rank projection | 7 | implemented candidate; integration and timing audit pending | `rk4_bandwidth_adversary` + root | — |
 | F4 | Roofline/adversarial measurement | Establish whether bandwidth is limiting and reject false saturation claims | 3 | active; prior timestamp ceiling retracted | root + measurement adversary | New hardware-counter access or a falsifiable bandwidth proxy |
 | F5a | Structured state physical layout | Generated AoSoA-32 hot-state layout selected from semantic D/A/P/I liveness | 3 | viable isolated mechanism | `explicit_liveness_compaction_r2` | — |
 | F5b | Unstructured state physical layout | Compact/reordered AoS hot state selected from semantic D/A/P/I liveness | 3 | viable isolated mechanism | `explicit_liveness_compaction_r2` | — |
@@ -403,3 +404,31 @@ reuse makes the same logical model overstate scalar bandwidth, and Metal exposes
 no supported external-memory counter here. Therefore the accepted claim is a
 measured 22--27% high-order solver speedup with near-stream requested traffic,
 not “100% physical DRAM saturation.”
+
+### Round 7
+
+#### F3f semantic face-channel liveness
+
+An independent audit found that the density-compressible systems retain eight
+semantic coupled ranks (twelve for the biharmonic MMS variant), while only the
+four conserved equations are ever produced into or consumed from the face
+buffer. The new router derives an exact coupled-rank-to-storage-rank map from
+the model graph. Boundary expressions and equations continue to see the full
+semantic ordering; face allocation, producer stores, and all structured/CSR,
+explicit/implicit, RHS-only, gradient-state, and fused consumers use the same
+compact projection. There is no model-ID branch.
+
+The shipped compressible base, MMS, and structured layouts compact from stride
+eight to four; the biharmonic MMS layout compacts from twelve to four. Every
+other model, including all ALE layouts, retains an identity projection. The
+mechanical artifact audit finds exactly four generated stores (ranks zero
+through three), no residual stride-eight/twelve access, and matching compact
+allocation in every stepping recipe.
+
+The exact removed traffic is sixteen bytes per face per stage, or sixty-four
+bytes per face per RK4 step. At 1024² this removes about 256 MiB of structured
+face stores and 64 MiB of face-buffer capacity per step; a regular CSR mesh
+removes about 128 MiB of stores and 32 MiB of capacity. These are logical-byte
+results, not a physical-DRAM saturation claim. F3f remains a candidate until
+the full MMS/ALE/generated-shader gates and a stable, completion-fenced
+end-to-end timing comparison are green.

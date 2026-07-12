@@ -37,6 +37,115 @@ pub struct ExplicitRkLayout {
     coupled_offsets: HashMap<String, u32>,
 }
 
+/// One scalar component in the coupled face-flux layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExplicitFaceChannel {
+    /// Field targeted by the equation row.
+    pub field: FieldRef,
+    /// Component within the target field.
+    pub component: u32,
+    /// Position in the full coupled equation layout.
+    pub coupled_rank: u32,
+    /// Position in compact face storage, or `None` when no spatial residual
+    /// operation consumes this row's face flux.
+    pub storage_rank: Option<u32>,
+}
+
+/// Exact producer/consumer liveness for the shared face-flux table.
+///
+/// Flux schemes are naturally declared over the complete coupled row layout,
+/// because algebraic rows still have names, BC slots and primitive closures.
+/// Both matrix-free residual and implicit assembly read a face channel only
+/// for an equation carrying a convection (`Div`/`DivFlux`) operation.
+/// Materialising any other channel is therefore a dead storage write. This
+/// layout retains coupled semantic ranks while assigning dense storage ranks
+/// only to actual consumers; it never switches on model ids or assumes that
+/// live rows form a prefix.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExplicitFaceChannelLiveness {
+    components: Vec<ExplicitFaceChannel>,
+    stored: Vec<ExplicitFaceChannel>,
+}
+
+impl ExplicitFaceChannelLiveness {
+    /// Build the dense component map from row-level consumer facts.  This is
+    /// the shared constructor for lowered IR and for codegen tests that define
+    /// a flux kernel directly without first constructing a full equation
+    /// system.
+    pub fn from_row_consumers(
+        rows: impl IntoIterator<Item = (FieldRef, bool)>,
+    ) -> Self {
+        let mut components = Vec::new();
+        let mut stored = Vec::new();
+        let mut coupled_rank = 0u32;
+
+        for (field, consumes_face_flux) in rows {
+            for component in 0..field.kind().component_count() as u32 {
+                let storage_rank = consumes_face_flux.then_some(stored.len() as u32);
+                let entry = ExplicitFaceChannel {
+                    field,
+                    component,
+                    coupled_rank,
+                    storage_rank,
+                };
+                components.push(entry);
+                if consumes_face_flux {
+                    stored.push(entry);
+                }
+                coupled_rank += 1;
+            }
+        }
+
+        Self { components, stored }
+    }
+
+    /// Derive compact face storage from the operations the generated spatial
+    /// residual actually emits.  Every component of a convection-bearing row
+    /// is consumed; components of rows without convection have no `fluxes[]`
+    /// load and receive no storage rank.
+    pub fn from_discrete_system(system: &DiscreteSystem) -> Self {
+        let layout = Self::from_row_consumers(system.equations.iter().map(|equation| {
+            (
+                equation.target,
+                equation
+                    .ops
+                    .iter()
+                    .any(|op| op.kind == DiscreteOpKind::Convection),
+            )
+        }));
+
+        debug_assert_eq!(
+            layout.components.len(),
+            coupled_unknown_components(system).len(),
+            "face-channel liveness must preserve the full coupled component order"
+        );
+
+        layout
+    }
+
+    pub fn coupled_stride(&self) -> u32 {
+        self.components.len() as u32
+    }
+
+    pub fn storage_stride(&self) -> u32 {
+        self.stored.len() as u32
+    }
+
+    pub fn components(&self) -> &[ExplicitFaceChannel] {
+        &self.components
+    }
+
+    pub fn stored_components(&self) -> &[ExplicitFaceChannel] {
+        &self.stored
+    }
+
+    pub fn storage_rank_for_coupled(&self, coupled_rank: u32) -> Option<u32> {
+        self.components
+            .get(coupled_rank as usize)
+            .and_then(|component| component.storage_rank)
+    }
+}
+
 impl ExplicitRkLayout {
     /// Derive liveness from lowered equation IR.
     ///
@@ -138,7 +247,9 @@ pub fn differential_component_count(system: &EquationSystem) -> u32 {
 mod tests {
     use super::*;
     use crate::solver::codegen::ir::lower_system;
-    use crate::solver::ir::{fvm, vol_scalar_dim, Equation, SchemeRegistry};
+    use crate::solver::ir::{
+        fvm, surface_scalar_dim, vol_scalar_dim, vol_vector_dim, Equation, SchemeRegistry,
+    };
     use crate::solver::scheme::Scheme;
     use cfd2_ir::dimensions::Dimensionless;
 
@@ -184,5 +295,41 @@ mod tests {
         assert_eq!(layout.coupled_offset("q"), Some(0));
         assert_eq!(layout.coupled_offset("closure"), Some(1));
         assert_eq!(layout.coupled_offset("r"), Some(2));
+    }
+
+    #[test]
+    fn face_channels_compact_actual_convection_consumers_without_prefix_assumption() {
+        let q = vol_scalar_dim::<Dimensionless>("q");
+        let closure = vol_scalar_dim::<Dimensionless>("closure");
+        let velocity = vol_vector_dim::<Dimensionless>("velocity");
+        let phi = surface_scalar_dim::<Dimensionless>("phi");
+
+        let mut q_eq = Equation::new(q);
+        q_eq.add_term(fvm::div(phi, q));
+        let closure_eq = Equation::new(closure);
+        let mut velocity_eq = Equation::new(velocity);
+        velocity_eq.add_term(fvm::div(phi, velocity));
+
+        let mut system = EquationSystem::new();
+        system.add_equation(q_eq);
+        system.add_equation(closure_eq);
+        system.add_equation(velocity_eq);
+        let discrete = lower_system(&system, &SchemeRegistry::new(Scheme::Upwind)).unwrap();
+        let channels = ExplicitFaceChannelLiveness::from_discrete_system(&discrete);
+
+        assert_eq!(channels.coupled_stride(), 4);
+        assert_eq!(channels.storage_stride(), 3);
+        assert_eq!(channels.storage_rank_for_coupled(0), Some(0));
+        assert_eq!(channels.storage_rank_for_coupled(1), None);
+        assert_eq!(channels.storage_rank_for_coupled(2), Some(1));
+        assert_eq!(channels.storage_rank_for_coupled(3), Some(2));
+        assert_eq!(
+            channels
+                .stored_components()
+                .iter()
+                .map(|component| component.coupled_rank)
+                .collect::<Vec<_>>(),
+            vec![0, 2, 3]
+        );
     }
 }

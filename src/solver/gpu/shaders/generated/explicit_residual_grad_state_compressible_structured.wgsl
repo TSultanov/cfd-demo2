@@ -32,8 +32,9 @@ struct Constants {
     eos_gm1: f32,
     eos_r: f32,
     eos_dp_drho: f32,
-    eos_p_offset: f32,
+    eos_p_ref: f32,
     eos_theta_ref: f32,
+    eos_rho_ref: f32,
 }
 
 
@@ -84,7 +85,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     rhs_6 += -constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol * state[idx * 23u + 7u];
     rhs_6 += 0.5 * constants.eos_gm1 * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * dot(vec2<f32>(state[idx * 23u + 10u], state[idx * 23u + 11u]), vec2<f32>(state[idx * 23u + 10u], state[idx * 23u + 11u])) * vol * state[idx * 23u + 0u];
     rhs_6 += -constants.eos_dp_drho * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol * state[idx * 23u + 0u];
-    rhs_6 += -constants.eos_p_offset * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
+    rhs_6 += constants.eos_dp_drho * constants.eos_rho_ref * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
+    rhs_6 += -constants.eos_p_ref * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol;
     rhs_7 += state[idx * 23u + 0u] * constants.eos_r * 1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0) * vol * state[idx * 23u + 9u];
     rhs_7 += -(1.0 / select(constants.dt, constants.dtau, constants.dtau > 0.0)) * vol * state[idx * 23u + 8u];
     for (var k = 0u; k < 4u; k++) {
@@ -122,7 +124,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         if (lam_total > 0.000001) {
             lambda_f = lam_d_neigh / lam_total;
         }
-        var phi_0: f32 = fluxes[face_idx * 8u + 0u];
+        var phi_0: f32 = fluxes[face_idx * 4u + 0u];
         if (owner != idx) {
             phi_0 -= phi_0 * 2.0;
         }
@@ -150,12 +152,12 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        var phi_1: f32 = fluxes[face_idx * 8u + 1u];
+        var phi_1: f32 = fluxes[face_idx * 4u + 1u];
         if (owner != idx) {
             phi_1 -= phi_1 * 2.0;
         }
         rhs_1 -= phi_1;
-        var phi_2: f32 = fluxes[face_idx * 8u + 2u];
+        var phi_2: f32 = fluxes[face_idx * 4u + 2u];
         if (owner != idx) {
             phi_2 -= phi_2 * 2.0;
         }
@@ -172,7 +174,7 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
                 }
             }
         }
-        var phi_3: f32 = fluxes[face_idx * 8u + 3u];
+        var phi_3: f32 = fluxes[face_idx * 4u + 3u];
         if (owner != idx) {
             phi_3 -= phi_3 * 2.0;
         }

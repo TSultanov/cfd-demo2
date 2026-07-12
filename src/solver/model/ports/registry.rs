@@ -1802,7 +1802,7 @@ mod tests {
 
         let manifest = eos_uniform_port_manifest();
 
-        assert_eq!(manifest.params.len(), 6);
+        assert_eq!(manifest.params.len(), 7);
 
         let gamma = manifest
             .params
@@ -1832,13 +1832,13 @@ mod tests {
         assert_eq!(dp_drho.unit, expected_dp_drho);
         assert_eq!(dp_drho.wgsl_field, "eos_dp_drho");
 
-        let p_offset = manifest
+        let p_ref = manifest
             .params
             .iter()
-            .find(|p| p.key == "eos.p_offset")
+            .find(|p| p.key == "eos.p_ref")
             .unwrap();
-        assert_eq!(p_offset.unit, si::PRESSURE);
-        assert_eq!(p_offset.wgsl_field, "eos_p_offset");
+        assert_eq!(p_ref.unit, si::PRESSURE);
+        assert_eq!(p_ref.wgsl_field, "eos_p_ref");
 
         let theta_ref = manifest
             .params
@@ -1848,6 +1848,14 @@ mod tests {
         // theta = P/rho has units L²/T² (specific energy)
         assert_eq!(theta_ref.unit, expected_dp_drho);
         assert_eq!(theta_ref.wgsl_field, "eos_theta_ref");
+
+        let rho_ref = manifest
+            .params
+            .iter()
+            .find(|p| p.key == "eos.rho_ref")
+            .unwrap();
+        assert_eq!(rho_ref.unit, si::DENSITY);
+        assert_eq!(rho_ref.wgsl_field, "eos_rho_ref");
     }
 
     #[test]

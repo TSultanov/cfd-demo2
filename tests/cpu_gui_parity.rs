@@ -329,7 +329,15 @@ fn cpu_set_eos_param_routes() {
         CpuBackendConfig::default(),
     )
     .expect("cpu solver");
-    for f in ["eos.gamma", "eos.gm1", "eos.r", "eos.dp_drho", "eos.p_offset", "eos.theta_ref"] {
+    for f in [
+        "eos.gamma",
+        "eos.gm1",
+        "eos.r",
+        "eos.dp_drho",
+        "eos.p_ref",
+        "eos.theta_ref",
+        "eos.rho_ref",
+    ] {
         assert!(s.set_eos_param(f, 1.23), "expected {f} to be a recognized EOS field");
     }
     assert!(!s.set_eos_param("eos.bogus", 0.0), "unknown eos field must not be applied");

@@ -1,6 +1,7 @@
 use crate::solver::cpu::structured::StructuredModelSolver;
 use crate::solver::gpu::structured::{
-    BcComp as StructBc, Edge as StructEdge, StructuredGpuSolver, StructuredGrid,
+    BcComp as StructBc, Edge as StructEdge, StructuredAutonomousStatus, StructuredGpuSolver,
+    StructuredGrid,
 };
 use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_cvt_mesh, generate_delaunay_mesh,
@@ -13,6 +14,7 @@ use crate::solver::model::{
     allmach_thermal_model, compressible_model_with_eos, incompressible_momentum_ale_model,
     incompressible_momentum_model, ModelPreconditionerSpec, ModelSpec,
 };
+use crate::solver::model::eos::{EosRuntimeParams, EosSpec};
 use crate::solver::scheme::Scheme;
 use crate::solver::{
     GpuLowMachPrecondModel, LinearSolverStats, OuterStepStatus, PreconditionerType,
@@ -23,7 +25,8 @@ use crate::ui::{cfd_renderer, fluid::Fluid};
 use eframe::egui;
 use egui_plot::{Plot, PlotPoints, Polygon};
 use nalgebra::{Point2, Vector2};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 
@@ -53,6 +56,26 @@ enum RenderMode {
 enum MeshMode {
     Unstructured,
     Structured2D,
+}
+
+/// Keep a pending moving-mesh request on a time integrator the ALE path can
+/// construct. RK4 is intentionally static-only because its four stages do not
+/// yet advance stage-consistent mesh geometry; BDF2 is the deterministic
+/// implicit fallback already used by every GUI model family.
+///
+/// Returning whether a coercion occurred makes the policy directly testable
+/// without constructing an `eframe` application. Static requests are an exact
+/// no-op, so selecting RK4 for the normal fixed-mesh solver is unaffected.
+fn enforce_moving_mesh_time_scheme(
+    moving_mesh: bool,
+    time_scheme: &mut GpuTimeScheme,
+) -> bool {
+    if moving_mesh && *time_scheme == GpuTimeScheme::RK4 {
+        *time_scheme = GpuTimeScheme::BDF2;
+        true
+    } else {
+        false
+    }
 }
 
 impl Default for MeshMode {
@@ -305,8 +328,316 @@ struct SolverInitOutcome {
 struct VizFieldBuffers {
     buffers: [wgpu::Buffer; 3],
     size_bytes: u64,
-    front_idx: Arc<AtomicUsize>,
-    ready_idx: Arc<AtomicUsize>,
+    range_reducer: cfd_renderer::CfdRangeReducer,
+    mailbox: Arc<VizFrameMailbox>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VizSnapshotSource {
+    Current,
+    AutonomousAccepted,
+}
+
+const VIZ_SLOT_STATE_BITS: u32 = 2;
+const VIZ_SLOT_STATE_MASK: u64 = (1 << VIZ_SLOT_STATE_BITS) - 1;
+const VIZ_MAX_SEQUENCE: u64 = u64::MAX >> VIZ_SLOT_STATE_BITS;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u64)]
+enum VizSlotState {
+    Free = 0,
+    Writing = 1,
+    Ready = 2,
+    Display = 3,
+}
+
+impl VizSlotState {
+    fn from_word(word: u64) -> Self {
+        match word & VIZ_SLOT_STATE_MASK {
+            0 => Self::Free,
+            1 => Self::Writing,
+            2 => Self::Ready,
+            3 => Self::Display,
+            _ => unreachable!("slot state is encoded in two bits"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct VizSlotToken {
+    index: usize,
+    sequence: u64,
+}
+
+impl VizSlotToken {
+    fn word(self, state: VizSlotState) -> u64 {
+        (self.sequence << VIZ_SLOT_STATE_BITS) | state as u64
+    }
+}
+
+/// Lock-free, frame-demanded mailbox between the solver worker and renderer.
+///
+/// A slot's atomic word contains both its state and the frame-request sequence,
+/// so an old observation can never claim or release a recycled slot (the ABA
+/// problem in an index-only front/ready protocol). There is one producer (the
+/// solver worker) and one consumer (the UI/render thread):
+///
+/// `FREE -> WRITING -> READY -> DISPLAY -> FREE`.
+///
+/// Requests are monotonically numbered. The worker samples the newest request
+/// only at an accepted-step boundary, so multiple screen frames during a long
+/// step coalesce, while a fast solver performs at most one visualization copy
+/// per rendered frame. An unconsumed older READY slot may be discarded after a
+/// newer slot is claimed; it was never visible and is therefore safe to free.
+struct VizFrameMailbox {
+    gpu_consumer_enabled: AtomicBool,
+    requested_sequence: AtomicU64,
+    serviced_sequence: AtomicU64,
+    write_cursor: AtomicUsize,
+    slots: [AtomicU64; 3],
+}
+
+impl VizFrameMailbox {
+    fn new() -> Self {
+        let initial_display = VizSlotToken {
+            index: 0,
+            sequence: 0,
+        };
+        Self {
+            gpu_consumer_enabled: AtomicBool::new(false),
+            requested_sequence: AtomicU64::new(0),
+            serviced_sequence: AtomicU64::new(0),
+            write_cursor: AtomicUsize::new(1),
+            slots: [
+                AtomicU64::new(initial_display.word(VizSlotState::Display)),
+                AtomicU64::new(
+                    VizSlotToken {
+                        index: 1,
+                        sequence: 0,
+                    }
+                    .word(VizSlotState::Free),
+                ),
+                AtomicU64::new(
+                    VizSlotToken {
+                        index: 2,
+                        sequence: 0,
+                    }
+                    .word(VizSlotState::Free),
+                ),
+            ],
+        }
+    }
+
+    fn initial_display(&self) -> VizSlotToken {
+        VizSlotToken {
+            index: 0,
+            sequence: 0,
+        }
+    }
+
+    /// Post a screen-frame request. The producer deliberately observes only
+    /// the latest sequence, so this never creates an unbounded work queue.
+    fn request_frame(&self) -> u64 {
+        self.requested_sequence
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |sequence| {
+                (sequence < VIZ_MAX_SEQUENCE).then_some(sequence + 1)
+            })
+            .expect("visualization frame sequence exhausted")
+            + 1
+    }
+
+    fn set_gpu_consumer_enabled(&self, enabled: bool) {
+        self.gpu_consumer_enabled.store(enabled, Ordering::Release);
+    }
+
+    fn gpu_consumer_enabled(&self) -> bool {
+        self.gpu_consumer_enabled.load(Ordering::Acquire)
+    }
+
+    /// True while a requested snapshot has not reached the renderer yet.
+    ///
+    /// The producer publishes READY before advancing `serviced_sequence`, so
+    /// the acquire loads below cannot miss a completed slot after observing
+    /// that sequence. The UI uses this only to schedule another screen tick;
+    /// it never participates in slot ownership.
+    fn presentation_refresh_pending(&self) -> bool {
+        if self.requested_sequence.load(Ordering::Acquire)
+            != self.serviced_sequence.load(Ordering::Acquire)
+        {
+            return true;
+        }
+        self.slots.iter().any(|slot| {
+            matches!(
+                VizSlotState::from_word(slot.load(Ordering::Acquire)),
+                VizSlotState::Writing | VizSlotState::Ready
+            )
+        })
+    }
+
+    /// Claim a free target for the newest outstanding frame request.
+    /// Called by the single solver-worker producer at accepted-step boundaries.
+    fn try_begin_write(&self) -> Option<VizSlotToken> {
+        let requested = self.requested_sequence.load(Ordering::Acquire);
+        if requested == self.serviced_sequence.load(Ordering::Acquire) {
+            return None;
+        }
+
+        let n = self.slots.len();
+        let start = self.write_cursor.load(Ordering::Relaxed) % n;
+        for offset in 0..n {
+            let index = (start + offset) % n;
+            let observed = self.slots[index].load(Ordering::Acquire);
+            if VizSlotState::from_word(observed) != VizSlotState::Free {
+                continue;
+            }
+            let token = VizSlotToken {
+                index,
+                sequence: requested,
+            };
+            if self.slots[index]
+                .compare_exchange(
+                    observed,
+                    token.word(VizSlotState::Writing),
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok()
+            {
+                self.write_cursor.store((index + 1) % n, Ordering::Relaxed);
+                return Some(token);
+            }
+        }
+        None
+    }
+
+    /// Publish a copy only after its queue copy/write has been enqueued. A
+    /// renderer that acquires READY therefore submits its draw after the copy
+    /// on the same wgpu queue (including `Queue::write_buffer` CPU bridges).
+    fn finish_write(&self, token: VizSlotToken) -> bool {
+        if self.slots[token.index]
+            .compare_exchange(
+                token.word(VizSlotState::Writing),
+                token.word(VizSlotState::Ready),
+                Ordering::Release,
+                Ordering::Acquire,
+            )
+            .is_err()
+        {
+            return false;
+        }
+        self.serviced_sequence
+            .store(token.sequence, Ordering::Release);
+        true
+    }
+
+    /// Return an unpublished producer slot to the pool after a snapshot copy
+    /// failed before READY publication. The outstanding request deliberately
+    /// remains unserviced so a later accepted boundary can retry it.
+    fn cancel_write(&self, token: VizSlotToken) -> bool {
+        self.slots[token.index]
+            .compare_exchange(
+                token.word(VizSlotState::Writing),
+                token.word(VizSlotState::Free),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    /// Claim the newest completed snapshot. The exact generation participates
+    /// in the CAS, so a stale READY observation cannot claim a recycled slot.
+    fn try_claim_latest_ready(&self) -> Option<VizSlotToken> {
+        loop {
+            let mut newest: Option<(VizSlotToken, u64)> = None;
+            for (index, slot) in self.slots.iter().enumerate() {
+                let word = slot.load(Ordering::Acquire);
+                if VizSlotState::from_word(word) != VizSlotState::Ready {
+                    continue;
+                }
+                let token = VizSlotToken {
+                    index,
+                    sequence: word >> VIZ_SLOT_STATE_BITS,
+                };
+                if newest
+                    .as_ref()
+                    .map_or(true, |(current, _)| token.sequence > current.sequence)
+                {
+                    newest = Some((token, word));
+                }
+            }
+
+            let (token, observed) = newest?;
+            if self.slots[token.index]
+                .compare_exchange(
+                    observed,
+                    token.word(VizSlotState::Display),
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_err()
+            {
+                continue;
+            }
+
+            // Coalesce completed snapshots that the screen never displayed.
+            // A concurrently published *newer* snapshot is retained for the
+            // next frame; only generations older than this display are freed.
+            for (index, slot) in self.slots.iter().enumerate() {
+                if index == token.index {
+                    continue;
+                }
+                let word = slot.load(Ordering::Acquire);
+                let sequence = word >> VIZ_SLOT_STATE_BITS;
+                if VizSlotState::from_word(word) == VizSlotState::Ready && sequence < token.sequence
+                {
+                    let _ = slot.compare_exchange(
+                        word,
+                        VizSlotToken { index, sequence }.word(VizSlotState::Free),
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    );
+                }
+            }
+            return Some(token);
+        }
+    }
+
+    /// Release the previous display only after the renderer has rebound to the
+    /// replacement. Exact-token comparison makes stale releases harmless.
+    fn release_display(&self, token: VizSlotToken) -> bool {
+        self.slots[token.index]
+            .compare_exchange(
+                token.word(VizSlotState::Display),
+                token.word(VizSlotState::Free),
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_ok()
+    }
+
+    #[cfg(test)]
+    fn state(&self, index: usize) -> (u64, VizSlotState) {
+        let word = self.slots[index].load(Ordering::Acquire);
+        (word >> VIZ_SLOT_STATE_BITS, VizSlotState::from_word(word))
+    }
+}
+
+/// Activate Direct presentation and post its cold-start snapshot exactly once.
+///
+/// The false -> true edge is atomic. This matters because a render callback can
+/// still be completing while the next UI update changes presentation mode: a
+/// late callback may post one harmless coalesced request, but it must never
+/// resurrect the autonomous Direct consumer after Plot disabled it.
+fn activate_direct_viz(mailbox: &VizFrameMailbox) -> bool {
+    if mailbox
+        .gpu_consumer_enabled
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return false;
+    }
+    mailbox.request_frame();
+    true
 }
 
 struct SolverInitResponse {
@@ -317,6 +648,8 @@ struct SolverInitResponse {
 // Cached GPU solver stats for UI display (avoids lock contention)
 #[derive(Default, Clone)]
 struct CachedGpuStats {
+    /// Completion-fenced simulation time. GPU submission may be ahead of this.
+    sim_time: f64,
     dt: f32,
     linear_solves: u32,
     linear_last: LinearSolverStats,
@@ -394,9 +727,19 @@ impl CompletedStepTiming {
         completion_fenced: bool,
         now: std::time::Instant,
     ) -> CompletedStepSample {
-        self.window_steps = self.window_steps.saturating_add(1);
-        if dt.is_finite() && dt > 0.0 {
-            self.window_sim_time += dt as f64;
+        self.record_batch_at(1, f64::from(dt), completion_fenced, now)
+    }
+
+    fn record_batch_at(
+        &mut self,
+        steps: u64,
+        simulated_seconds: f64,
+        completion_fenced: bool,
+        now: std::time::Instant,
+    ) -> CompletedStepSample {
+        self.window_steps = self.window_steps.saturating_add(steps);
+        if simulated_seconds.is_finite() && simulated_seconds > 0.0 {
+            self.window_sim_time += simulated_seconds;
         }
         if completion_fenced {
             if self.has_completion_anchor {
@@ -420,6 +763,471 @@ impl CompletedStepTiming {
             self.window_sim_time = 0.0;
         }
         self.last
+    }
+}
+
+const AUTONOMOUS_MAX_IN_FLIGHT: usize = 2;
+const AUTONOMOUS_TARGET_BATCH_TIME: std::time::Duration = std::time::Duration::from_millis(3);
+const AUTONOMOUS_MAX_BATCH_STEPS: u32 = 4096;
+
+/// Host-side state of the bounded autonomous GPU producer.
+///
+/// `Pausing` is deliberately distinct from `Paused`: no more work is submitted,
+/// but the worker continues nonblocking device polls until the (at most two)
+/// already-submitted batches reach their completion callbacks. Only then may a
+/// `Running(false)` acknowledgement be published.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutonomousRunPhase {
+    Paused,
+    Running,
+    Pausing,
+}
+
+/// Whether a backend can append a new batch as soon as one FIFO credit retires.
+/// A three-phase backend remains continuously refillable when every ticket is
+/// a whole history-ring cycle: its submitted and reconciled buffer phase are
+/// then identical at every healthy batch boundary. A rejected prefix halts the
+/// already-queued tail before the scheduler can refill it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutonomousRefillPolicy {
+    Continuous,
+    ContinuousPhaseCycle3,
+    DrainWindow,
+}
+
+/// Structured autonomous marching is a presentation optimization, never a
+/// distinct numerical policy. If the runtime EOS is outside the certified
+/// device audit, both Direct (`presentation_ready=true`) and Plot (`false`)
+/// return `None` and therefore use the same ordinary `structured_step` CFL
+/// route.
+fn structured_autonomous_refill_policy(
+    presentation_ready: bool,
+    adaptive_dt: bool,
+    supports_fixed: bool,
+    supports_adaptive: bool,
+) -> Option<AutonomousRefillPolicy> {
+    (presentation_ready
+        && if adaptive_dt {
+            supports_adaptive
+        } else {
+            supports_fixed
+        })
+    .then_some(AutonomousRefillPolicy::Continuous)
+}
+
+impl AutonomousRefillPolicy {
+    fn is_continuous(self) -> bool {
+        matches!(self, Self::Continuous | Self::ContinuousPhaseCycle3)
+    }
+
+    fn normalize_steps(self, steps: u32) -> u32 {
+        if self != Self::ContinuousPhaseCycle3 {
+            return steps.clamp(1, AUTONOMOUS_MAX_BATCH_STEPS);
+        }
+        // 4095 is the largest whole three-buffer cycle inside the global cap.
+        steps
+            .max(1)
+            .div_ceil(3)
+            .saturating_mul(3)
+            .min(AUTONOMOUS_MAX_BATCH_STEPS - AUTONOMOUS_MAX_BATCH_STEPS % 3)
+            .max(3)
+    }
+}
+
+/// A slot reserved before backend submission. The exact generation and serial
+/// travel through the completion callback, so replacing a solver or changing
+/// parameters cannot turn an old callback into progress for a new run.
+#[derive(Debug, Clone, Copy)]
+struct AutonomousBatchTicket {
+    backend_epoch: u64,
+    generation: u64,
+    serial: u64,
+    requested_steps: u32,
+    submitted_at: std::time::Instant,
+}
+
+/// Backend-independent, completion-fenced result of one autonomous batch.
+///
+/// Backends populate this from their tiny GPU control/status block, never by
+/// copying the cell state. `accepted_steps` may be smaller than the ticket's
+/// requested count when a health kernel freezes/rolls back an invalid step.
+#[derive(Debug, Clone, Copy)]
+struct AutonomousBatchCompletion {
+    ticket: AutonomousBatchTicket,
+    accepted_steps: u32,
+    completed_time: f64,
+    last_dt: f32,
+    next_dt: f32,
+    halted: bool,
+    invalid_count: u32,
+    completed_at: std::time::Instant,
+    backend_status: Option<AutonomousBackendStatus>,
+}
+
+struct AutonomousCallbackMessage {
+    ticket: AutonomousBatchTicket,
+    result: Result<AutonomousBackendStatus, String>,
+    completed_at: std::time::Instant,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum AutonomousBackendStatus {
+    Structured(StructuredAutonomousStatus),
+    Unstructured(crate::solver::gpu::unified_solver::AdaptiveExplicitGpuBatchCompletion),
+}
+
+impl AutonomousBatchCompletion {
+    fn is_healthy(self) -> bool {
+        !self.halted
+            && self.invalid_count == 0
+            && self.accepted_steps == self.ticket.requested_steps
+    }
+}
+
+/// Duration feedback for batch sizing. The target is the middle of the 2--4 ms
+/// latency envelope. An EWMA filters callback/poll jitter and a 2x slew limit
+/// prevents one delayed UI tick from making the next command buffer enormous.
+#[derive(Debug, Clone)]
+struct AutonomousBatchController {
+    steps: u32,
+    seconds_per_step_ewma: Option<f64>,
+}
+
+impl Default for AutonomousBatchController {
+    fn default() -> Self {
+        Self {
+            steps: 1,
+            seconds_per_step_ewma: None,
+        }
+    }
+}
+
+impl AutonomousBatchController {
+    fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    fn steps(&self) -> u32 {
+        self.steps
+    }
+
+    fn observe(&mut self, completed_steps: u32, elapsed: std::time::Duration) {
+        if completed_steps == 0 || elapsed.is_zero() {
+            return;
+        }
+        let sample = elapsed.as_secs_f64() / f64::from(completed_steps);
+        if !sample.is_finite() || sample <= 0.0 {
+            return;
+        }
+        let filtered = self
+            .seconds_per_step_ewma
+            .map_or(sample, |old| old.mul_add(0.75, sample * 0.25));
+        self.seconds_per_step_ewma = Some(filtered);
+
+        let desired = (AUTONOMOUS_TARGET_BATCH_TIME.as_secs_f64() / filtered)
+            .round()
+            .clamp(1.0, f64::from(AUTONOMOUS_MAX_BATCH_STEPS)) as u32;
+        let lower = (self.steps / 2).max(1);
+        let upper = self.steps.saturating_mul(2).min(AUTONOMOUS_MAX_BATCH_STEPS);
+        self.steps = desired.clamp(lower, upper);
+    }
+}
+
+#[derive(Debug)]
+struct FixedCompletionBatch {
+    slots: [Option<AutonomousBatchCompletion>; AUTONOMOUS_MAX_IN_FLIGHT],
+    len: usize,
+}
+
+impl Default for FixedCompletionBatch {
+    fn default() -> Self {
+        Self {
+            slots: [None; AUTONOMOUS_MAX_IN_FLIGHT],
+            len: 0,
+        }
+    }
+}
+
+impl FixedCompletionBatch {
+    fn push(&mut self, completion: AutonomousBatchCompletion) {
+        assert!(
+            self.len < AUTONOMOUS_MAX_IN_FLIGHT,
+            "autonomous completion drain exceeded the two-credit bound"
+        );
+        self.slots[self.len] = Some(completion);
+        self.len += 1;
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn get(&self, index: usize) -> Option<&AutonomousBatchCompletion> {
+        (index < self.len).then(|| self.slots[index].as_ref()).flatten()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &AutonomousBatchCompletion> {
+        self.slots[..self.len].iter().flatten()
+    }
+}
+
+#[derive(Debug, Default)]
+struct AutonomousDrain {
+    /// Every physically retired FIFO completion, including stale generations;
+    /// same-backend stale entries still need host phase/time reconciliation.
+    retired: FixedCompletionBatch,
+    completed: FixedCompletionBatch,
+    became_paused: bool,
+}
+
+/// Two-credit FIFO scheduler shared by structured and unstructured GPU paths.
+/// It contains no solver-specific assumptions: a backend may use it only after
+/// declaring that every encoded accepted state has GPU health checking and
+/// rollback/freeze semantics.
+struct AutonomousBatchScheduler {
+    backend_epoch: u64,
+    generation: u64,
+    next_serial: u64,
+    phase: AutonomousRunPhase,
+    refill_policy: AutonomousRefillPolicy,
+    window_slots_remaining: usize,
+    controller: AutonomousBatchController,
+    in_flight: VecDeque<AutonomousBatchTicket>,
+    pending_completions: Vec<AutonomousBatchCompletion>,
+    last_completion_at: Option<std::time::Instant>,
+}
+
+impl Default for AutonomousBatchScheduler {
+    fn default() -> Self {
+        Self {
+            backend_epoch: 0,
+            generation: 0,
+            next_serial: 0,
+            phase: AutonomousRunPhase::Paused,
+            refill_policy: AutonomousRefillPolicy::Continuous,
+            window_slots_remaining: AUTONOMOUS_MAX_IN_FLIGHT,
+            controller: AutonomousBatchController::default(),
+            in_flight: VecDeque::with_capacity(AUTONOMOUS_MAX_IN_FLIGHT),
+            pending_completions: Vec::with_capacity(AUTONOMOUS_MAX_IN_FLIGHT),
+            last_completion_at: None,
+        }
+    }
+}
+
+impl AutonomousBatchScheduler {
+    fn begin_run(&mut self, refill_policy: AutonomousRefillPolicy) {
+        self.generation = self.generation.wrapping_add(1);
+        self.phase = AutonomousRunPhase::Running;
+        self.refill_policy = refill_policy;
+        self.window_slots_remaining = if self.in_flight.is_empty() {
+            AUTONOMOUS_MAX_IN_FLIGHT
+        } else {
+            0
+        };
+        self.controller.reset();
+        self.last_completion_at = None;
+    }
+
+    fn replace_backend(&mut self) {
+        self.backend_epoch = self.backend_epoch.wrapping_add(1);
+        self.invalidate(false);
+    }
+
+    /// Start a new callback generation without forgetting physical queue
+    /// occupancy. Stale tickets retain their credits until their callbacks are
+    /// observed, which keeps the global in-flight bound true across updates.
+    fn invalidate(&mut self, continue_running: bool) {
+        self.generation = self.generation.wrapping_add(1);
+        self.phase = if continue_running {
+            AutonomousRunPhase::Running
+        } else if self.in_flight.is_empty() {
+            AutonomousRunPhase::Paused
+        } else {
+            AutonomousRunPhase::Pausing
+        };
+        self.window_slots_remaining = if self.in_flight.is_empty() {
+            AUTONOMOUS_MAX_IN_FLIGHT
+        } else {
+            0
+        };
+        self.controller.reset();
+        self.last_completion_at = None;
+    }
+
+    /// Returns `true` when already fully drained.
+    fn request_pause(&mut self) -> bool {
+        self.phase = if self.in_flight.is_empty() {
+            AutonomousRunPhase::Paused
+        } else {
+            AutonomousRunPhase::Pausing
+        };
+        self.phase == AutonomousRunPhase::Paused
+    }
+
+    fn abort(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+        self.phase = AutonomousRunPhase::Paused;
+        self.in_flight.clear();
+        self.pending_completions.clear();
+        self.window_slots_remaining = AUTONOMOUS_MAX_IN_FLIGHT;
+        self.last_completion_at = None;
+    }
+
+    fn is_active(&self) -> bool {
+        self.phase != AutonomousRunPhase::Paused || !self.in_flight.is_empty()
+    }
+
+    fn can_submit(&self) -> bool {
+        self.phase == AutonomousRunPhase::Running
+            && self.in_flight.len() < AUTONOMOUS_MAX_IN_FLIGHT
+            && (self.refill_policy.is_continuous() || self.window_slots_remaining > 0)
+    }
+
+    fn reserve(&mut self, now: std::time::Instant) -> Option<AutonomousBatchTicket> {
+        if !self.can_submit() {
+            return None;
+        }
+        let ticket = AutonomousBatchTicket {
+            backend_epoch: self.backend_epoch,
+            generation: self.generation,
+            serial: self.next_serial,
+            requested_steps: self.refill_policy.normalize_steps(self.controller.steps()),
+            submitted_at: now,
+        };
+        self.next_serial = self.next_serial.wrapping_add(1);
+        self.in_flight.push_back(ticket);
+        if self.refill_policy == AutonomousRefillPolicy::DrainWindow {
+            self.window_slots_remaining = self.window_slots_remaining.saturating_sub(1);
+        }
+        Some(ticket)
+    }
+
+    fn cancel_reservation(&mut self, ticket: AutonomousBatchTicket) {
+        if let Some(index) = self.in_flight.iter().position(|queued| {
+            queued.generation == ticket.generation && queued.serial == ticket.serial
+        }) {
+            self.in_flight.remove(index);
+            if self.refill_policy == AutonomousRefillPolicy::DrainWindow
+                && ticket.generation == self.generation
+            {
+                self.window_slots_remaining =
+                    (self.window_slots_remaining + 1).min(AUTONOMOUS_MAX_IN_FLIGHT);
+            }
+        }
+        if self.phase == AutonomousRunPhase::Pausing && self.in_flight.is_empty() {
+            self.phase = AutonomousRunPhase::Paused;
+        }
+    }
+
+    /// Release a batch whose completion status could not be decoded.  The run
+    /// generation is invalidated by the caller first, so any already-arrived
+    /// tail statuses are tombstones: retire them in FIFO order without ever
+    /// exposing their progress. This prevents an out-of-order tail callback
+    /// from being stranded forever behind the failed front ticket.
+    fn discard_failed_completion(&mut self, ticket: AutonomousBatchTicket) {
+        self.cancel_reservation(ticket);
+        loop {
+            let Some(front) = self.in_flight.front().copied() else {
+                break;
+            };
+            let Some(index) = self.pending_completions.iter().position(|pending| {
+                pending.ticket.backend_epoch == front.backend_epoch
+                    && pending.ticket.generation == front.generation
+                    && pending.ticket.serial == front.serial
+            }) else {
+                break;
+            };
+            self.pending_completions.swap_remove(index);
+            self.in_flight.pop_front();
+        }
+        if self.phase == AutonomousRunPhase::Pausing && self.in_flight.is_empty() {
+            self.phase = AutonomousRunPhase::Paused;
+        }
+    }
+
+    /// A retired device may be lost independently of the replacement backend.
+    /// Its callbacks can no longer arrive, so release only stale-epoch credits;
+    /// current-backend work and poison state are untouched.
+    fn discard_retired_epochs(&mut self) {
+        let epoch = self.backend_epoch;
+        self.in_flight
+            .retain(|ticket| ticket.backend_epoch == epoch);
+        self.pending_completions
+            .retain(|pending| pending.ticket.backend_epoch == epoch);
+        if self.phase == AutonomousRunPhase::Pausing && self.in_flight.is_empty() {
+            self.phase = AutonomousRunPhase::Paused;
+        }
+    }
+
+    /// Accept callback delivery in any host order, then retire it strictly in
+    /// GPU FIFO order. Queue callbacks are normally ordered; retaining this
+    /// small reorder buffer makes duplicate/adversarial callbacks harmless and
+    /// keeps pause acknowledgement deterministic.
+    fn complete(&mut self, completion: AutonomousBatchCompletion) -> AutonomousDrain {
+        let known = self.in_flight.iter().any(|queued| {
+            queued.generation == completion.ticket.generation
+                && queued.serial == completion.ticket.serial
+        });
+        let duplicate = self.pending_completions.iter().any(|pending| {
+            pending.ticket.generation == completion.ticket.generation
+                && pending.ticket.serial == completion.ticket.serial
+        });
+        if !known || duplicate {
+            return AutonomousDrain::default();
+        }
+        self.pending_completions.push(completion);
+
+        let mut drain = AutonomousDrain::default();
+        loop {
+            let Some(front) = self.in_flight.front().copied() else {
+                break;
+            };
+            let Some(index) = self.pending_completions.iter().position(|pending| {
+                pending.ticket.generation == front.generation
+                    && pending.ticket.serial == front.serial
+            }) else {
+                break;
+            };
+            let completed = self.pending_completions.swap_remove(index);
+            self.in_flight.pop_front();
+            drain.retired.push(completed);
+
+            // A callback from an invalidated generation releases its physical
+            // credit but cannot tune or publish progress for the current run.
+            if completed.ticket.generation != self.generation {
+                continue;
+            }
+
+            let interval_start = self
+                .last_completion_at
+                .unwrap_or(completed.ticket.submitted_at);
+            let elapsed = completed
+                .completed_at
+                .saturating_duration_since(interval_start);
+            self.last_completion_at = Some(completed.completed_at);
+            self.controller.observe(completed.accepted_steps, elapsed);
+            if !completed.is_healthy() {
+                self.phase = AutonomousRunPhase::Pausing;
+            }
+            drain.completed.push(completed);
+        }
+
+        if self.in_flight.is_empty()
+            && self.phase == AutonomousRunPhase::Running
+            && self.refill_policy == AutonomousRefillPolicy::DrainWindow
+        {
+            self.window_slots_remaining = AUTONOMOUS_MAX_IN_FLIGHT;
+        }
+
+        if self.phase == AutonomousRunPhase::Pausing && self.in_flight.is_empty() {
+            self.phase = AutonomousRunPhase::Paused;
+            drain.became_paused = true;
+        }
+        drain
     }
 }
 
@@ -491,6 +1299,23 @@ impl StructuredCpuBridge {
         self.queue
             .write_buffer(dst, 0, bytemuck::cast_slice(&packed));
     }
+
+    fn upload_state_to_buffer(&self, dst: &wgpu::Buffer) -> Result<(), String> {
+        if dst.size() < self.size_bytes {
+            return Err(format!(
+                "structured CPU visualization destination is {} bytes, needs {}",
+                dst.size(),
+                self.size_bytes
+            ));
+        }
+        if !dst.usage().contains(wgpu::BufferUsages::COPY_DST) {
+            return Err(
+                "structured CPU visualization destination lacks COPY_DST usage".to_string(),
+            );
+        }
+        self.copy_state_to_buffer(dst);
+        Ok(())
+    }
 }
 
 impl SolverMode {
@@ -504,6 +1329,42 @@ impl SolverMode {
             SolverMode::Structured(_) | SolverMode::StructuredCpu(_) => {
                 panic!("driver() called on a Structured SolverMode")
             }
+        }
+    }
+
+    fn install_viz_frame_targets(
+        &mut self,
+        destinations: &[wgpu::Buffer; 3],
+    ) -> Result<(), String> {
+        match self {
+            SolverMode::Static(driver) => {
+                driver.install_autonomous_frame_copy_targets(destinations)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn encode_viz_snapshot_to_buffer(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        target_slot: usize,
+        dst: &wgpu::Buffer,
+        source: VizSnapshotSource,
+    ) -> Result<(), String> {
+        if source == VizSnapshotSource::AutonomousAccepted {
+            if let SolverMode::Static(driver) = self {
+                return driver.encode_autonomous_accepted_state_copy(encoder, target_slot);
+            }
+        }
+        match self {
+            SolverMode::Structured(solver) => {
+                solver.encode_state_copy_to_buffer(encoder, dst)
+            }
+            SolverMode::StructuredCpu(bridge) => bridge.upload_state_to_buffer(dst),
+            _ => self
+                .driver()
+                .solver()
+                .encode_or_upload_state_to_buffer(encoder, dst),
         }
     }
 
@@ -545,6 +1406,14 @@ impl SolverMode {
         }
     }
 
+    fn state_size_bytes(&self) -> u64 {
+        match self {
+            SolverMode::Structured(s) => s.state_size_bytes(),
+            SolverMode::StructuredCpu(s) => s.size_bytes,
+            _ => self.driver().solver().state_size_bytes(),
+        }
+    }
+
     /// Same-device copy of packed `state` into a renderer viz buffer.
     fn copy_state_to_buffer(&self, dst: &wgpu::Buffer) {
         match self {
@@ -572,10 +1441,14 @@ impl SolverMode {
     }
 
     fn sim_time(&self) -> f32 {
+        self.sim_time_f64() as f32
+    }
+
+    fn sim_time_f64(&self) -> f64 {
         match self {
-            SolverMode::Structured(s) => s.time() as f32,
-            SolverMode::StructuredCpu(s) => s.solver.time() as f32,
-            _ => self.driver().solver().time(),
+            SolverMode::Structured(s) => s.time(),
+            SolverMode::StructuredCpu(s) => s.solver.time(),
+            _ => f64::from(self.driver().solver().time()),
         }
     }
 
@@ -616,6 +1489,7 @@ impl SolverMode {
                     );
                 }
                 if s.model_id() == "compressible_structured" {
+                    apply_structured_compressible_runtime(s, params);
                     let stride = s.state_layout().stride() as usize;
                     setup_structured_bcs(
                         s,
@@ -654,6 +1528,7 @@ impl SolverMode {
                     );
                 }
                 if s.solver.model_id() == "compressible_structured" {
+                    apply_structured_compressible_runtime(&mut s.solver, params);
                     let stride = s.solver.state_layout().stride() as usize;
                     setup_structured_bcs(
                         &mut s.solver,
@@ -667,6 +1542,65 @@ impl SolverMode {
             _ => self.driver_mut().apply_params(params),
         }
     }
+}
+
+impl VizFieldBuffers {
+    /// Capture one sequence-tagged visualization snapshot. Queue ordering is
+    /// field copy -> range reduction/readback copy -> READY publication.
+    fn capture_snapshot(
+        &self,
+        mode: &SolverMode,
+        write: VizSlotToken,
+        source: VizSnapshotSource,
+    ) -> Result<(), String> {
+        let field_buffer = &self.buffers[write.index];
+        let bytes_per_cell = u64::from(self.range_reducer.stride()) * 4;
+        let copied_bytes = mode.state_size_bytes().min(field_buffer.size());
+        let cell_count = if bytes_per_cell == 0 {
+            0
+        } else {
+            (copied_bytes / bytes_per_cell) as usize
+        };
+        let submitted = self.range_reducer.submit_snapshot(
+            write.index,
+            write.sequence,
+            cell_count,
+            |encoder| {
+                mode.encode_viz_snapshot_to_buffer(
+                    encoder,
+                    write.index,
+                    field_buffer,
+                    source,
+                )
+            },
+        );
+        if let Err(error) = submitted {
+            let cancelled = self.mailbox.cancel_write(write);
+            debug_assert!(
+                cancelled,
+                "failed visualization copy lost exclusive WRITING ownership"
+            );
+            return Err(error);
+        }
+        if self.mailbox.finish_write(write) {
+            Ok(())
+        } else {
+            let _ = self.mailbox.cancel_write(write);
+            Err("visualization producer lost exclusive WRITING ownership".to_string())
+        }
+    }
+}
+
+fn service_pending_viz_snapshot(
+    mode: &SolverMode,
+    viz: &VizFieldBuffers,
+    source: VizSnapshotSource,
+) -> Result<bool, String> {
+    let Some(write) = viz.mailbox.try_begin_write() else {
+        return Ok(false);
+    };
+    viz.capture_snapshot(mode, write, source)?;
+    Ok(true)
 }
 
 enum SolverWorkerCommand {
@@ -1076,7 +2010,7 @@ pub struct CFDApp {
     target_format: wgpu::TextureFormat,
     cfd_renderer: Option<Arc<Mutex<cfd_renderer::CfdRenderResources>>>,
     viz_field: Option<VizFieldBuffers>,
-    viz_field_front: usize,
+    viz_display: VizSlotToken,
     /// A moving-mesh refresh arrived and `cached_cells` changed since the GPU
     /// renderer's vertex buffers were last re-tessellated. Multiple solver
     /// steps may land between frames; only the latest matters, so this is a
@@ -1088,6 +2022,9 @@ struct CfdRenderCallback {
     renderer: Arc<Mutex<cfd_renderer::CfdRenderResources>>,
     uniforms: cfd_renderer::CfdUniforms,
     draw_lines: bool,
+    /// Present only while marching. Posting from `prepare` ties solver-state
+    /// copies to actual rendered frames rather than UI-loop guesses.
+    viz_frame_request: Option<Arc<VizFrameMailbox>>,
 }
 
 impl eframe::egui_wgpu::CallbackTrait for CfdRenderCallback {
@@ -1099,6 +2036,15 @@ impl eframe::egui_wgpu::CallbackTrait for CfdRenderCallback {
         _encoder: &mut wgpu::CommandEncoder,
         resources: &mut eframe::egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
+        if let Some(mailbox) = &self.viz_frame_request {
+            // `request_frame` intentionally does not change presentation
+            // ownership. If this callback races a Direct -> Plot switch, its
+            // stale request may be serviced later, but it cannot turn the
+            // autonomous Direct producer back on behind Plot's back.
+            if mailbox.gpu_consumer_enabled() {
+                mailbox.request_frame();
+            }
+        }
         let renderer = self.renderer.lock().unwrap();
         renderer.update_uniforms(queue, &self.uniforms);
         resources.insert(renderer.clone());
@@ -1249,7 +2195,10 @@ impl CFDApp {
             target_format,
             cfd_renderer: None,
             viz_field: None,
-            viz_field_front: 0,
+            viz_display: VizSlotToken {
+                index: 0,
+                sequence: 0,
+            },
             pending_mesh_upload: false,
         };
         app.apply_model_defaults();
@@ -1586,6 +2535,11 @@ impl CFDApp {
     }
 
     fn make_init_request(&mut self) -> SolverInitRequest {
+        // Defense in depth for programmatic/request-order paths: the checkbox
+        // handler below normally performs this coercion immediately, but an
+        // initialization request must never carry the static-only RK4 scheme
+        // into an ALE model even if UI events were delivered in another order.
+        enforce_moving_mesh_time_scheme(self.enable_moving_mesh, &mut self.time_scheme);
         let generation = self.next_init_generation;
         self.next_init_generation = self.next_init_generation.wrapping_add(1);
         SolverInitRequest {
@@ -2228,7 +3182,10 @@ impl CFDApp {
                         self.cached_cells.clear();
                         self.cfd_renderer = None;
                         self.viz_field = None;
-                        self.viz_field_front = 0;
+                        self.viz_display = VizSlotToken {
+                            index: 0,
+                            sequence: 0,
+                        };
                         self.cached_u.clear();
                         self.cached_p.clear();
                         self.snapshot_seq = 0;
@@ -2307,12 +3264,42 @@ impl CFDApp {
             self.cfd_renderer.as_ref(),
             self.wgpu_device.as_ref(),
         ) {
-            let ready = viz.ready_idx.load(Ordering::Acquire) % viz.buffers.len();
-            if ready != self.viz_field_front {
+            // Mapping callbacks are driven opportunistically and never wait for
+            // the GPU. The colormap itself reads the range buffer directly;
+            // this poll serves only the tiny CPU legend labels.
+            let _ = viz.range_reducer.poll_nonblocking();
+            if let Some(next_display) = viz.mailbox.try_claim_latest_ready() {
                 let mut renderer = renderer.lock().unwrap();
-                renderer.update_bind_group(device, &viz.buffers[ready]);
-                self.viz_field_front = ready;
-                viz.front_idx.store(ready, Ordering::Release);
+                if renderer.update_field_snapshot(
+                    device,
+                    &viz.buffers[next_display.index],
+                    viz.range_reducer.range_buffer(next_display.index),
+                    next_display.sequence,
+                ) {
+                    let previous_display = std::mem::replace(&mut self.viz_display, next_display);
+                    let released = viz.mailbox.release_display(previous_display);
+                    debug_assert!(
+                        released,
+                        "renderer released a stale visualization display token"
+                    );
+                } else {
+                    // Defensive only: mailbox generations are monotonic. Keep
+                    // the current display owned if a stale token ever arrives.
+                    let released = viz.mailbox.release_display(next_display);
+                    debug_assert!(released);
+                }
+            }
+
+            if let Some(ranges) = viz
+                .range_reducer
+                .take_readback_for_sequence(self.viz_display.sequence)
+            {
+                let mut renderer = renderer.lock().unwrap();
+                let updated = renderer.update_legend_ranges(ranges);
+                debug_assert!(
+                    updated,
+                    "range readback sequence did not match the displayed snapshot"
+                );
             }
         }
 
@@ -2389,11 +3376,13 @@ impl CFDApp {
 
         self.cfd_renderer = renderer.map(|r| Arc::new(Mutex::new(r)));
         self.viz_field = viz_field.clone();
-        self.viz_field_front = 0;
-        if let Some(viz) = self.viz_field.as_ref() {
-            viz.front_idx.store(0, Ordering::Release);
-            viz.ready_idx.store(0, Ordering::Release);
-        }
+        self.viz_display = self.viz_field.as_ref().map_or(
+            VizSlotToken {
+                index: 0,
+                sequence: 0,
+            },
+            |viz| viz.mailbox.initial_display(),
+        );
         self.last_init_trace_events = trace_init_events;
 
         self.cached_gpu_stats = CachedGpuStats::default();
@@ -2426,7 +3415,7 @@ impl CFDApp {
         // WITH its seeds and wraps a `MovingMeshDriver` around the incompressible
         // ALE model. Both yield the same downstream tuple, so the renderer / viz /
         // return tail below is shared.
-        let (mode, mesh, cached_u, cached_p, mut model_caps) =
+        let (mut mode, mesh, cached_u, cached_p, mut model_caps) =
             if request.mesh_mode == MeshMode::Structured2D {
                 CFDApp::build_structured_init(&request, &mut trace_init_events)?
             } else if request.enable_moving_mesh {
@@ -2489,6 +3478,8 @@ impl CFDApp {
                 usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             });
+            let viz_buffers = [viz_buffer, viz_buffer_1, viz_buffer_2];
+            mode.install_viz_frame_targets(&viz_buffers)?;
             if state_size_bytes > 0 {
                 let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("cfd_viz:init_copy_state"),
@@ -2496,26 +3487,43 @@ impl CFDApp {
                 encoder.copy_buffer_to_buffer(
                     mode.state_buffer(),
                     0,
-                    &viz_buffer,
+                    &viz_buffers[0],
                     0,
                     state_size_bytes,
                 );
                 encoder.copy_buffer_to_buffer(
                     mode.state_buffer(),
                     0,
-                    &viz_buffer_1,
+                    &viz_buffers[1],
                     0,
                     state_size_bytes,
                 );
                 encoder.copy_buffer_to_buffer(
                     mode.state_buffer(),
                     0,
-                    &viz_buffer_2,
+                    &viz_buffers[2],
                     0,
                     state_size_bytes,
                 );
                 queue.submit(Some(encoder.finish()));
             }
+
+            let range_reducer = cfd_renderer::CfdRangeReducer::new(
+                device,
+                queue,
+                &viz_buffers,
+                cfd_renderer::CfdFieldLayout {
+                    stride: model_caps.plot_stride,
+                    u_offset: model_caps.plot_u_offset,
+                    p_offset: model_caps.plot_p_offset,
+                    has_u: model_caps.plot_has_u,
+                    has_p: model_caps.plot_has_p,
+                },
+            );
+            // Initialize the range metadata for the already-bound slot zero.
+            // The state copy above, this reduction, and the first render are
+            // ordered on the same queue; no host wait is needed.
+            range_reducer.submit(0, 0, n_cells);
 
             // Size the render buffers from the actual triangulated data: a
             // per-cell heuristic undersizes polygonal (Voronoi) meshes, whose
@@ -2539,14 +3547,14 @@ impl CFDApp {
                 headroom,
             );
             renderer.update_mesh(device, queue, &vertices, &line_vertices);
-            renderer.update_bind_group(device, &viz_buffer);
+            renderer.bind_initial_snapshot(device, &viz_buffers[0], range_reducer.range_buffer(0));
             (
                 Some(renderer),
                 Some(VizFieldBuffers {
-                    buffers: [viz_buffer, viz_buffer_1, viz_buffer_2],
+                    buffers: viz_buffers,
                     size_bytes: state_size_bytes,
-                    front_idx: Arc::new(AtomicUsize::new(0)),
-                    ready_idx: Arc::new(AtomicUsize::new(0)),
+                    range_reducer,
+                    mailbox: Arc::new(VizFrameMailbox::new()),
                 }),
             )
         } else {
@@ -2794,6 +3802,9 @@ impl CFDApp {
             cpu.set_outer_auto_converge(request.params.outer_auto_converge);
             cpu.set_alpha_u(request.params.alpha_u);
             cpu.set_alpha_p(request.params.alpha_p);
+            if request.model_id == "compressible_structured" {
+                apply_structured_compressible_runtime(&mut cpu, &request.params);
+            }
             seed_structured_state(
                 &mut cpu,
                 request.model_id,
@@ -2839,6 +3850,9 @@ impl CFDApp {
             solver.set_outer_auto_converge(request.params.outer_auto_converge);
             solver.set_alpha_u(request.params.alpha_u);
             solver.set_alpha_p(request.params.alpha_p);
+            if request.model_id == "compressible_structured" {
+                apply_structured_compressible_runtime(&mut solver, &request.params);
+            }
             seed_structured_state(
                 &mut solver,
                 request.model_id,
@@ -3211,6 +4225,15 @@ impl CFDApp {
         }
     }
 
+    fn render_range_field(&self) -> cfd_renderer::CfdRangeField {
+        match self.plot_field {
+            PlotField::Pressure => cfd_renderer::CfdRangeField::Pressure,
+            PlotField::VelocityX => cfd_renderer::CfdRangeField::VelocityX,
+            PlotField::VelocityY => cfd_renderer::CfdRangeField::VelocityY,
+            PlotField::VelocityMag => cfd_renderer::CfdRangeField::VelocityMagnitude,
+        }
+    }
+
     fn update_gpu_fluid(&mut self) {
         // The fluid's EOS sets the sound speed, so the REAL compressibility
         // `psi = 1/c^2` must be recomputed when the fluid (preset, density, or
@@ -3367,8 +4390,12 @@ impl CFDApp {
 
                 ui.separator();
                 ui.label("Render Mode:");
+                let old_render_mode = self.render_mode;
                 ui.radio_value(&mut self.render_mode, RenderMode::GpuDirect, "Direct");
                 ui.radio_value(&mut self.render_mode, RenderMode::EguiPlot, "Plot (Slow)");
+                if old_render_mode != self.render_mode {
+                    self.invalidate_plot_cache();
+                }
             });
         });
     }
@@ -3396,6 +4423,14 @@ impl CFDApp {
             if let Some(cells) = cells {
                 match self.render_mode {
                     RenderMode::GpuDirect => {
+                        if let Some(viz) = &self.viz_field {
+                            if activate_direct_viz(&viz.mailbox) {
+                                // This request is posted after `update`'s normal
+                                // repaint decision. Keep ticking until the idle
+                                // worker publishes and the UI adopts it.
+                                ctx.request_repaint_after(std::time::Duration::from_millis(16));
+                            }
+                        }
                         let rect = ui.available_rect_before_wrap();
                         let (rect, _response) =
                             ui.allocate_exact_size(rect.size(), egui::Sense::drag());
@@ -3422,6 +4457,7 @@ impl CFDApp {
                             let ty = 0.5 - mesh_center_y as f32 * scale_y;
 
                             let (stride, offset, mode) = self.render_layout_for_field();
+                            let range_field = self.render_range_field();
 
                             let cb = eframe::egui_wgpu::Callback::new_paint_callback(
                                 rect,
@@ -3434,9 +4470,14 @@ impl CFDApp {
                                         stride,
                                         offset,
                                         mode,
-                                        _padding: 0,
+                                        range_index: range_field as u32,
                                     },
                                     draw_lines: self.show_mesh_lines,
+                                    viz_frame_request: if self.is_running {
+                                        self.viz_field.as_ref().map(|viz| Arc::clone(&viz.mailbox))
+                                    } else {
+                                        None
+                                    },
                                 },
                             );
 
@@ -3477,6 +4518,11 @@ impl CFDApp {
                         }
                     }
                     RenderMode::EguiPlot => {
+                        if let Some(viz) = &self.viz_field {
+                            // This path consumes host `cached_u/p`, so ordinary
+                            // readback stepping must remain authoritative.
+                            viz.mailbox.set_gpu_consumer_enabled(false);
+                        }
                         let Some(vals) = self
                             .plot_cache
                             .as_ref()
@@ -3538,10 +4584,6 @@ impl eframe::App for CFDApp {
         let init_in_progress = self.init_rx.is_some();
         let init_pending = self.pending_init_request.is_some();
         let is_initializing = init_in_progress || init_pending;
-
-        if self.is_running || is_initializing {
-            ctx.request_repaint_after(std::time::Duration::from_millis(16));
-        }
 
         egui::SidePanel::left("controls").show(ctx, |ui| {
             egui::ScrollArea::vertical()
@@ -3815,6 +4857,14 @@ impl eframe::App for CFDApp {
                         if enable != self.enable_moving_mesh {
                             self.enable_moving_mesh = enable;
                             if enable {
+                                // RK4 has no stage-consistent ALE geometry path.
+                                // Reflect the supported scheme in the controls
+                                // immediately; `make_init_request` repeats this
+                                // guard so request construction is authoritative.
+                                enforce_moving_mesh_time_scheme(
+                                    true,
+                                    &mut self.time_scheme,
+                                );
                                 // Save the pre-moving mesh selection so disabling
                                 // restores it; the model selection is untouched.
                                 self.pre_moving_mesh_type = Some(self.mesh_type);
@@ -5046,6 +6096,7 @@ impl eframe::App for CFDApp {
 
                     if has_solver {
                         let stats = &self.cached_gpu_stats;
+                        ui.label(format!("Completed simulation time: {:.6e} s", stats.sim_time));
                         if stats.dt.is_finite() && stats.dt > 0.0 {
                             ui.label(format!("Last accepted dt: {:.2e} s", stats.dt));
                         } else {
@@ -5195,19 +6246,47 @@ impl eframe::App for CFDApp {
 
         let has_solver = self.mesh.is_some();
 
-        if has_solver {
-            self.ensure_plot_cache(matches!(self.render_mode, RenderMode::EguiPlot));
+        if has_solver && matches!(self.render_mode, RenderMode::EguiPlot) {
+            // The slow fallback intentionally retains the host cached_u/p
+            // implementation. GPU-direct ranges come from the sequence-matched
+            // reduction metadata below and never consult this cache.
+            self.ensure_plot_cache(true);
         }
 
-        let (min_val, max_val) = self
-            .plot_cache
-            .as_ref()
-            .map(|cache| (cache.min as f32, cache.max as f32))
-            .unwrap_or((0.0, 1.0));
+        let (min_val, max_val) = match self.render_mode {
+            RenderMode::GpuDirect => self
+                .cfd_renderer
+                .as_ref()
+                .map(|renderer| {
+                    let range = renderer
+                        .lock()
+                        .unwrap()
+                        .legend_range(self.render_range_field());
+                    (range[0], range[1])
+                })
+                .unwrap_or((0.0, 1.0)),
+            RenderMode::EguiPlot => self
+                .plot_cache
+                .as_ref()
+                .map(|cache| (cache.min as f32, cache.max as f32))
+                .unwrap_or((0.0, 1.0)),
+        };
 
         self.render_right_panel(ctx, has_solver, min_val, max_val);
         self.render_bottom_panel(ctx);
         self.render_central_panel(ctx, is_initializing, has_solver, min_val, max_val);
+
+        // Schedule after controls and Direct activation have run. In
+        // particular, a paused Plot -> Direct transition and the first Run
+        // click both happen later than the old start-of-update decision.
+        let direct_refresh_pending = matches!(self.render_mode, RenderMode::GpuDirect)
+            && self
+                .viz_field
+                .as_ref()
+                .is_some_and(|viz| viz.mailbox.presentation_refresh_pending());
+        if self.is_running || is_initializing || direct_refresh_pending {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        }
     }
 }
 
@@ -6150,6 +7229,8 @@ fn ale_model_by_id(id: &str) -> Result<ModelSpec, String> {
 /// identically-named inherent methods the impls forward to.
 trait StructuredSeed {
     fn sc_field_offset(&self, name: &str) -> Option<usize>;
+    fn sc_set_eos(&mut self, params: EosRuntimeParams);
+    fn sc_set_inlet_velocity(&mut self, velocity: f32);
     fn sc_set_named<F: Fn(f64, f64) -> f64>(&mut self, name: &str, f: F);
     fn sc_set_component<F: Fn(f64, f64) -> f64>(&mut self, offset: usize, f: F);
     fn sc_set_boundaries<F: Fn(StructEdge, f64, f64) -> (u32, Vec<StructBc>)>(&mut self, f: F);
@@ -6157,6 +7238,12 @@ trait StructuredSeed {
 impl StructuredSeed for StructuredGpuSolver {
     fn sc_field_offset(&self, name: &str) -> Option<usize> {
         self.field_offset(name)
+    }
+    fn sc_set_eos(&mut self, params: EosRuntimeParams) {
+        self.set_eos(params)
+    }
+    fn sc_set_inlet_velocity(&mut self, velocity: f32) {
+        self.set_inlet_ramp(velocity, 0.0)
     }
     fn sc_set_named<F: Fn(f64, f64) -> f64>(&mut self, name: &str, f: F) {
         self.set_named_field(name, f)
@@ -6172,6 +7259,12 @@ impl StructuredSeed for StructuredModelSolver {
     fn sc_field_offset(&self, name: &str) -> Option<usize> {
         self.field_offset(name)
     }
+    fn sc_set_eos(&mut self, params: EosRuntimeParams) {
+        self.set_eos(params)
+    }
+    fn sc_set_inlet_velocity(&mut self, velocity: f32) {
+        self.set_inlet_ramp(velocity, 0.0)
+    }
     fn sc_set_named<F: Fn(f64, f64) -> f64>(&mut self, name: &str, f: F) {
         self.set_named_field(name, f)
     }
@@ -6180,6 +7273,63 @@ impl StructuredSeed for StructuredModelSolver {
     }
     fn sc_set_boundaries<F: Fn(StructEdge, f64, f64) -> (u32, Vec<StructBc>)>(&mut self, f: F) {
         self.set_boundaries(f)
+    }
+}
+
+/// Apply the two runtime inputs that expression-valued compressible kernels do
+/// not obtain from the state buffers. This is deliberately called before IC/BC
+/// construction so the host reference state, generated kernels, and the GPU
+/// autonomous oracle all observe one EOS and one inlet target.
+fn apply_structured_compressible_runtime(
+    s: &mut impl StructuredSeed,
+    params: &RuntimeParams,
+) {
+    s.sc_set_eos(params.eos.runtime_params());
+    s.sc_set_inlet_velocity(params.inlet_velocity);
+}
+
+#[derive(Clone, Copy, Debug)]
+struct StructuredCompressibleReferenceState {
+    rho: f64,
+    momentum_x: f64,
+    total_energy_density: f64,
+    pressure: f64,
+    temperature: f64,
+}
+
+/// Uniform conserved/primitive state implied by the selected physical EOS.
+/// Pressure comes from `EosSpec` itself, avoiding a second affine-pressure
+/// implementation in the GUI. The energy gauge is the model helper's declared
+/// zero gauge for a barotropic liquid and the conventional ideal-gas energy for
+/// calorically-perfect gases.
+fn structured_compressible_reference_state(
+    eos: EosSpec,
+    rho: f64,
+    velocity_x: f64,
+) -> StructuredCompressibleReferenceState {
+    let pressure = eos.pressure_for_density(rho);
+    let runtime = eos.runtime_params();
+    let kinetic = 0.5 * rho * velocity_x * velocity_x;
+    let internal = eos
+        .barotropic_internal_energy_density(rho, 0.0)
+        .unwrap_or_else(|| {
+            if runtime.gm1 > 0.0 {
+                pressure / f64::from(runtime.gm1)
+            } else {
+                0.0
+            }
+        });
+    let temperature = if rho > 0.0 && runtime.r > 0.0 {
+        pressure / (rho * f64::from(runtime.r))
+    } else {
+        0.0
+    };
+    StructuredCompressibleReferenceState {
+        rho,
+        momentum_x: rho * velocity_x,
+        total_energy_density: internal + kinetic,
+        pressure,
+        temperature,
     }
 }
 
@@ -6286,13 +7436,15 @@ fn seed_structured_state(
             s.sc_set_named("d_p", move |_, _| d_p);
         }
         "compressible_structured" => {
-            let rho = params.density as f64;
-            s.sc_set_named("rho", move |_, _| rho);
-            // Ideal-gas rest internal energy scale e = p/((γ-1)ρ) with p=ρ R T;
-            // keep the historical nondimensional rest (ρ=1, e=2.5) scaled by ρ.
-            s.sc_set_named("rho_e", move |_, _| 2.5 * rho);
-            s.sc_set_named("p", move |_, _| rho); // θ_ref=1 → p = ρ
-            s.sc_set_named("T", |_, _| 1.0);
+            let reference = structured_compressible_reference_state(
+                params.eos,
+                params.density as f64,
+                0.0,
+            );
+            s.sc_set_named("rho", move |_, _| reference.rho);
+            s.sc_set_named("rho_e", move |_, _| reference.total_energy_density);
+            s.sc_set_named("p", move |_, _| reference.pressure);
+            s.sc_set_named("T", move |_, _| reference.temperature);
             if s.sc_field_offset("mu").is_some() {
                 let mu = params.viscosity as f64;
                 s.sc_set_named("mu", move |_, _| mu);
@@ -6353,16 +7505,25 @@ fn seed_structured_freestream(
     params: &RuntimeParams,
 ) {
     if model_id == "compressible_structured" {
-        // rho_u_x = rho * u_in (rho seeded in seed_structured_state).
-        let rho = params.density as f64;
+        let reference = structured_compressible_reference_state(
+            params.eos,
+            params.density as f64,
+            u_in,
+        );
         if s.sc_field_offset("rho_u").is_some() {
-            s.sc_set_named("rho_u", move |_, _| rho * u_in);
+            s.sc_set_named("rho_u", move |_, _| reference.momentum_x);
         }
-        // Keep total energy consistent with the seeded momentum. The rest
-        // pressure is p=rho (R*T=1), hence p/(gamma-1)=2.5*rho.
         if s.sc_field_offset("rho_e").is_some() {
-            let rho_e = rho * (2.5 + 0.5 * u_in * u_in);
-            s.sc_set_named("rho_e", move |_, _| rho_e);
+            s.sc_set_named("rho_e", move |_, _| reference.total_energy_density);
+        }
+        if s.sc_field_offset("p").is_some() {
+            s.sc_set_named("p", move |_, _| reference.pressure);
+        }
+        if s.sc_field_offset("T").is_some() {
+            s.sc_set_named("T", move |_, _| reference.temperature);
+        }
+        if s.sc_field_offset("u").is_some() {
+            s.sc_set_named("u", move |_, _| u_in);
         }
     }
     if model_id == "allmach_thermal_structured" {
@@ -6407,8 +7568,14 @@ fn setup_structured_bcs(
     params: &RuntimeParams,
 ) {
     if model_id == "compressible_structured" {
-        let rho0 = params.density.max(1.0e-6);
-        let e0 = rho0 * (2.5 + 0.5 * (u_in as f32) * (u_in as f32));
+        let reference = structured_compressible_reference_state(
+            params.eos,
+            f64::from(params.density.max(1.0e-6)),
+            u_in,
+        );
+        let rho0 = reference.rho as f32;
+        let momentum_x = reference.momentum_x as f32;
+        let e0 = reference.total_energy_density as f32;
         s.sc_set_boundaries(move |edge, _x, _y| {
             let d = |v: f32| StructBc { kind: 1, value: v };
             let n = || StructBc {
@@ -6416,7 +7583,7 @@ fn setup_structured_bcs(
                 value: 0.0,
             };
             let (btype, mut v): (u32, Vec<StructBc>) = match edge {
-                StructEdge::Left => (1, vec![d(rho0), d(rho0 * u_in as f32), d(0.0)]),
+                StructEdge::Left => (1, vec![d(rho0), d(momentum_x), d(0.0)]),
                 StructEdge::Right => (2, vec![n(), n(), n()]),
                 // No-slip wall: momentum pinned to 0, rho/rho_e zero-gradient.
                 _ => (3, vec![n(), d(0.0), d(0.0)]),
@@ -6517,6 +7684,1374 @@ mod structured_boundary_tests {
     use super::*;
     use crate::solver::model::eos::EosSpec;
     use crate::ui::model_defaults::gui_defaults_for;
+
+    #[test]
+    fn moving_mesh_coerces_only_static_rk4_to_bdf2() {
+        let mut rk4 = GpuTimeScheme::RK4;
+        assert!(enforce_moving_mesh_time_scheme(true, &mut rk4));
+        assert_eq!(rk4, GpuTimeScheme::BDF2);
+
+        let mut static_rk4 = GpuTimeScheme::RK4;
+        assert!(!enforce_moving_mesh_time_scheme(
+            false,
+            &mut static_rk4,
+        ));
+        assert_eq!(static_rk4, GpuTimeScheme::RK4);
+
+        for mut implicit in [GpuTimeScheme::Euler, GpuTimeScheme::BDF2] {
+            let expected = implicit;
+            assert!(!enforce_moving_mesh_time_scheme(true, &mut implicit));
+            assert_eq!(implicit, expected);
+        }
+    }
+
+    #[test]
+    fn actual_gui_model_options_are_exact_for_each_topology() {
+        let unstructured: Vec<_> = CFDApp::supported_ui_models(MeshMode::Unstructured)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(
+            unstructured,
+            [
+                "allmach_pressure",
+                "allmach_thermal",
+                "compressible",
+                "incompressible_momentum",
+            ]
+        );
+
+        let structured: Vec<_> = CFDApp::supported_ui_models(MeshMode::Structured2D)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(
+            structured,
+            [
+                "incompressible_momentum_structured",
+                "allmach_thermal_structured",
+                "compressible_structured",
+            ]
+        );
+    }
+
+    #[test]
+    fn structured_compressible_air_gui_runtime_reaches_cpu_kernels_seed_and_bc() {
+        let air = EosSpec::IdealGas {
+            gamma: 1.4,
+            gas_constant: 287.0,
+            temperature: 300.0,
+        };
+        let mut params = gui_defaults_for("compressible_structured")
+            .to_runtime_params(1.225, 1.81e-5, air);
+        params.inlet_velocity = 12.5;
+        params.time_scheme = GpuTimeScheme::RK4;
+
+        let model = crate::solver::model::compressible_structured_model().unwrap();
+        let grid = StructuredGrid::new(3, 2, 0.3, 0.2);
+        let mut solver = StructuredModelSolver::with_config(
+            grid,
+            &model,
+            f64::from(params.requested_dt),
+            1,
+            Scheme::Upwind,
+            GpuTimeScheme::RK4,
+        )
+        .unwrap();
+        solver.set_fluid(f64::from(params.density), f64::from(params.viscosity));
+        apply_structured_compressible_runtime(&mut solver, &params);
+        seed_structured_state(&mut solver, model.id, &params, grid.dx, grid.dy);
+        seed_structured_freestream(
+            &mut solver,
+            model.id,
+            f64::from(params.inlet_velocity),
+            &params,
+        );
+        let unknowns = solver.unknowns();
+        setup_structured_bcs(
+            &mut solver,
+            model.id,
+            f64::from(params.inlet_velocity),
+            unknowns,
+            &params,
+        );
+
+        assert_eq!(solver.runtime_eos_for_test(), air.runtime_params());
+        assert_eq!(
+            solver.inlet_velocity_for_test().to_bits(),
+            params.inlet_velocity.to_bits(),
+            "live inlet target must reach generated-kernel constants"
+        );
+
+        let expected = structured_compressible_reference_state(
+            air,
+            f64::from(params.density),
+            f64::from(params.inlet_velocity),
+        );
+        let stored = |value: f64| f64::from(value as f32);
+        let scalar = |name: &str| {
+            solver.get_scalar(solver.field_offset(name).expect("structured field"))[0]
+        };
+        assert_eq!(scalar("rho"), stored(expected.rho));
+        assert_eq!(scalar("rho_e"), stored(expected.total_energy_density));
+        assert_eq!(scalar("p"), stored(expected.pressure));
+        assert_eq!(scalar("T"), stored(expected.temperature));
+        let velocity = solver.get_u(solver.field_offset("u").unwrap())[0];
+        assert_eq!(velocity, (stored(f64::from(params.inlet_velocity)), 0.0));
+
+        // Cell 0's west face is the inlet; coupled unknown order is
+        // rho, rho_u.x, rho_u.y, rho_e.
+        assert_eq!(solver.bc_kind_at(0, 1, 0), 1);
+        assert_eq!(solver.bc_kind_at(0, 1, 1), 1);
+        assert_eq!(solver.bc_kind_at(0, 1, 3), 1);
+        assert_eq!(solver.bc_value_at(0, 1, 0), stored(expected.rho));
+        assert_eq!(
+            solver.bc_value_at(0, 1, 1),
+            stored(expected.momentum_x)
+        );
+        assert_eq!(
+            solver.bc_value_at(0, 1, 3),
+            stored(expected.total_energy_density)
+        );
+    }
+
+    #[test]
+    fn unsupported_structured_eos_uses_same_ordinary_policy_in_plot_and_direct() {
+        for adaptive in [false, true] {
+            let plot = structured_autonomous_refill_policy(false, adaptive, false, false);
+            let direct = structured_autonomous_refill_policy(true, adaptive, false, false);
+            assert_eq!(plot, None);
+            assert_eq!(direct, None);
+        }
+    }
+
+    #[test]
+    fn real_gpu_structured_air_gui_runtime_reaches_oracle_and_water_falls_back() {
+        let ctx = match pollster::block_on(crate::solver::gpu::context::GpuContext::new(None, None))
+        {
+            Ok(ctx) => ctx,
+            Err(error) => {
+                eprintln!("skipping structured EOS GPU gate: {error}");
+                return;
+            }
+        };
+        let air = EosSpec::IdealGas {
+            gamma: 1.4,
+            gas_constant: 287.0,
+            temperature: 300.0,
+        };
+        let mut params = gui_defaults_for("compressible_structured")
+            .to_runtime_params(1.225, 1.81e-5, air);
+        params.inlet_velocity = 6.25;
+        params.target_cfl = 0.5;
+        params.requested_dt = 1.0e-5;
+        params.adaptive_dt = true;
+        params.time_scheme = GpuTimeScheme::RK4;
+
+        let model = crate::solver::model::compressible_structured_model().unwrap();
+        let grid = StructuredGrid::new(4, 2, 1.0e-4, 5.0e-5);
+        let mut solver = StructuredGpuSolver::with_config(
+            ctx,
+            grid,
+            &model,
+            f64::from(params.requested_dt),
+            1,
+            Scheme::Upwind,
+            GpuTimeScheme::RK4,
+        )
+        .unwrap();
+        solver.set_fluid(f64::from(params.density), f64::from(params.viscosity));
+        apply_structured_compressible_runtime(&mut solver, &params);
+        seed_structured_state(&mut solver, model.id, &params, grid.dx, grid.dy);
+        seed_structured_freestream(
+            &mut solver,
+            model.id,
+            f64::from(params.inlet_velocity),
+            &params,
+        );
+        let unknowns = solver.unknowns();
+        setup_structured_bcs(
+            &mut solver,
+            model.id,
+            f64::from(params.inlet_velocity),
+            unknowns,
+            &params,
+        );
+
+        // Exercise the worker's live-update seam, not only construction-time
+        // setup: the new target must reach the same constants/oracle block.
+        let mut live = params;
+        live.inlet_velocity = 12.5;
+        let mut mode = SolverMode::Structured(solver);
+        mode.apply_params_any(&live);
+        let SolverMode::Structured(mut solver) = mode else {
+            unreachable!("structured GPU mode changed variant")
+        };
+        params = live;
+
+        assert_eq!(solver.runtime_eos_for_test(), air.runtime_params());
+        assert_eq!(
+            solver.inlet_velocity_for_test().to_bits(),
+            params.inlet_velocity.to_bits()
+        );
+        assert!(solver.supports_autonomous_fixed());
+        assert!(solver.supports_autonomous_adaptive());
+        let target_cfl = params.target_cfl as f32;
+        solver
+            .step_autonomous_batch(1, Some(target_cfl))
+            .expect("Air adaptive oracle submission");
+        let status = solver.autonomous_status().expect("Air oracle status");
+        assert_eq!(status.accepted_steps, 1, "Air oracle rejected GUI state");
+        assert!(!status.halted, "Air oracle halted: {status:?}");
+
+        let h = grid.dx.min(grid.dy) as f32;
+        let sound = (air.runtime_params().gamma * air.runtime_params().theta_ref).sqrt();
+        let wave_dt = target_cfl * h / (params.inlet_velocity.abs() + sound);
+        let diffusion_dt = 0.25 * target_cfl * h * h
+            / (params.viscosity.abs() / params.density.abs().max(1.0e-12));
+        let ibm_dt = 2.5 * target_cfl.clamp(0.0, 1.0) / 1.0e5;
+        let expected = wave_dt
+            .min(diffusion_dt)
+            .min(ibm_dt)
+            .min(params.requested_dt * 1.2)
+            .clamp(1.0e-9, 100.0);
+        assert!(
+            (status.dt - expected).abs() <= expected * 2.0e-4,
+            "Air EOS/inlet did not reach adaptive oracle: dt={} expected={expected}",
+            status.dt
+        );
+
+        let water = EosSpec::LinearCompressibility {
+            bulk_modulus: 2.2e9,
+            rho_ref: 1000.0,
+            p_ref: 1.0e5,
+        };
+        for unsupported in [water, EosSpec::Constant] {
+            solver.set_eos(unsupported.runtime_params());
+            assert_eq!(solver.runtime_eos_for_test(), unsupported.runtime_params());
+            assert!(!solver.supports_autonomous_fixed());
+            assert!(!solver.supports_autonomous_adaptive());
+            assert!(solver.step_autonomous_batch(1, None).is_err());
+            for presentation_ready in [false, true] {
+                assert_eq!(
+                    structured_autonomous_refill_policy(
+                        presentation_ready,
+                        params.adaptive_dt,
+                        solver.supports_autonomous_fixed(),
+                        solver.supports_autonomous_adaptive(),
+                    ),
+                    None,
+                    "unsupported EOS must use the ordinary timestep route in Plot and Direct"
+                );
+            }
+        }
+    }
+
+    fn batch_completion(
+        ticket: AutonomousBatchTicket,
+        accepted_steps: u32,
+        completed_at: std::time::Instant,
+    ) -> AutonomousBatchCompletion {
+        AutonomousBatchCompletion {
+            ticket,
+            accepted_steps,
+            completed_time: (ticket.serial + 1) as f64,
+            last_dt: 1.0e-3,
+            next_dt: 1.0e-3,
+            halted: false,
+            invalid_count: 0,
+            completed_at,
+            backend_status: None,
+        }
+    }
+
+    #[test]
+    fn autonomous_batch_controller_converges_to_three_millisecond_batches() {
+        let mut controller = AutonomousBatchController::default();
+        for _ in 0..12 {
+            let steps = controller.steps();
+            // Deterministic 0.5 ms/step device throughput.
+            controller.observe(
+                steps,
+                std::time::Duration::from_secs_f64(f64::from(steps) * 0.0005),
+            );
+        }
+        assert_eq!(controller.steps(), 6);
+        let predicted_ms = f64::from(controller.steps()) * 0.5;
+        assert!((2.0..=4.0).contains(&predicted_ms));
+    }
+
+    #[test]
+    fn autonomous_scheduler_bounds_fifo_and_acks_pause_only_after_drain() {
+        let start = std::time::Instant::now();
+        let mut scheduler = AutonomousBatchScheduler::default();
+        scheduler.begin_run(AutonomousRefillPolicy::Continuous);
+        let first = scheduler.reserve(start).unwrap();
+        let second = scheduler
+            .reserve(start + std::time::Duration::from_micros(20))
+            .unwrap();
+        assert!(
+            scheduler.reserve(start).is_none(),
+            "only two GPU batches may be queued"
+        );
+        assert!(!scheduler.request_pause());
+        assert_eq!(scheduler.phase, AutonomousRunPhase::Pausing);
+
+        // Even adversarial callback delivery cannot retire the FIFO tail first.
+        let tail = scheduler.complete(batch_completion(
+            second,
+            second.requested_steps,
+            start + std::time::Duration::from_millis(6),
+        ));
+        assert!(tail.completed.is_empty());
+        assert!(!tail.became_paused);
+
+        let drained = scheduler.complete(batch_completion(
+            first,
+            first.requested_steps,
+            start + std::time::Duration::from_millis(3),
+        ));
+        assert_eq!(drained.completed.len(), 2);
+        assert_eq!(drained.completed.get(0).unwrap().ticket.serial, first.serial);
+        assert_eq!(drained.completed.get(1).unwrap().ticket.serial, second.serial);
+        assert_eq!(drained.retired.get(0).unwrap().ticket.serial, first.serial);
+        assert_eq!(drained.retired.get(1).unwrap().ticket.serial, second.serial);
+        assert!(drained.became_paused);
+        assert_eq!(scheduler.phase, AutonomousRunPhase::Paused);
+        assert!(!scheduler.is_active());
+    }
+
+    #[test]
+    fn autonomous_scheduler_invalidates_stale_callback_generations() {
+        let start = std::time::Instant::now();
+        let mut scheduler = AutonomousBatchScheduler::default();
+        scheduler.begin_run(AutonomousRefillPolicy::Continuous);
+        let stale = scheduler.reserve(start).unwrap();
+
+        // A live parameter/solver change gets a new generation without
+        // forgetting that the old queue submission still occupies one credit.
+        scheduler.invalidate(true);
+        let current = scheduler
+            .reserve(start + std::time::Duration::from_millis(1))
+            .unwrap();
+        assert!(scheduler.reserve(start).is_none());
+
+        let mut stale_completion = batch_completion(
+            stale,
+            stale.requested_steps,
+            start + std::time::Duration::from_millis(2),
+        );
+        stale_completion.halted = true;
+        stale_completion.invalid_count = 7;
+        let ignored = scheduler.complete(stale_completion);
+        assert!(ignored.completed.is_empty());
+        assert_eq!(ignored.retired.len(), 1);
+        assert_eq!(
+            ignored.retired.get(0).unwrap().ticket.backend_epoch,
+            scheduler.backend_epoch,
+            "same-solver stale work must still be offered for host reconciliation"
+        );
+        assert_eq!(scheduler.phase, AutonomousRunPhase::Running);
+
+        let accepted = scheduler.complete(batch_completion(
+            current,
+            current.requested_steps,
+            start + std::time::Duration::from_millis(5),
+        ));
+        assert_eq!(accepted.completed.len(), 1);
+        assert_eq!(
+            accepted.completed.get(0).unwrap().ticket.generation,
+            scheduler.generation
+        );
+        assert_eq!(scheduler.phase, AutonomousRunPhase::Running);
+    }
+
+    #[test]
+    fn autonomous_scheduler_separates_backend_epoch_from_run_generation() {
+        let start = std::time::Instant::now();
+        let mut scheduler = AutonomousBatchScheduler::default();
+        scheduler.begin_run(AutonomousRefillPolicy::Continuous);
+        let replaced = scheduler.reserve(start).unwrap();
+        scheduler.replace_backend();
+
+        let drain = scheduler.complete(batch_completion(
+            replaced,
+            replaced.requested_steps,
+            start + std::time::Duration::from_millis(2),
+        ));
+        assert!(drain.completed.is_empty());
+        assert_eq!(drain.retired.len(), 1);
+        assert_ne!(
+            drain.retired.get(0).unwrap().ticket.backend_epoch,
+            scheduler.backend_epoch,
+            "replacement-solver callbacks must never reconcile into the new backend"
+        );
+    }
+
+    #[test]
+    fn autonomous_failed_front_tombstones_an_already_arrived_tail() {
+        let start = std::time::Instant::now();
+        let mut scheduler = AutonomousBatchScheduler::default();
+        scheduler.begin_run(AutonomousRefillPolicy::Continuous);
+        let front = scheduler.reserve(start).unwrap();
+        let tail = scheduler.reserve(start).unwrap();
+
+        let parked = scheduler.complete(batch_completion(
+            tail,
+            tail.requested_steps,
+            start + std::time::Duration::from_millis(2),
+        ));
+        assert!(parked.completed.is_empty());
+        assert_eq!(scheduler.pending_completions.len(), 1);
+
+        // The front map/decode fails. Invalidating first makes the parked tail
+        // a tombstone; discarding the failure must release both credits.
+        scheduler.invalidate(false);
+        scheduler.discard_failed_completion(front);
+        assert!(scheduler.in_flight.is_empty());
+        assert!(scheduler.pending_completions.is_empty());
+        assert_eq!(scheduler.phase, AutonomousRunPhase::Paused);
+    }
+
+    #[test]
+    fn autonomous_health_failure_freezes_submission_and_drains_tail() {
+        let start = std::time::Instant::now();
+        let mut scheduler = AutonomousBatchScheduler::default();
+        scheduler.begin_run(AutonomousRefillPolicy::Continuous);
+        let first = scheduler.reserve(start).unwrap();
+        let second = scheduler.reserve(start).unwrap();
+
+        let mut failed = batch_completion(
+            first,
+            first.requested_steps.saturating_sub(1),
+            start + std::time::Duration::from_millis(3),
+        );
+        failed.halted = true;
+        failed.invalid_count = 1;
+        let failure = scheduler.complete(failed);
+        assert_eq!(failure.completed.len(), 1);
+        assert_eq!(scheduler.phase, AutonomousRunPhase::Pausing);
+        assert!(scheduler.reserve(start).is_none());
+
+        let tail = scheduler.complete(batch_completion(
+            second,
+            0,
+            start + std::time::Duration::from_millis(4),
+        ));
+        assert!(tail.became_paused);
+        assert_eq!(scheduler.phase, AutonomousRunPhase::Paused);
+    }
+
+    #[test]
+    fn autonomous_drain_window_does_not_refill_after_only_one_completion() {
+        let start = std::time::Instant::now();
+        let mut scheduler = AutonomousBatchScheduler::default();
+        scheduler.begin_run(AutonomousRefillPolicy::DrainWindow);
+        let first = scheduler.reserve(start).unwrap();
+        let second = scheduler.reserve(start).unwrap();
+        assert!(scheduler.reserve(start).is_none());
+
+        let first_done = scheduler.complete(batch_completion(
+            first,
+            first.requested_steps,
+            start + std::time::Duration::from_millis(2),
+        ));
+        assert_eq!(first_done.completed.len(), 1);
+        assert!(
+            scheduler.reserve(start).is_none(),
+            "phase-sensitive backend must drain both ping-pong batches before refill"
+        );
+
+        let second_done = scheduler.complete(batch_completion(
+            second,
+            second.requested_steps,
+            start + std::time::Duration::from_millis(4),
+        ));
+        assert_eq!(second_done.completed.len(), 1);
+        assert!(scheduler.reserve(start).is_some());
+    }
+
+    #[test]
+    fn autonomous_three_phase_policy_refills_only_whole_history_cycles() {
+        let start = std::time::Instant::now();
+        let mut scheduler = AutonomousBatchScheduler::default();
+        scheduler.begin_run(AutonomousRefillPolicy::ContinuousPhaseCycle3);
+        scheduler.controller.steps = 1;
+        let first = scheduler.reserve(start).unwrap();
+        assert_eq!(first.requested_steps, 3);
+        scheduler.controller.steps = 4;
+        let second = scheduler.reserve(start).unwrap();
+        assert_eq!(second.requested_steps, 6);
+
+        let first_done = scheduler.complete(batch_completion(
+            first,
+            first.requested_steps,
+            start + std::time::Duration::from_millis(2),
+        ));
+        assert_eq!(first_done.completed.len(), 1);
+        let refill = scheduler.reserve(start).expect("continuous refill credit");
+        assert_eq!(refill.requested_steps % 3, 0);
+        assert!((3..=4095).contains(&refill.requested_steps));
+    }
+
+    fn autonomous_allmach_params() -> RuntimeParams {
+        let air = EosSpec::IdealGas {
+            gamma: 1.4,
+            gas_constant: 287.0,
+            temperature: 300.0,
+        };
+        let mut params = gui_defaults_for("allmach_thermal").to_runtime_params(1.225, 1.81e-5, air);
+        params.time_scheme = GpuTimeScheme::RK4;
+        params.adaptive_dt = true;
+        params.target_cfl = 0.5;
+        params.requested_dt = 2.0e-4;
+        params.log_convergence = false;
+        params.inlet_velocity = 0.2;
+        params.allmach_precond_uref_min = 0.2;
+        params.outer_iters = 1;
+        params
+    }
+
+    /// Drive the same two-credit scheduler/callback/reconciliation seam as the
+    /// worker, but with direct assertions on its private FIFO state. This is a
+    /// real-device smoke: both batches execute, map their exact tail status via
+    /// Poll-only callbacks, and publish one frame-demanded device copy.
+    #[derive(Debug)]
+    struct DirectVizProbe {
+        pressure_values: Vec<f32>,
+        pressure_range: [f32; 2],
+        velocity_magnitude_range: [f32; 2],
+    }
+
+    fn read_gpu_f32(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        source: &wgpu::Buffer,
+        size_bytes: u64,
+    ) -> Vec<f32> {
+        let staging = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("direct-viz-probe-readback"),
+            size: size_bytes,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("direct-viz-probe-copy"),
+        });
+        encoder.copy_buffer_to_buffer(source, 0, &staging, 0, size_bytes);
+        queue.submit(Some(encoder.finish()));
+
+        let (tx, rx) = mpsc::sync_channel(1);
+        staging.slice(..size_bytes).map_async(wgpu::MapMode::Read, move |result| {
+            let _ = tx.send(result);
+        });
+        device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: Some(std::time::Duration::from_secs(5)),
+            })
+            .expect("direct viz probe GPU wait");
+        rx.recv_timeout(std::time::Duration::from_secs(5))
+            .expect("direct viz probe map callback")
+            .expect("direct viz probe map");
+        let view = staging.slice(..size_bytes).get_mapped_range();
+        let values = bytemuck::cast_slice::<u8, f32>(&view).to_vec();
+        drop(view);
+        staging.unmap();
+        values
+    }
+
+    fn probe_paused_plot_to_direct(
+        mode: &SolverMode,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> DirectVizProbe {
+        let ports = mode.ui_ports();
+        let pressure_offset = ports.p_offset.expect("paused Direct pressure offset");
+        let velocity_offset = ports.u_offset.expect("paused Direct velocity offset");
+        let size_bytes = mode.state_size_bytes();
+        let expected = read_gpu_f32(device, queue, mode.state_buffer(), size_bytes);
+        let buffers = std::array::from_fn(|_| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("paused-direct-viz-field"),
+                size: size_bytes,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
+        let range_reducer = cfd_renderer::CfdRangeReducer::new(
+            device,
+            queue,
+            &buffers,
+            cfd_renderer::CfdFieldLayout {
+                stride: ports.stride,
+                u_offset: ports.u_offset.unwrap_or(0),
+                p_offset: pressure_offset,
+                has_u: ports.u_offset.is_some(),
+                has_p: true,
+            },
+        );
+        let mailbox = Arc::new(VizFrameMailbox::new());
+        let viz = VizFieldBuffers {
+            buffers,
+            size_bytes,
+            range_reducer,
+            mailbox: Arc::clone(&mailbox),
+        };
+
+        // A cold Direct renderer starts with no GPU consumer and slot zero's
+        // bootstrap field. Production activation must post exactly one request,
+        // and idle service must replace it without a Plot transition or another
+        // solver step.
+        assert!(mailbox.try_begin_write().is_none());
+        assert!(activate_direct_viz(&mailbox));
+        let submissions_before = viz.range_reducer.snapshot_submission_count();
+        assert!(
+            service_pending_viz_snapshot(mode, &viz, VizSnapshotSource::Current)
+                .expect("cold Direct snapshot service")
+        );
+        assert_eq!(
+            viz.range_reducer.snapshot_submission_count(),
+            submissions_before + 1,
+            "Direct field copy and range reduction must share one submission"
+        );
+        let display = mailbox
+            .try_claim_latest_ready()
+            .expect("paused Direct snapshot becomes READY");
+        assert_eq!(display.sequence, 1);
+
+        let packed = read_gpu_f32(device, queue, &viz.buffers[display.index], size_bytes);
+        assert_eq!(
+            packed.iter().map(|value| value.to_bits()).collect::<Vec<_>>(),
+            expected
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>(),
+            "paused Direct copy must match the latest ordinary-step state"
+        );
+        let pressure_values: Vec<f32> = packed
+            .chunks_exact(ports.stride as usize)
+            .map(|cell| cell[pressure_offset as usize])
+            .collect();
+        let expected_min = pressure_values
+            .iter()
+            .copied()
+            .fold(f32::INFINITY, f32::min);
+        let expected_max = pressure_values
+            .iter()
+            .copied()
+            .fold(f32::NEG_INFINITY, f32::max);
+        viz.range_reducer
+            .poll_nonblocking()
+            .expect("paused Direct range poll");
+        let ranges = viz
+            .range_reducer
+            .take_readback_for_sequence(display.sequence)
+            .expect("paused Direct sequence-matched range");
+        let pressure_range = ranges.range(cfd_renderer::CfdRangeField::Pressure);
+        let expected_pressure_range = if expected_max > expected_min {
+            [expected_min, expected_max]
+        } else {
+            [expected_min, expected_min + 1.0]
+        };
+        assert_eq!(pressure_range, expected_pressure_range);
+
+        let (expected_velocity_min, expected_velocity_max) = packed
+            .chunks_exact(ports.stride as usize)
+            .map(|cell| {
+                let ux = cell[velocity_offset as usize];
+                let uy = cell[velocity_offset as usize + 1];
+                ux.hypot(uy)
+            })
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), value| {
+                (lo.min(value), hi.max(value))
+            });
+        let expected_velocity_range = if expected_velocity_max > expected_velocity_min {
+            [expected_velocity_min, expected_velocity_max]
+        } else {
+            [expected_velocity_min, expected_velocity_min + 1.0]
+        };
+        let velocity_magnitude_range =
+            ranges.range(cfd_renderer::CfdRangeField::VelocityMagnitude);
+        for (actual, expected) in velocity_magnitude_range
+            .into_iter()
+            .zip(expected_velocity_range)
+        {
+            assert!(
+                (actual - expected).abs() <= 1.0e-6_f32.max(expected.abs() * 2.0e-5),
+                "paused Direct |U| range mismatch: actual={actual} expected={expected}"
+            );
+        }
+        DirectVizProbe {
+            pressure_values,
+            pressure_range,
+            velocity_magnitude_range,
+        }
+    }
+
+    fn drive_real_gpu_autonomous_window(
+        mut mode: SolverMode,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        params: RuntimeParams,
+        policy: AutonomousRefillPolicy,
+    ) -> DirectVizProbe {
+        let size_bytes = mode.state_size_bytes();
+        let ports = mode.ui_ports();
+        let pressure_offset = ports
+            .p_offset
+            .expect("direct visualization probe requires pressure");
+        let velocity_offset = ports
+            .u_offset
+            .expect("direct visualization probe requires velocity");
+        let buffers: [wgpu::Buffer; 3] = std::array::from_fn(|index| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(match index {
+                    0 => "autonomous-smoke-viz-0",
+                    1 => "autonomous-smoke-viz-1",
+                    _ => "autonomous-smoke-viz-2",
+                }),
+                size: size_bytes,
+                usage: wgpu::BufferUsages::STORAGE
+                    | wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        });
+        mode.install_viz_frame_targets(&buffers)
+            .expect("install cached Direct frame targets");
+        if let SolverMode::Static(driver) = &mode {
+            assert_eq!(
+                driver.autonomous_frame_copy_bind_group_count(),
+                3,
+                "one cached accepted-copy bind group per mailbox slot"
+            );
+        }
+        let range_reducer = cfd_renderer::CfdRangeReducer::new(
+            device,
+            queue,
+            &buffers,
+            cfd_renderer::CfdFieldLayout {
+                stride: ports.stride,
+                u_offset: ports.u_offset.unwrap_or(0),
+                p_offset: pressure_offset,
+                has_u: ports.u_offset.is_some(),
+                has_p: true,
+            },
+        );
+        let mailbox = Arc::new(VizFrameMailbox::new());
+        let viz = VizFieldBuffers {
+            buffers,
+            size_bytes,
+            range_reducer,
+            mailbox: Arc::clone(&mailbox),
+        };
+        mailbox.set_gpu_consumer_enabled(true);
+        mailbox.request_frame();
+
+        let (tx, rx) = mpsc::channel::<AutonomousCallbackMessage>();
+        let mut scheduler = AutonomousBatchScheduler::default();
+        scheduler.begin_run(policy);
+        let initial_time = mode.sim_time_f64();
+        let mut max_in_flight = 0usize;
+        let mut requested_steps = 0_u64;
+
+        while let Some(ticket) = scheduler.reserve(std::time::Instant::now()) {
+            max_in_flight = max_in_flight.max(scheduler.in_flight.len());
+            requested_steps = requested_steps.saturating_add(u64::from(ticket.requested_steps));
+            assert!(scheduler.in_flight.len() <= AUTONOMOUS_MAX_IN_FLIGHT);
+            let callback_tx = tx.clone();
+            let submission = match &mut mode {
+                SolverMode::Structured(s) => s.submit_autonomous_batch(
+                    ticket.requested_steps as usize,
+                    Some(params.target_cfl as f32),
+                    move |result| {
+                        let _ = callback_tx.send(AutonomousCallbackMessage {
+                            ticket,
+                            result: result.map(AutonomousBackendStatus::Structured),
+                            completed_at: std::time::Instant::now(),
+                        });
+                    },
+                ),
+                SolverMode::Static(d) => d
+                    .submit_autonomous_explicit_gpu_batch(ticket.requested_steps, move |result| {
+                        let _ = callback_tx.send(AutonomousCallbackMessage {
+                            ticket,
+                            result: result.map(AutonomousBackendStatus::Unstructured),
+                            completed_at: std::time::Instant::now(),
+                        });
+                    })
+                    .map(|submission| Some(submission.submission_index)),
+                _ => panic!("real autonomous smoke requires a GPU solver"),
+            }
+            .expect("health-ready autonomous submission");
+            assert!(submission.is_some());
+        }
+        assert_eq!(max_in_flight, AUTONOMOUS_MAX_IN_FLIGHT);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        let mut accepted_steps = 0u64;
+        let mut completed_time = initial_time;
+        let mut frame_published = false;
+        let mut refill_submitted = false;
+        while scheduler.is_active() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "autonomous completion callbacks did not drain before timeout"
+            );
+            match &mode {
+                SolverMode::Structured(s) => s.poll_gpu_completions().unwrap(),
+                SolverMode::Static(d) => d.poll_gpu_batch_completions().unwrap(),
+                _ => unreachable!(),
+            }
+
+            while let Ok(message) = rx.try_recv() {
+                let completion = match message.result.expect("mapped autonomous status") {
+                    AutonomousBackendStatus::Structured(status) => AutonomousBatchCompletion {
+                        ticket: message.ticket,
+                        accepted_steps: status.accepted_steps,
+                        completed_time: f64::from(status.time),
+                        last_dt: status.dt_old,
+                        next_dt: status.dt,
+                        halted: status.halted,
+                        invalid_count: status.invalid_cells,
+                        completed_at: message.completed_at,
+                        backend_status: Some(AutonomousBackendStatus::Structured(status)),
+                    },
+                    AutonomousBackendStatus::Unstructured(status) => AutonomousBatchCompletion {
+                        ticket: message.ticket,
+                        accepted_steps: status.accepted_batch,
+                        completed_time: f64::from(status.time),
+                        last_dt: status.last_dt,
+                        next_dt: status.next_dt,
+                        halted: status.halted,
+                        invalid_count: status.invalid_count,
+                        completed_at: message.completed_at,
+                        backend_status: Some(AutonomousBackendStatus::Unstructured(status)),
+                    },
+                };
+                let drain = scheduler.complete(completion);
+                for retired in drain.retired.iter() {
+                    assert_eq!(retired.ticket.backend_epoch, scheduler.backend_epoch);
+                    match (retired.backend_status, &mut mode) {
+                        (
+                            Some(AutonomousBackendStatus::Structured(status)),
+                            SolverMode::Structured(s),
+                        ) => s.reconcile_autonomous_status(status),
+                        (
+                            Some(AutonomousBackendStatus::Unstructured(status)),
+                            SolverMode::Static(d),
+                        ) => d
+                            .reconcile_autonomous_explicit_gpu_batch(status)
+                            .expect("unstructured phase reconciliation"),
+                        _ => panic!("status/backend mismatch"),
+                    }
+                }
+                for completed in drain.completed.iter().copied() {
+                    assert!(completed.is_healthy(), "GPU health status: {completed:?}");
+                    assert!(completed.completed_time.is_finite());
+                    assert!(completed.last_dt.is_finite() && completed.last_dt > 0.0);
+                    assert!(completed.next_dt.is_finite() && completed.next_dt > 0.0);
+                    accepted_steps =
+                        accepted_steps.saturating_add(u64::from(completed.accepted_steps));
+                    completed_time = completed.completed_time;
+                    let frame_boundary = policy.is_continuous() || scheduler.in_flight.is_empty();
+                    if frame_boundary {
+                        if let Some(write) = mailbox.try_begin_write() {
+                            let source = if matches!(mode, SolverMode::Static(_)) {
+                                VizSnapshotSource::AutonomousAccepted
+                            } else {
+                                VizSnapshotSource::Current
+                            };
+                            viz.capture_snapshot(&mode, write, source)
+                                .expect("accepted Direct snapshot");
+                            frame_published = true;
+                        }
+                    }
+                }
+
+                // Retire/reconcile the front batch while the second remains
+                // physically queued, then immediately append batch three. This
+                // is the production continuous-refill seam: the unstructured
+                // route must preserve its whole-cycle phase before encoding the
+                // refill, and both routes must retain exactly two credits.
+                if !refill_submitted
+                    && scheduler.phase == AutonomousRunPhase::Running
+                    && scheduler.in_flight.len() == 1
+                {
+                    let ticket = scheduler
+                        .reserve(std::time::Instant::now())
+                        .expect("front retirement must release one refill credit");
+                    assert_eq!(scheduler.in_flight.len(), AUTONOMOUS_MAX_IN_FLIGHT);
+                    requested_steps = requested_steps
+                        .saturating_add(u64::from(ticket.requested_steps));
+                    let callback_tx = tx.clone();
+                    let submission = match &mut mode {
+                        SolverMode::Structured(s) => s.submit_autonomous_batch(
+                            ticket.requested_steps as usize,
+                            Some(params.target_cfl as f32),
+                            move |result| {
+                                let _ = callback_tx.send(AutonomousCallbackMessage {
+                                    ticket,
+                                    result: result.map(AutonomousBackendStatus::Structured),
+                                    completed_at: std::time::Instant::now(),
+                                });
+                            },
+                        ),
+                        SolverMode::Static(d) => d
+                            .submit_autonomous_explicit_gpu_batch(
+                                ticket.requested_steps,
+                                move |result| {
+                                    let _ = callback_tx.send(AutonomousCallbackMessage {
+                                        ticket,
+                                        result: result.map(AutonomousBackendStatus::Unstructured),
+                                        completed_at: std::time::Instant::now(),
+                                    });
+                                },
+                            )
+                            .map(|submission| Some(submission.submission_index)),
+                        _ => panic!("real autonomous smoke requires a GPU solver"),
+                    }
+                    .expect("continuous third-batch refill submission");
+                    assert!(submission.is_some());
+                    refill_submitted = true;
+                    assert!(
+                        !scheduler.request_pause(),
+                        "pause must drain the queued second and third batches"
+                    );
+                }
+            }
+            thread::yield_now();
+        }
+
+        assert_eq!(scheduler.phase, AutonomousRunPhase::Paused);
+        assert!(scheduler.in_flight.is_empty());
+        assert!(refill_submitted, "real GPU path never submitted batch three");
+        assert_eq!(accepted_steps, requested_steps);
+        assert!(completed_time > initial_time);
+        assert!(frame_published);
+        if let SolverMode::Static(driver) = &mode {
+            assert_eq!(
+                driver.autonomous_frame_copy_bind_group_count(),
+                3,
+                "frame capture must not allocate additional bind groups"
+            );
+        }
+        assert!(
+            (0..3).any(|index| mailbox.state(index).1 == VizSlotState::Ready),
+            "accepted boundary must publish a READY GPU-direct frame"
+        );
+
+        let display = mailbox
+            .try_claim_latest_ready()
+            .expect("accepted Direct frame must become displayable");
+        let packed = read_gpu_f32(device, queue, &viz.buffers[display.index], size_bytes);
+        let pressure_values: Vec<f32> = packed
+            .chunks_exact(ports.stride as usize)
+            .map(|cell| cell[pressure_offset as usize])
+            .collect();
+        let expected_min = pressure_values
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite())
+            .fold(f32::INFINITY, f32::min);
+        let expected_max = pressure_values
+            .iter()
+            .copied()
+            .filter(|value| value.is_finite())
+            .fold(f32::NEG_INFINITY, f32::max);
+        viz.range_reducer
+            .poll_nonblocking()
+            .expect("Direct range callback poll");
+        let ranges = viz
+            .range_reducer
+            .take_readback_for_sequence(display.sequence)
+            .expect("Direct range must match displayed sequence");
+        let pressure_range = ranges.range(cfd_renderer::CfdRangeField::Pressure);
+        let expected_range = if expected_min.is_finite()
+            && expected_max.is_finite()
+            && expected_max > expected_min
+        {
+            [expected_min, expected_max]
+        } else if expected_min.is_finite() && expected_max == expected_min {
+            [expected_min, expected_min + 1.0]
+        } else {
+            [0.0, 1.0]
+        };
+        assert_eq!(
+            pressure_range, expected_range,
+            "Direct range reducer must consume the same packed snapshot the renderer binds"
+        );
+        let (velocity_min, velocity_max) = packed
+            .chunks_exact(ports.stride as usize)
+            .map(|cell| {
+                let ux = cell[velocity_offset as usize];
+                let uy = cell[velocity_offset as usize + 1];
+                ux.hypot(uy)
+            })
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), value| {
+                (lo.min(value), hi.max(value))
+            });
+        let expected_velocity_range = if velocity_max > velocity_min {
+            [velocity_min, velocity_max]
+        } else {
+            [velocity_min, velocity_min + 1.0]
+        };
+        let velocity_magnitude_range =
+            ranges.range(cfd_renderer::CfdRangeField::VelocityMagnitude);
+        for (actual, expected) in velocity_magnitude_range
+            .into_iter()
+            .zip(expected_velocity_range)
+        {
+            assert!(
+                (actual - expected).abs() <= 1.0e-6_f32.max(expected.abs() * 2.0e-5),
+                "default Direct |U| range mismatch: actual={actual} expected={expected}"
+            );
+        }
+        DirectVizProbe {
+            pressure_values,
+            pressure_range,
+            velocity_magnitude_range,
+        }
+    }
+
+    #[test]
+    fn real_gpu_structured_adaptive_worker_window_advances_and_drains() {
+        let ctx = match pollster::block_on(crate::solver::gpu::context::GpuContext::new(None, None))
+        {
+            Ok(ctx) => ctx,
+            Err(error) => {
+                eprintln!("skipping structured autonomous GPU smoke: {error}");
+                return;
+            }
+        };
+        let device = ctx.device.clone();
+        let queue = ctx.queue.clone();
+        let params = autonomous_allmach_params();
+        let model = crate::solver::model::allmach_thermal_structured_model()
+            .expect("structured all-Mach model");
+        let grid = StructuredGrid::new(8, 4, 1.0, 0.5);
+        let mut solver = StructuredGpuSolver::with_config(
+            ctx,
+            grid,
+            &model,
+            f64::from(params.requested_dt),
+            1,
+            Scheme::Upwind,
+            GpuTimeScheme::RK4,
+        )
+        .expect("structured explicit solver");
+        solver.set_fluid(f64::from(params.density), f64::from(params.viscosity));
+        seed_structured_state(
+            &mut solver,
+            "allmach_thermal_structured",
+            &params,
+            grid.dx,
+            grid.dy,
+        );
+        seed_structured_freestream(
+            &mut solver,
+            "allmach_thermal_structured",
+            f64::from(params.inlet_velocity),
+            &params,
+        );
+        refresh_structured_allmach_runtime_fields(&mut solver, &params, grid.dx, grid.dy);
+        setup_structured_bcs(
+            &mut solver,
+            "allmach_thermal_structured",
+            f64::from(params.inlet_velocity),
+            4,
+            &params,
+        );
+
+        // Make the default GUI field (|U|) and pressure independently
+        // nonuniform. A stale bootstrap buffer, a wrong field offset, or a
+        // range from another generation would therefore be observable instead
+        // of accidentally producing the same all-blue image as a rest state.
+        let u_offset = solver
+            .state_layout()
+            .offset_for("U")
+            .expect("structured velocity state") as usize;
+        let p_offset = solver
+            .state_layout()
+            .offset_for("p")
+            .expect("structured pressure state") as usize;
+        solver.set_state_component(u_offset, |x, _| 0.05 + 0.1 * x);
+        solver.set_state_component(u_offset + 1, |_, y| 0.02 * y);
+        solver.set_state_component(p_offset, |x, y| 0.01 * x - 0.005 * y);
+
+        let mode = SolverMode::Structured(solver);
+        let cold = probe_paused_plot_to_direct(&mode, &device, &queue);
+        assert!(cold.pressure_range[1] > cold.pressure_range[0]);
+        assert!(cold.velocity_magnitude_range[1] > cold.velocity_magnitude_range[0]);
+        let live = drive_real_gpu_autonomous_window(
+            mode,
+            &device,
+            &queue,
+            params,
+            AutonomousRefillPolicy::Continuous,
+        );
+        assert!(live.velocity_magnitude_range[1] > live.velocity_magnitude_range[0]);
+    }
+
+    #[test]
+    fn real_gpu_unstructured_adaptive_worker_window_advances_and_drains() {
+        let ctx = match pollster::block_on(crate::solver::gpu::context::GpuContext::new(None, None))
+        {
+            Ok(ctx) => ctx,
+            Err(error) => {
+                eprintln!("skipping unstructured autonomous GPU smoke: {error}");
+                return;
+            }
+        };
+        let device = ctx.device.clone();
+        let queue = ctx.queue.clone();
+        let params = autonomous_allmach_params();
+        let mesh = generate_structured_rect_mesh(
+            8,
+            4,
+            1.0,
+            0.5,
+            BoundarySides {
+                left: BoundaryType::Inlet,
+                right: BoundaryType::Outlet,
+                bottom: BoundaryType::Wall,
+                top: BoundaryType::Wall,
+            },
+        );
+        let n = mesh.num_cells();
+        let model = allmach_thermal_model().expect("unstructured all-Mach model");
+        let mut build = pollster::block_on(SolverDriver::build(
+            &mesh,
+            model,
+            &params,
+            &vec![(0.0, 0.0); n],
+            &vec![0.0; n],
+            Some(device.clone()),
+            Some(queue),
+        ))
+        .expect("unstructured GPU driver");
+        build.driver.apply_params(&params);
+
+        // Deterministic nonuniform valid state. This makes a stale slot-zero
+        // capture (the release-blocking all-blue failure) impossible to hide
+        // behind an accidentally uniform flow field.
+        let ports = build.driver.solver().ui_ports();
+        let stride = ports.stride as usize;
+        let p_offset = ports.p_offset.expect("all-Mach pressure offset") as usize;
+        let mut packed = pollster::block_on(build.driver.solver().read_state_f32());
+        for (cell, values) in packed.chunks_exact_mut(stride).enumerate() {
+            values[p_offset] = cell as f32 * 0.01;
+        }
+        build
+            .driver
+            .solver_mut()
+            .write_state_f32(&packed)
+            .expect("seed deterministic Direct field");
+
+        // Evolve through the ordinary (Plot-compatible) route, then pause and
+        // switch to Direct. This is the second all-blue release regression:
+        // the initial slot must be replaced even though no next step exists.
+        let outcome = build.driver.step(true);
+        assert!(outcome.diverged.is_none(), "ordinary Plot step diverged");
+        let mode = SolverMode::Static(build.driver);
+        let paused_probe = probe_paused_plot_to_direct(&mode, &device, &ctx.queue);
+        assert!(paused_probe.pressure_range[1] > paused_probe.pressure_range[0]);
+        assert!(
+            paused_probe.velocity_magnitude_range[1]
+                > paused_probe.velocity_magnitude_range[0]
+        );
+
+        let probe = drive_real_gpu_autonomous_window(
+            mode,
+            &device,
+            &ctx.queue,
+            params,
+            AutonomousRefillPolicy::ContinuousPhaseCycle3,
+        );
+        assert!(
+            probe.pressure_range[1] > probe.pressure_range[0],
+            "Direct pressure range must be nondegenerate"
+        );
+        assert!(
+            probe.velocity_magnitude_range[1] > probe.velocity_magnitude_range[0],
+            "default Direct velocity-magnitude range must be nondegenerate"
+        );
+        assert!(
+            probe
+                .pressure_values
+                .windows(2)
+                .any(|pair| pair[0].to_bits() != pair[1].to_bits()),
+            "Direct accepted-state buffer must contain a nonconstant pressure field"
+        );
+    }
+
+    #[test]
+    fn viz_mailbox_coalesces_frames_and_never_exposes_writing_slots() {
+        let mailbox = VizFrameMailbox::new();
+        let initial = mailbox.initial_display();
+        assert_eq!(mailbox.state(0), (0, VizSlotState::Display));
+        assert_eq!(mailbox.state(1), (0, VizSlotState::Free));
+        assert_eq!(mailbox.state(2), (0, VizSlotState::Free));
+        assert!(mailbox.try_begin_write().is_none());
+
+        // Three screen callbacks before an accepted solver boundary collapse
+        // into one copy tagged with the newest request generation.
+        assert_eq!(mailbox.request_frame(), 1);
+        assert_eq!(mailbox.request_frame(), 2);
+        assert_eq!(mailbox.request_frame(), 3);
+        let write = mailbox.try_begin_write().expect("coalesced frame copy");
+        assert_eq!(write.sequence, 3);
+        assert_eq!(mailbox.state(write.index), (3, VizSlotState::Writing));
+        assert!(
+            mailbox.try_claim_latest_ready().is_none(),
+            "the renderer must never observe a copy before queue submission"
+        );
+
+        assert!(mailbox.finish_write(write));
+        assert!(mailbox.try_begin_write().is_none(), "one copy per request");
+        let next = mailbox
+            .try_claim_latest_ready()
+            .expect("submitted snapshot becomes displayable");
+        assert_eq!(next, write);
+
+        // Claiming the replacement does not free the old field out from under
+        // the renderer; rebinding is followed by an explicit release.
+        assert_eq!(mailbox.state(initial.index), (0, VizSlotState::Display));
+        assert_eq!(mailbox.state(next.index), (3, VizSlotState::Display));
+        assert!(mailbox.release_display(initial));
+        assert_eq!(mailbox.state(initial.index), (0, VizSlotState::Free));
+    }
+
+    #[test]
+    fn initial_direct_activation_posts_one_cold_snapshot_request() {
+        let mailbox = VizFrameMailbox::new();
+        assert!(!mailbox.gpu_consumer_enabled());
+        assert!(!mailbox.presentation_refresh_pending());
+
+        assert!(activate_direct_viz(&mailbox));
+        assert!(mailbox.gpu_consumer_enabled());
+        assert!(mailbox.presentation_refresh_pending());
+        let write = mailbox
+            .try_begin_write()
+            .expect("cold Direct activation must be serviceable");
+        assert_eq!(write.sequence, 1);
+
+        // Re-rendering Direct does not create a second request. The outstanding
+        // generation remains the only work until the worker publishes it.
+        assert!(!activate_direct_viz(&mailbox));
+        assert!(mailbox.finish_write(write));
+        assert!(mailbox.presentation_refresh_pending());
+        let display = mailbox
+            .try_claim_latest_ready()
+            .expect("cold Direct snapshot must become displayable");
+        assert_eq!(display.sequence, 1);
+        assert!(!mailbox.presentation_refresh_pending());
+    }
+
+    #[test]
+    fn direct_activation_edge_is_atomic_under_competing_ui_observers() {
+        let mailbox = Arc::new(VizFrameMailbox::new());
+        let start = Arc::new(std::sync::Barrier::new(9));
+        let mut workers = Vec::new();
+        for _ in 0..8 {
+            let mailbox = Arc::clone(&mailbox);
+            let start = Arc::clone(&start);
+            workers.push(thread::spawn(move || {
+                start.wait();
+                activate_direct_viz(&mailbox)
+            }));
+        }
+        start.wait();
+        let activated = workers
+            .into_iter()
+            .map(|worker| worker.join().expect("activation observer"))
+            .filter(|activated| *activated)
+            .count();
+
+        assert_eq!(activated, 1, "only one false -> true edge may win");
+        assert_eq!(mailbox.requested_sequence.load(Ordering::Acquire), 1);
+        assert!(mailbox.gpu_consumer_enabled());
+    }
+
+    #[test]
+    fn late_direct_frame_request_cannot_resurrect_plot_consumer() {
+        let mailbox = VizFrameMailbox::new();
+        assert!(activate_direct_viz(&mailbox));
+        mailbox.set_gpu_consumer_enabled(false);
+
+        // Emulate a Direct paint callback which observed the old mode before
+        // the next UI update selected Plot. It may leave one coalesced request,
+        // but request publication no longer owns the presentation-mode bit.
+        assert_eq!(mailbox.request_frame(), 2);
+        assert!(!mailbox.gpu_consumer_enabled());
+
+        assert!(activate_direct_viz(&mailbox));
+        assert_eq!(mailbox.requested_sequence.load(Ordering::Acquire), 3);
+        assert!(mailbox.gpu_consumer_enabled());
+    }
+
+    #[test]
+    fn viz_mailbox_cancelled_copy_retries_the_same_outstanding_request() {
+        let mailbox = VizFrameMailbox::new();
+        mailbox.request_frame();
+        let failed = mailbox.try_begin_write().expect("first copy reservation");
+        assert!(mailbox.cancel_write(failed));
+        assert_eq!(mailbox.state(failed.index).1, VizSlotState::Free);
+
+        let retry = mailbox
+            .try_begin_write()
+            .expect("cancelled request must remain outstanding");
+        assert_eq!(retry.sequence, failed.sequence);
+        assert!(mailbox.finish_write(retry));
+    }
+
+    #[test]
+    fn viz_mailbox_generation_prevents_aba_and_discards_stale_ready_frames() {
+        let mailbox = VizFrameMailbox::new();
+        let initial = mailbox.initial_display();
+
+        mailbox.request_frame();
+        let first = mailbox.try_begin_write().unwrap();
+        assert!(mailbox.finish_write(first));
+        mailbox.request_frame();
+        let second = mailbox.try_begin_write().unwrap();
+        assert!(mailbox.finish_write(second));
+
+        let displayed = mailbox.try_claim_latest_ready().unwrap();
+        assert_eq!(displayed.sequence, 2);
+        assert_eq!(
+            mailbox.state(first.index).1,
+            VizSlotState::Free,
+            "an older completed frame is coalesced without becoming visible"
+        );
+        assert!(mailbox.release_display(initial));
+
+        // Cycle until `first.index` is displayed again with a newer sequence.
+        let mut current = displayed;
+        let recycled = loop {
+            mailbox.request_frame();
+            let write = mailbox.try_begin_write().unwrap();
+            assert!(mailbox.finish_write(write));
+            let next = mailbox.try_claim_latest_ready().unwrap();
+            assert!(mailbox.release_display(current));
+            current = next;
+            if current.index == first.index {
+                break current;
+            }
+        };
+        assert!(recycled.sequence > first.sequence);
+
+        // An index-only protocol would free the newly displayed buffer here.
+        // The stale generation is part of the expected CAS word, so it cannot.
+        assert!(!mailbox.release_display(first));
+        assert_eq!(
+            mailbox.state(recycled.index),
+            (recycled.sequence, VizSlotState::Display)
+        );
+    }
 
     #[test]
     fn completed_step_timing_ignores_unfenced_submission_latency() {
@@ -6622,6 +9157,888 @@ mod structured_boundary_tests {
             params.inlet_pressure as f64
         );
     }
+}
+
+/// One row of the explicit-RK4 capability inventory derived from the actual
+/// GUI model dropdown.  A rejected model remains in the inventory with its
+/// validator diagnostic; callers must not treat it as a skipped test case.
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GuiExplicitRk4Capability {
+    pub topology: &'static str,
+    pub model_id: &'static str,
+    pub supported: bool,
+    pub rejection: Option<String>,
+}
+
+/// Return the RK4 capability of every model the two real GUI dropdowns expose.
+#[doc(hidden)]
+pub fn gui_explicit_rk4_capability_matrix(
+) -> Result<Vec<GuiExplicitRk4Capability>, String> {
+    let air = Fluid::presets()
+        .into_iter()
+        .find(|fluid| fluid.name == "Air")
+        .ok_or("Air GUI fluid preset is missing")?;
+    let mut rows = Vec::new();
+    for (mesh_mode, topology) in [
+        (MeshMode::Unstructured, "unstructured"),
+        (MeshMode::Structured2D, "structured"),
+    ] {
+        for (model_id, _) in CFDApp::supported_ui_models(mesh_mode) {
+            let model = if mesh_mode == MeshMode::Structured2D {
+                structured_model_by_id(model_id)?
+            } else {
+                unstructured_model_by_id(model_id, air.eos)?
+            };
+            let rejection = model.validate_explicit_rk4().err();
+            rows.push(GuiExplicitRk4Capability {
+                topology,
+                model_id,
+                supported: rejection.is_none(),
+                rejection,
+            });
+        }
+    }
+    Ok(rows)
+}
+
+/// A headless case selected only through controls that exist in the GUI.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy)]
+pub struct GuiExplicitRk4Case<'a> {
+    pub model_id: &'a str,
+    /// Exact entry from the GUI fluid preset dropdown.
+    pub fluid: &'a str,
+    pub geometry: &'a str,
+    /// `structured` for dense Cartesian mode; otherwise one of the real
+    /// unstructured mesh radio values (`cutcell`, `delaunay`, `voronoi`, `cvt`,
+    /// or nozzle-only `fitted`).
+    pub mesh_kind: &'a str,
+    /// `gpu`, `cpu-interpreter`, `cpu-transpiled`, or
+    /// `cpu-transpiled-simd`, matching the compute dropdown.
+    pub backend: &'a str,
+    pub adaptive: bool,
+    /// `direct` or `plot`.  Direct GPU cases take the autonomous controller
+    /// whenever that exact solver reports the required health capability.
+    pub presentation: &'a str,
+    pub moving_mesh: bool,
+    pub cell_size: f64,
+    pub steps: usize,
+    /// Optional exact value of the GUI timestep slider. `None` uses the lean
+    /// matrix seed (the smaller of the model default and 5e-6 s).
+    pub requested_dt: Option<f32>,
+    /// Optional exact advection radio selection. `None` uses the model's real
+    /// GUI default.
+    pub advection_scheme: Option<Scheme>,
+}
+
+/// Stability observations from the real GUI mesh/model/seed/BC/runtime path.
+#[doc(hidden)]
+#[derive(Debug, Clone)]
+pub struct GuiExplicitRk4Smoke {
+    pub topology: &'static str,
+    pub model_id: String,
+    pub backend: String,
+    pub presentation: String,
+    /// `ordinary` is the readback-capable Plot/CPU router; `autonomous` is the
+    /// health-audited Direct GPU router.
+    pub route: &'static str,
+    pub cells: usize,
+    pub steps: usize,
+    pub final_time: f64,
+    pub min_dt: f64,
+    pub max_dt: f64,
+    pub min_rho: Option<f64>,
+    pub min_temperature: Option<f64>,
+    pub min_pressure: Option<f64>,
+    pub min_total_energy_density: Option<f64>,
+    pub min_internal_energy_density: Option<f64>,
+    pub packed_state: Vec<f32>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum GuiMatrixBackend {
+    Gpu,
+    CpuInterpreter,
+    CpuTranspiled,
+    CpuTranspiledSimd,
+}
+
+impl GuiMatrixBackend {
+    fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "gpu" => Ok(Self::Gpu),
+            "cpu-interpreter" => Ok(Self::CpuInterpreter),
+            "cpu-transpiled" => Ok(Self::CpuTranspiled),
+            "cpu-transpiled-simd" => Ok(Self::CpuTranspiledSimd),
+            other => Err(format!(
+                "unknown GUI compute backend '{other}'; expected gpu, cpu-interpreter, cpu-transpiled, or cpu-transpiled-simd"
+            )),
+        }
+    }
+
+    fn is_gpu(self) -> bool {
+        matches!(self, Self::Gpu)
+    }
+}
+
+fn gui_matrix_geometry(value: &str) -> Result<GeometryType, String> {
+    match value {
+        "backstep" => Ok(GeometryType::BackwardsStep),
+        "obstacle" => Ok(GeometryType::ChannelObstacle),
+        "nozzle" => Ok(GeometryType::Nozzle),
+        other => Err(format!(
+            "unknown GUI geometry '{other}'; expected backstep, obstacle, or nozzle"
+        )),
+    }
+}
+
+fn gui_matrix_mesh(value: &str, geometry: GeometryType) -> Result<MeshType, String> {
+    match value {
+        "cutcell" => Ok(MeshType::CutCell),
+        "delaunay" => Ok(MeshType::Delaunay),
+        "voronoi" => Ok(MeshType::Voronoi),
+        "cvt" => Ok(MeshType::VoronoiCvt),
+        "fitted" if geometry == GeometryType::Nozzle => Ok(MeshType::Fitted),
+        "fitted" => Err("the fitted GUI mesh is nozzle-only".to_string()),
+        "structured" => Err(
+            "the structured mesh token is valid only for a *_structured GUI model".to_string(),
+        ),
+        other => Err(format!(
+            "unknown GUI mesh '{other}'; expected cutcell, delaunay, voronoi, cvt, or fitted"
+        )),
+    }
+}
+
+fn gui_matrix_params(
+    model_id: &str,
+    geometry: GeometryType,
+    adaptive: bool,
+    fluid_name: &str,
+) -> Result<(Fluid, RuntimeParams), String> {
+    let fluid = Fluid::presets()
+        .into_iter()
+        .find(|fluid| fluid.name == fluid_name)
+        .ok_or_else(|| format!("unknown GUI fluid preset '{fluid_name}'"))?;
+    let is_allmach = matches!(
+        model_id,
+        "allmach_pressure" | "allmach_thermal" | "allmach_thermal_structured"
+    );
+    let defaults = if geometry == GeometryType::Nozzle && is_allmach {
+        crate::ui::model_defaults::ALLMACH_THERMAL_NOZZLE
+    } else {
+        crate::ui::model_defaults::gui_defaults_for(model_id)
+    };
+    let mut params = defaults.to_runtime_params(
+        fluid.density as f32,
+        fluid.viscosity as f32,
+        fluid.eos,
+    );
+    params.time_scheme = GpuTimeScheme::RK4;
+    params.adaptive_dt = adaptive;
+    // This is an ordinary, user-selectable timestep value.  It is below the
+    // acoustic limit of the deliberately lean matrix meshes and below the
+    // structured Brinkman reaction limit, so the fixed-dt row tests RK4 rather
+    // than intentionally asking the stability region to reject an oversized
+    // implicit-default slider value.
+    params.requested_dt = params.requested_dt.min(5.0e-6);
+    Ok((fluid, params))
+}
+
+fn gui_matrix_gpu_context(
+) -> Result<crate::solver::gpu::context::GpuContext, String> {
+    use crate::solver::gpu::context::GpuContext;
+    static CONTEXT: std::sync::OnceLock<Result<GpuContext, String>> =
+        std::sync::OnceLock::new();
+    let shared = CONTEXT.get_or_init(|| pollster::block_on(GpuContext::new(None, None)));
+    match shared {
+        Ok(context) => Ok(GpuContext {
+            device: context.device.clone(),
+            queue: context.queue.clone(),
+            timestamp_query: context.timestamp_query,
+            timestamps_inside_encoders: context.timestamps_inside_encoders,
+            timestamp_period_ns: context.timestamp_period_ns,
+            pipeline_cache: Arc::clone(&context.pipeline_cache),
+        }),
+        Err(error) => Err(error.clone()),
+    }
+}
+
+/// Cheap adapter probe used by the matrix gate to distinguish a legitimate
+/// headless skip from a solver construction failure.
+#[doc(hidden)]
+pub fn gui_explicit_rk4_gpu_available() -> Result<(), String> {
+    gui_matrix_gpu_context().map(|_| ())
+}
+
+static GUI_MATRIX_CPU_ENV_LOCK: Mutex<()> = Mutex::new(());
+
+struct GuiMatrixEnvRestore(Vec<(&'static str, Option<std::ffi::OsString>)>);
+
+impl GuiMatrixEnvRestore {
+    fn install(backend: GuiMatrixBackend) -> Self {
+        const KEYS: [&str; 5] = [
+            "CFD2_BACKEND",
+            "CFD2_CPU_ENGINE",
+            "CFD2_CPU_THREADS",
+            "CFD2_CPU_SIMD",
+            "CFD2_CPU_PRECISION",
+        ];
+        let old = KEYS
+            .iter()
+            .map(|&key| (key, std::env::var_os(key)))
+            .collect();
+        if backend.is_gpu() {
+            std::env::remove_var("CFD2_BACKEND");
+        } else {
+            std::env::set_var("CFD2_BACKEND", "cpu");
+            std::env::set_var(
+                "CFD2_CPU_ENGINE",
+                if matches!(backend, GuiMatrixBackend::CpuInterpreter) {
+                    "interpreter"
+                } else {
+                    "transpiled"
+                },
+            );
+            std::env::set_var("CFD2_CPU_THREADS", "1");
+            std::env::set_var(
+                "CFD2_CPU_SIMD",
+                if matches!(backend, GuiMatrixBackend::CpuTranspiledSimd) {
+                    "1"
+                } else {
+                    "0"
+                },
+            );
+            std::env::set_var("CFD2_CPU_PRECISION", "f64");
+        }
+        Self(old)
+    }
+}
+
+impl Drop for GuiMatrixEnvRestore {
+    fn drop(&mut self) {
+        for (key, value) in self.0.drain(..) {
+            if let Some(value) = value {
+                std::env::set_var(key, value);
+            } else {
+                std::env::remove_var(key);
+            }
+        }
+    }
+}
+
+fn gui_matrix_state_minima(
+    model_id: &str,
+    layout: &crate::solver::model::backend::state_layout::StateLayout,
+    state: &[f32],
+    eos: EosSpec,
+) -> Result<
+    (
+        Option<f64>,
+        Option<f64>,
+        Option<f64>,
+        Option<f64>,
+        Option<f64>,
+    ),
+    String,
+> {
+    let stride = layout.stride() as usize;
+    if stride == 0 || state.len() % stride != 0 || state.is_empty() {
+        return Err(format!(
+            "GUI RK4 {model_id} returned invalid packed-state length {} for stride {stride}",
+            state.len()
+        ));
+    }
+    if let Some((index, value)) = state
+        .iter()
+        .enumerate()
+        .find(|(_, value)| !value.is_finite())
+    {
+        return Err(format!(
+            "GUI RK4 {model_id} returned non-finite state[{index}]={value}"
+        ));
+    }
+
+    let offset = |name: &str| layout.offset_for(name).map(|value| value as usize);
+    let rows = || state.chunks_exact(stride);
+    let min_rho = offset("rho").map(|rho| {
+        rows()
+            .map(|row| row[rho] as f64)
+            .fold(f64::INFINITY, f64::min)
+    });
+    if min_rho.is_some_and(|value| !(value > 0.0)) {
+        return Err(format!(
+            "GUI RK4 {model_id} produced non-positive density {min_rho:?}"
+        ));
+    }
+    let min_temperature = offset("T").map(|temperature| {
+        rows()
+            .map(|row| row[temperature] as f64)
+            .fold(f64::INFINITY, f64::min)
+    });
+    if min_temperature.is_some_and(|value| !(value > 0.0)) {
+        return Err(format!(
+            "GUI RK4 {model_id} produced non-positive temperature {min_temperature:?}"
+        ));
+    }
+
+    let conserved_offsets = (
+        offset("rho"),
+        offset("rho_u"),
+        offset("rho_e"),
+    );
+    let min_total_energy_density = conserved_offsets.2.map(|total_energy| {
+        rows()
+            .map(|row| row[total_energy] as f64)
+            .fold(f64::INFINITY, f64::min)
+    });
+    if matches!(eos, EosSpec::IdealGas { .. })
+        && min_total_energy_density.is_some_and(|value| !(value > 0.0))
+    {
+        return Err(format!(
+            "GUI RK4 {model_id} produced non-positive conserved energy density {min_total_energy_density:?}"
+        ));
+    }
+    let min_pressure = if conserved_offsets.2.is_some() {
+        offset("p").map(|pressure| {
+            rows()
+                .map(|row| row[pressure] as f64)
+                .fold(f64::INFINITY, f64::min)
+        })
+    } else {
+        None
+    };
+    if min_pressure.is_some_and(|value| !(value > 0.0)) {
+        return Err(format!(
+            "GUI RK4 {model_id} produced non-positive thermodynamic pressure {min_pressure:?}"
+        ));
+    }
+    let min_internal_energy_density = match conserved_offsets {
+        (Some(rho), Some(momentum), Some(total_energy)) => Some(
+            rows()
+                .map(|row| {
+                    let density = row[rho] as f64;
+                    let mx = row[momentum] as f64;
+                    let my = row[momentum + 1] as f64;
+                    row[total_energy] as f64 - (mx * mx + my * my) / (2.0 * density)
+                })
+                .fold(f64::INFINITY, f64::min),
+        ),
+        _ => None,
+    };
+    let internal_invalid = match eos {
+        EosSpec::IdealGas { .. } => {
+            min_internal_energy_density.is_some_and(|value| !(value > 0.0))
+        }
+        // A barotropic internal-energy primitive has an arbitrary additive
+        // C*rho gauge. GUI liquid presets choose zero at rho_ref, and the
+        // thermodynamically compatible energy is negative for a sufficiently
+        // small rarefaction about that reference. Its sign is therefore not a
+        // domain invariant; finite rho, pressure, and sound-speed closure are.
+        EosSpec::LinearCompressibility { .. } | EosSpec::Constant => false,
+    };
+    if internal_invalid {
+        return Err(format!(
+            "GUI RK4 {model_id} produced invalid internal-energy density {min_internal_energy_density:?}"
+        ));
+    }
+    Ok((
+        min_rho,
+        min_temperature,
+        min_pressure,
+        min_total_energy_density,
+        min_internal_energy_density,
+    ))
+}
+
+fn gui_matrix_state_diagnostic(
+    layout: &crate::solver::model::backend::state_layout::StateLayout,
+    state: &[f32],
+    mesh: Option<&Mesh>,
+) -> String {
+    let stride = layout.stride() as usize;
+    if stride == 0 || state.len() % stride != 0 {
+        return format!("state_len={} stride={stride}", state.len());
+    }
+    let nonfinite_cells: Vec<usize> = state
+        .chunks_exact(stride)
+        .enumerate()
+        .filter_map(|(cell, row)| row.iter().any(|value| !value.is_finite()).then_some(cell))
+        .collect();
+    let nonfinite_boundary_cells = mesh.map(|mesh| {
+        nonfinite_cells
+            .iter()
+            .filter(|&&cell| {
+                mesh.cell_faces[mesh.cell_face_offsets[cell]..mesh.cell_face_offsets[cell + 1]]
+                    .iter()
+                    .any(|&face| mesh.face_boundary[face].is_some())
+            })
+            .count()
+    });
+    let mut fields = Vec::new();
+    for name in ["rho", "p", "T", "psi_precond", "d_p", "rho_e"] {
+        let Some(offset) = layout.offset_for(name).map(|value| value as usize) else {
+            continue;
+        };
+        let (min, max) = state
+            .chunks_exact(stride)
+            .map(|row| row[offset])
+            .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), value| {
+                (min.min(value), max.max(value))
+            });
+        fields.push(format!("{name}=[{min:.6e},{max:.6e}]"));
+    }
+    format!(
+        "nonfinite_rows={} boundary_nonfinite={nonfinite_boundary_cells:?} bad_cells={nonfinite_cells:?} {}",
+        nonfinite_cells.len(),
+        fields.join(" ")
+    )
+}
+
+/// Execute one bounded matrix row through the same GUI mesh/model/IC/BC/runtime
+/// helpers and the same ordinary/autonomous routing policy as the worker.
+#[doc(hidden)]
+pub fn gui_explicit_rk4_smoke(
+    case: GuiExplicitRk4Case<'_>,
+) -> Result<GuiExplicitRk4Smoke, String> {
+    if case.moving_mesh {
+        return Err(
+            "explicit RK4 is static-only; the GUI coerces a moving-mesh request to BDF2"
+                .to_string(),
+        );
+    }
+    if case.steps == 0 {
+        return Err("GUI RK4 smoke requires at least one step".to_string());
+    }
+    if !case.cell_size.is_finite() || !(case.cell_size > 0.0) {
+        return Err(format!(
+            "GUI RK4 smoke cell size must be finite and positive, got {}",
+            case.cell_size
+        ));
+    }
+    let backend = GuiMatrixBackend::parse(case.backend)?;
+    let direct = match case.presentation {
+        "direct" => true,
+        "plot" => false,
+        other => {
+            return Err(format!(
+                "unknown GUI presentation '{other}'; expected direct or plot"
+            ))
+        }
+    };
+    let geometry = gui_matrix_geometry(case.geometry)?;
+    let structured = case.model_id.ends_with("_structured");
+    let mesh_mode = if structured {
+        MeshMode::Structured2D
+    } else {
+        MeshMode::Unstructured
+    };
+    if !CFDApp::supported_ui_models(mesh_mode)
+        .iter()
+        .any(|(model_id, _)| *model_id == case.model_id)
+    {
+        return Err(format!(
+            "model '{}' is not an actual {mesh_mode:?} GUI dropdown option",
+            case.model_id
+        ));
+    }
+    if structured && case.mesh_kind != "structured" {
+        return Err(format!(
+            "structured GUI model '{}' requires mesh_kind='structured'; its mesh dropdown is hidden",
+            case.model_id
+        ));
+    }
+    let mesh_kind = if structured {
+        None
+    } else {
+        Some(gui_matrix_mesh(case.mesh_kind, geometry)?)
+    };
+    let (fluid, params) =
+        gui_matrix_params(case.model_id, geometry, case.adaptive, case.fluid)?;
+    let mut params = params;
+    if let Some(requested_dt) = case.requested_dt {
+        if !(requested_dt.is_finite() && requested_dt > 0.0) {
+            return Err(format!(
+                "GUI RK4 requested timestep must be finite and positive, got {requested_dt}"
+            ));
+        }
+        params.requested_dt = requested_dt;
+    }
+    if let Some(advection_scheme) = case.advection_scheme {
+        params.advection_scheme = advection_scheme;
+    }
+
+    let model = if structured {
+        structured_model_by_id(case.model_id)?
+    } else {
+        unstructured_model_by_id(case.model_id, fluid.eos)?
+    };
+    model.validate_explicit_rk4().map_err(|error| {
+        format!(
+            "GUI model '{}' explicitly rejects RK4: {error}",
+            case.model_id
+        )
+    })?;
+
+    let mut min_dt = f64::INFINITY;
+    let mut max_dt = 0.0_f64;
+    let (route, cells, final_time, layout, packed_state) = if structured {
+        let (lx, ly) = (3.0_f64, 1.0_f64);
+        let nx = ((lx / case.cell_size).round() as usize).max(1);
+        let ny = ((ly / case.cell_size).round() as usize).max(1);
+        let grid = StructuredGrid::new(nx, ny, lx, ly);
+        let unknowns = model.system.unknowns_per_cell() as usize;
+
+        if backend.is_gpu() {
+            let mut solver = StructuredGpuSolver::with_config(
+                gui_matrix_gpu_context()?,
+                grid,
+                &model,
+                params.requested_dt as f64,
+                params.outer_iters.max(1) as usize,
+                params.advection_scheme,
+                GpuTimeScheme::RK4,
+            )?;
+            solver.set_fluid(params.density as f64, params.viscosity as f64);
+            solver.set_outer_iters(params.outer_iters.max(1) as usize);
+            solver.set_outer_auto_converge(params.outer_auto_converge);
+            solver.set_alpha_u(params.alpha_u);
+            solver.set_alpha_p(params.alpha_p);
+            if case.model_id == "compressible_structured" {
+                apply_structured_compressible_runtime(&mut solver, &params);
+            }
+            seed_structured_state(
+                &mut solver,
+                case.model_id,
+                &params,
+                grid.dx,
+                grid.dy,
+            );
+            seed_structured_freestream(
+                &mut solver,
+                case.model_id,
+                params.inlet_velocity as f64,
+                &params,
+            );
+            seed_structured_ibm(&mut solver, geometry, lx, ly);
+            setup_structured_bcs(
+                &mut solver,
+                case.model_id,
+                params.inlet_velocity as f64,
+                unknowns,
+                &params,
+            );
+
+            let autonomous = direct
+                && if params.adaptive_dt {
+                    solver.supports_autonomous_adaptive()
+                } else {
+                    solver.supports_autonomous_fixed()
+                };
+            if autonomous {
+                solver.step_autonomous_batch(
+                    case.steps,
+                    params.adaptive_dt.then_some(params.target_cfl as f32),
+                )?;
+                let status = solver
+                    .autonomous_status()
+                    .ok_or("structured Direct controller returned no status")?;
+                if status.halted || status.invalid_cells != 0 {
+                    return Err(format!(
+                        "structured Direct controller rejected GUI case: {status:?}"
+                    ));
+                }
+                if status.accepted_steps as usize != case.steps {
+                    return Err(format!(
+                        "structured Direct controller accepted {} of {} requested steps",
+                        status.accepted_steps, case.steps
+                    ));
+                }
+                min_dt = f64::from(status.dt_old.min(status.dt));
+                max_dt = f64::from(status.dt_old.max(status.dt));
+                solver.reconcile_autonomous_status(status);
+            } else {
+                let mut prev_max_vel = 0.0;
+                let mut prev_explicit_rate = None;
+                for step in 0..case.steps {
+                    let outcome = structured_step(
+                        &mut solver,
+                        &params,
+                        &mut prev_max_vel,
+                        &mut prev_explicit_rate,
+                        case.model_id,
+                        true,
+                    );
+                    if let Some(reason) = outcome.diverged {
+                        return Err(format!(
+                            "structured GUI RK4 ordinary step {step}: {reason:?}"
+                        ));
+                    }
+                    min_dt = min_dt.min(outcome.dt as f64);
+                    max_dt = max_dt.max(outcome.dt as f64);
+                }
+            }
+            let final_time = solver.time();
+            let layout = solver.state_layout().clone();
+            let state = solver.packed_state_f32();
+            (
+                if autonomous { "autonomous" } else { "ordinary" },
+                grid.num_cells(),
+                final_time,
+                layout,
+                state,
+            )
+        } else {
+            let mut solver = StructuredModelSolver::with_config(
+                grid,
+                &model,
+                params.requested_dt as f64,
+                params.outer_iters.max(1) as usize,
+                params.advection_scheme,
+                GpuTimeScheme::RK4,
+            )?;
+            let engine = if matches!(backend, GuiMatrixBackend::CpuInterpreter) {
+                crate::solver::cpu::CpuEngine::Interpreter
+            } else {
+                // The GUI documents SIMD as a linear-solve optimization. RK4 has
+                // no linear solve, so its transpiled and transpiled+SIMD rows
+                // deliberately execute the same structured kernel engine.
+                crate::solver::cpu::CpuEngine::Transpiled
+            };
+            solver.set_engine(engine, 1);
+            solver.set_fluid(params.density as f64, params.viscosity as f64);
+            solver.set_outer_iters(params.outer_iters.max(1) as usize);
+            solver.set_outer_auto_converge(params.outer_auto_converge);
+            solver.set_alpha_u(params.alpha_u);
+            solver.set_alpha_p(params.alpha_p);
+            if case.model_id == "compressible_structured" {
+                apply_structured_compressible_runtime(&mut solver, &params);
+            }
+            seed_structured_state(
+                &mut solver,
+                case.model_id,
+                &params,
+                grid.dx,
+                grid.dy,
+            );
+            seed_structured_freestream(
+                &mut solver,
+                case.model_id,
+                params.inlet_velocity as f64,
+                &params,
+            );
+            seed_structured_ibm(&mut solver, geometry, lx, ly);
+            setup_structured_bcs(
+                &mut solver,
+                case.model_id,
+                params.inlet_velocity as f64,
+                unknowns,
+                &params,
+            );
+            let mut prev_max_vel = 0.0;
+            let mut prev_explicit_rate = None;
+            for step in 0..case.steps {
+                let outcome = structured_step(
+                    &mut solver,
+                    &params,
+                    &mut prev_max_vel,
+                    &mut prev_explicit_rate,
+                    case.model_id,
+                    true,
+                );
+                if let Some(reason) = outcome.diverged {
+                    return Err(format!(
+                        "structured CPU GUI RK4 step {step}: {reason:?}"
+                    ));
+                }
+                min_dt = min_dt.min(outcome.dt as f64);
+                max_dt = max_dt.max(outcome.dt as f64);
+            }
+            (
+                "ordinary",
+                grid.num_cells(),
+                solver.time(),
+                solver.state_layout().clone(),
+                solver.packed_state_f32(),
+            )
+        }
+    } else {
+        let mut trace = Vec::new();
+        let mesh = CFDApp::build_mesh_with(
+            geometry,
+            mesh_kind.expect("unstructured mesh parsed"),
+            case.cell_size,
+            case.cell_size,
+            1.2,
+            &mut trace,
+        );
+        if mesh.cell_vol.iter().any(|volume| !volume.is_finite() || !(*volume > 0.0)) {
+            return Err(format!(
+                "GUI {geometry:?}/{:?} mesh contains a non-positive or non-finite cell volume",
+                mesh_kind.expect("unstructured mesh parsed")
+            ));
+        }
+        let initial_u = CFDApp::build_initial_velocity_with(
+            &mesh,
+            geometry,
+            case.cell_size,
+            params.inlet_velocity,
+        );
+        let initial_p = vec![0.0; mesh.num_cells()];
+        let _env_lock = GUI_MATRIX_CPU_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _env = GuiMatrixEnvRestore::install(backend);
+        let mut build = if backend.is_gpu() {
+            let context = gui_matrix_gpu_context()?;
+            pollster::block_on(SolverDriver::build(
+                &mesh,
+                model,
+                &params,
+                &initial_u,
+                &initial_p,
+                Some(context.device),
+                Some(context.queue),
+            ))?
+        } else {
+            pollster::block_on(SolverDriver::build_forced_cpu(
+                &mesh,
+                model,
+                &params,
+                &initial_u,
+                &initial_p,
+            ))?
+        };
+        build.driver.apply_params(&params);
+        let autonomous = direct
+            && backend.is_gpu()
+            && build
+                .driver
+                .autonomous_explicit_capabilities()
+                .is_some_and(|capabilities| {
+                    capabilities.accepted_state_copy
+                        && if params.adaptive_dt {
+                            capabilities.adaptive_health
+                        } else {
+                            capabilities.fixed_health
+                        }
+                });
+        if autonomous {
+            if case.steps % 3 != 0 {
+                return Err(format!(
+                    "unstructured Direct autonomous GUI smoke requires a whole three-history cycle; got {} steps",
+                    case.steps
+                ));
+            }
+            let (tx, rx) = mpsc::channel();
+            build.driver.submit_autonomous_explicit_gpu_batch(
+                case.steps as u32,
+                move |result| {
+                    let _ = tx.send(result);
+                },
+            )?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+            let completion = loop {
+                build.driver.poll_gpu_batch_completions()?;
+                if let Ok(result) = rx.try_recv() {
+                    break result?;
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err("unstructured Direct controller completion timed out".to_string());
+                }
+                thread::yield_now();
+            };
+            if completion.halted || completion.invalid_count != 0 {
+                return Err(format!(
+                    "unstructured Direct controller rejected GUI case: {completion:?}"
+                ));
+            }
+            if completion.accepted_batch as usize != case.steps {
+                return Err(format!(
+                    "unstructured Direct controller accepted {} of {} requested steps",
+                    completion.accepted_batch, case.steps
+                ));
+            }
+            min_dt = f64::from(completion.last_dt.min(completion.next_dt));
+            max_dt = f64::from(completion.last_dt.max(completion.next_dt));
+            build
+                .driver
+                .reconcile_autonomous_explicit_gpu_batch(completion)?;
+        } else {
+            for step in 0..case.steps {
+                let outcome = build.driver.step(true);
+                if let Some(reason) = outcome.diverged {
+                    let state = pollster::block_on(build.driver.solver().read_state_f32());
+                    let diagnostic = gui_matrix_state_diagnostic(
+                        &build.driver.solver().model().state_layout,
+                        &state,
+                        Some(&mesh),
+                    );
+                    return Err(format!(
+                        "unstructured GUI RK4 ordinary step {step}: {reason:?}; {diagnostic}"
+                    ));
+                }
+                if let Some(readback) = &outcome.readback {
+                    if readback.stats.nonfinite_u != 0 || readback.stats.nonfinite_p != 0 {
+                        return Err(format!(
+                            "unstructured GUI RK4 ordinary step {step} returned non-finite fields"
+                        ));
+                    }
+                }
+                min_dt = min_dt.min(outcome.dt as f64);
+                max_dt = max_dt.max(outcome.dt as f64);
+            }
+        }
+        let cells = mesh.num_cells();
+        let final_time = build.driver.solver().time() as f64;
+        let layout = build.driver.solver().model().state_layout.clone();
+        let state = pollster::block_on(build.driver.solver().read_state_f32());
+        (
+            if autonomous { "autonomous" } else { "ordinary" },
+            cells,
+            final_time,
+            layout,
+            state,
+        )
+    };
+
+    if !(final_time.is_finite() && final_time > 0.0) {
+        return Err(format!(
+            "GUI RK4 '{}' did not advance to a finite positive time: {final_time}",
+            case.model_id
+        ));
+    }
+    if !(min_dt.is_finite() && min_dt > 0.0 && max_dt.is_finite() && max_dt > 0.0) {
+        return Err(format!(
+            "GUI RK4 '{}' returned invalid timestep range [{min_dt}, {max_dt}]",
+            case.model_id
+        ));
+    }
+    let (
+        min_rho,
+        min_temperature,
+        min_pressure,
+        min_total_energy_density,
+        min_internal_energy_density,
+    ) = gui_matrix_state_minima(case.model_id, &layout, &packed_state, params.eos)?;
+    Ok(GuiExplicitRk4Smoke {
+        topology: if structured { "structured" } else { "unstructured" },
+        model_id: case.model_id.to_string(),
+        backend: case.backend.to_string(),
+        presentation: case.presentation.to_string(),
+        route,
+        cells,
+        steps: case.steps,
+        final_time,
+        min_dt,
+        max_dt,
+        min_rho,
+        min_temperature,
+        min_pressure,
+        min_total_energy_density,
+        min_internal_energy_density,
+        packed_state,
+    })
 }
 
 /// Headless observations from the exact unstructured GUI mesh, initial-field,
@@ -7315,6 +10732,25 @@ fn solver_worker_main(
     let mut completed_step_timing = CompletedStepTiming::new();
     let stats_publish_interval = std::time::Duration::from_millis(33);
     let snapshot_publish_interval = std::time::Duration::from_millis(100);
+    let mut autonomous_scheduler = AutonomousBatchScheduler::default();
+    let (autonomous_completion_tx, autonomous_completion_rx) =
+        mpsc::channel::<AutonomousCallbackMessage>();
+    let mut autonomous_fallback = false;
+    // A failed tail-status decode means the GPU executed work whose accepted
+    // time/history phase the host can no longer prove.  Such a backend must be
+    // rebuilt; silently falling back to the ordinary router would risk
+    // advancing from the wrong ping-pong buffer.
+    let mut autonomous_backend_poisoned = false;
+    // Live parameter changes are policy requests.  Applying them while an
+    // autonomous window is queued can both block on whole-state readbacks and
+    // let an older completion overwrite the new dt.  Drain first, then apply
+    // the latest request exactly once.
+    let mut pending_autonomous_param_apply = false;
+    let mut autonomous_error: Option<String> = None;
+    let mut autonomous_completed_time: Option<f64> = None;
+    // Keep a replaced solver (and therefore its wgpu Device) alive until all
+    // callbacks from its invalidated generation have released their credits.
+    let mut retired_autonomous_modes: Vec<SolverMode> = Vec::new();
 
     loop {
         while let Ok(cmd) = cmd_rx.try_recv() {
@@ -7332,13 +10768,402 @@ fn solver_worker_main(
                 &mut completed_step_timing,
                 &mut last_stats_publish,
                 &mut last_snapshot_publish,
+                &mut autonomous_scheduler,
+                &mut autonomous_fallback,
+                &mut autonomous_backend_poisoned,
+                &mut pending_autonomous_param_apply,
+                &mut retired_autonomous_modes,
                 &evt_tx,
             ) {
                 return;
             }
         }
 
+        // Autonomous marching is intentionally a presentation-mode fast path:
+        // the GPU-direct renderer consumes frame-demanded device copies, while
+        // EguiPlot needs host u/p snapshots and therefore stays on the ordinary
+        // readback path. Fixed-dt structured RK4 has an accepted-state GPU
+        // health/rollback controller. Other modes fall through until they
+        // expose the same safety contract.
+        let autonomous_presentation_ready = !autonomous_fallback
+            && trace.is_none()
+            && params.time_scheme == GpuTimeScheme::RK4
+            && !params.log_convergence
+            && viz_field
+                .as_ref()
+                .is_some_and(|viz| viz.size_bytes > 0 && viz.mailbox.gpu_consumer_enabled());
+        let autonomous_policy = match mode.as_ref() {
+            // Structured fixed-dt RK4 has finite-state rollback only when
+            // its current EOS family is covered by that audit. The exact
+            // all-Mach controller additionally supports adaptive CFL.
+            Some(SolverMode::Structured(s)) => structured_autonomous_refill_policy(
+                autonomous_presentation_ready,
+                params.adaptive_dt,
+                s.supports_autonomous_fixed(),
+                s.supports_autonomous_adaptive(),
+            ),
+            // Unstructured eligibility is declared by the controller, not
+            // inferred from a model id. Whole three-step history cycles
+            // keep the host submission phase stable while the GPU-selected
+            // frame copy follows any accepted prefix exactly.
+            Some(SolverMode::Static(d))
+                if autonomous_presentation_ready
+                    && d.autonomous_explicit_capabilities().is_some_and(|capabilities| {
+                        capabilities.accepted_state_copy
+                            && if params.adaptive_dt {
+                                capabilities.adaptive_health
+                            } else {
+                                capabilities.fixed_health
+                            }
+                    }) =>
+            {
+                Some(AutonomousRefillPolicy::ContinuousPhaseCycle3)
+            }
+            _ => None,
+        };
+        let autonomous_eligible = autonomous_policy.is_some();
+
+        if autonomous_scheduler.is_active() {
+            let mut current_pollable = false;
+            let current_poll = match mode.as_ref() {
+                Some(SolverMode::Structured(s)) => {
+                    current_pollable = true;
+                    s.poll_gpu_completions()
+                }
+                // A generation-changing solver replacement normally uses the
+                // same UI device. Polling its current plan also drives stale
+                // callbacks on that shared device until their credits retire.
+                Some(SolverMode::Static(d)) => {
+                    current_pollable = true;
+                    d.poll_gpu_batch_completions()
+                }
+                _ => Ok(()),
+            };
+            let current_poll_error = current_poll.err();
+            let mut retired_poll_succeeded = false;
+            let mut retired_poll_error = None;
+            for retired in &retired_autonomous_modes {
+                let result = match retired {
+                    SolverMode::Structured(s) => s.poll_gpu_completions(),
+                    SolverMode::Static(d) => d.poll_gpu_batch_completions(),
+                    _ => Ok(()),
+                };
+                match result {
+                    Ok(()) => retired_poll_succeeded = true,
+                    Err(error) => retired_poll_error = Some(error),
+                }
+            }
+
+            if let Some(error) = current_poll_error {
+                autonomous_error.get_or_insert(error);
+                autonomous_backend_poisoned = true;
+                autonomous_fallback = true;
+                running = false;
+                // The current device may have executed work whose tail status
+                // can no longer be observed.  Its state is therefore
+                // non-resumable until Initialize/Reset rebuilds the backend.
+                autonomous_scheduler.abort();
+            } else if retired_poll_error.is_some() {
+                // A retired device failure cannot poison its replacement.
+                // Its stale callbacks are unrecoverable, so release only those
+                // old-epoch credits and keep current work intact.
+                autonomous_scheduler.discard_retired_epochs();
+                retired_autonomous_modes.clear();
+            } else if !current_pollable
+                && !retired_poll_succeeded
+                && autonomous_scheduler.is_active()
+            {
+                let has_current_work = autonomous_scheduler
+                    .in_flight
+                    .iter()
+                    .any(|ticket| ticket.backend_epoch == autonomous_scheduler.backend_epoch);
+                if has_current_work {
+                    autonomous_error.get_or_insert_with(|| {
+                        "autonomous GPU completion lost its polling device".to_string()
+                    });
+                    autonomous_backend_poisoned = true;
+                    autonomous_fallback = true;
+                    running = false;
+                    autonomous_scheduler.abort();
+                } else {
+                    autonomous_scheduler.discard_retired_epochs();
+                }
+            }
+        }
+
+        let mut accepted_batch_boundary = false;
+        while let Ok(message) = autonomous_completion_rx.try_recv() {
+            let completion = match message.result {
+                Ok(AutonomousBackendStatus::Structured(status)) => AutonomousBatchCompletion {
+                    ticket: message.ticket,
+                    accepted_steps: status.accepted_steps,
+                    completed_time: f64::from(status.time),
+                    last_dt: status.dt_old,
+                    next_dt: status.dt,
+                    halted: status.halted,
+                    invalid_count: status.invalid_cells,
+                    completed_at: message.completed_at,
+                    backend_status: Some(AutonomousBackendStatus::Structured(status)),
+                },
+                Ok(AutonomousBackendStatus::Unstructured(status)) => AutonomousBatchCompletion {
+                    ticket: message.ticket,
+                    accepted_steps: status.accepted_batch,
+                    completed_time: f64::from(status.time),
+                    last_dt: status.last_dt,
+                    next_dt: status.next_dt,
+                    halted: status.halted,
+                    invalid_count: status.invalid_count,
+                    completed_at: message.completed_at,
+                    backend_status: Some(AutonomousBackendStatus::Unstructured(status)),
+                },
+                Err(error) => {
+                    // The GPU batch is fenced even when decoding its tiny
+                    // status failed, so release its physical credit but never
+                    // invent accepted progress.
+                    if message.ticket.backend_epoch == autonomous_scheduler.backend_epoch {
+                        // Make every queued tail callback stale before
+                        // tombstoning the failed front.  A late error from a
+                        // retired backend must not re-poison its replacement.
+                        autonomous_scheduler.invalidate(false);
+                        autonomous_error.get_or_insert(error);
+                        autonomous_backend_poisoned = true;
+                        autonomous_fallback = true;
+                        running = false;
+                    }
+                    autonomous_scheduler.discard_failed_completion(message.ticket);
+                    continue;
+                }
+            };
+
+            let drain = autonomous_scheduler.complete(completion);
+            for retired in drain.retired.iter() {
+                if retired.ticket.backend_epoch != autonomous_scheduler.backend_epoch {
+                    continue;
+                }
+                let reconciliation = match (retired.backend_status, mode.as_mut()) {
+                    (
+                        Some(AutonomousBackendStatus::Structured(status)),
+                        Some(SolverMode::Structured(s)),
+                    ) => {
+                        s.reconcile_autonomous_status(status);
+                        Ok(())
+                    }
+                    (
+                        Some(AutonomousBackendStatus::Unstructured(status)),
+                        Some(SolverMode::Static(d)),
+                    ) => d.reconcile_autonomous_explicit_gpu_batch(status),
+                    (None, _) => Ok(()),
+                    _ => {
+                        Err("autonomous completion reached a different solver backend".to_string())
+                    }
+                };
+                if let Err(error) = reconciliation {
+                    autonomous_error.get_or_insert(error);
+                    running = false;
+                    autonomous_scheduler.request_pause();
+                } else if retired.ticket.generation != autonomous_scheduler.generation {
+                    // Generation invalidation suppresses publication/tuning,
+                    // not physical work already accepted by this same
+                    // backend. Keep trace step numbering and the next timing
+                    // delta aligned with the reconciled solver clock.
+                    step_idx = step_idx.wrapping_add(u64::from(retired.accepted_steps));
+                    autonomous_completed_time = Some(retired.completed_time);
+                }
+            }
+            for completed in drain.completed.iter().copied() {
+                // Unstructured ping-pong ownership is reconciled only after
+                // the complete two-batch window retires. A copy submitted on
+                // the first callback would execute behind batch 2 while bound
+                // to batch 1's now-history phase. Structured storage has no
+                // such phase alias and may present every retired completion.
+                accepted_batch_boundary |= autonomous_scheduler.refill_policy.is_continuous()
+                    || autonomous_scheduler.in_flight.is_empty();
+                let simulated_seconds = autonomous_completed_time
+                    .map(|previous| (completed.completed_time - previous).max(0.0))
+                    .unwrap_or_else(|| {
+                        f64::from(completed.accepted_steps) * f64::from(completed.last_dt)
+                    });
+                autonomous_completed_time = Some(completed.completed_time);
+                let timing = completed_step_timing.record_batch_at(
+                    u64::from(completed.accepted_steps),
+                    simulated_seconds,
+                    true,
+                    completed.completed_at,
+                );
+                step_idx = step_idx.wrapping_add(u64::from(completed.accepted_steps));
+
+                if !completed.is_healthy() {
+                    autonomous_error.get_or_insert_with(|| {
+                        format!(
+                            "GPU explicit health check halted after {} accepted batch steps ({} invalid cells)",
+                            completed.accepted_steps, completed.invalid_count
+                        )
+                    });
+                    running = false;
+                }
+
+                if last_stats_publish.elapsed() >= stats_publish_interval
+                    || !completed.is_healthy()
+                    || autonomous_scheduler.phase == AutonomousRunPhase::Paused
+                {
+                    last_stats_publish = std::time::Instant::now();
+                    let _ = evt_tx.send(SolverWorkerEvent::Stats {
+                        stats: CachedGpuStats {
+                            sim_time: completed.completed_time,
+                            // `next_dt` is the controller value which will be
+                            // used by the next accepted step; fixed mode keeps
+                            // it equal to `last_dt`.
+                            dt: completed.next_dt,
+                            step_time_ms: timing.step_time_ms,
+                            steps_per_second: timing.steps_per_second,
+                            sim_seconds_per_wall_second: timing.sim_seconds_per_wall_second,
+                            ..Default::default()
+                        },
+                    });
+                }
+            }
+
+            if drain.became_paused && !running {
+                if let Some(error) = autonomous_error.take() {
+                    let _ = evt_tx.send(SolverWorkerEvent::Error(error));
+                }
+                let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+            }
+        }
+
+        if !autonomous_scheduler.is_active() && !running {
+            if let Some(error) = autonomous_error.take() {
+                let _ = evt_tx.send(SolverWorkerEvent::Error(error));
+                let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+            }
+        }
+        if !autonomous_scheduler.is_active() {
+            retired_autonomous_modes.clear();
+        }
+
+        // Parameter mutation is intentionally downstream of physical status
+        // reconciliation.  Therefore no stale completion can restore an old
+        // dt after this point, and any packed-state readback performed by
+        // apply_params_any sees a fully drained queue.
+        if !autonomous_scheduler.is_active()
+            && pending_autonomous_param_apply
+            && !autonomous_backend_poisoned
+        {
+            pending_autonomous_param_apply = false;
+            solver_worker_apply_live_params(
+                &mut mode,
+                &mut params,
+                &mut structured_prev_explicit_rate,
+            );
+            solver_worker_trace_params(&mut trace, mode.as_ref(), step_idx, params);
+        }
+
+        // A visualization copy is requested by the render callback and is
+        // serviced only after a completion-fenced accepted batch boundary.
+        // `finish_write` publishes queue order, not CPU completion: rendering
+        // is submitted after this copy on the same wgpu queue.
+        if accepted_batch_boundary {
+            if let (Some(mode), Some(viz)) = (
+                mode.as_ref(),
+                viz_field.as_ref().filter(|viz| viz.size_bytes > 0),
+            ) {
+                if let Some(write) = viz.mailbox.try_begin_write() {
+                    if viz
+                        .capture_snapshot(mode, write, VizSnapshotSource::AutonomousAccepted)
+                        .is_err()
+                    {
+                        // A missing/invalid accepted-state copy is a clean
+                        // autonomous capability failure. The cancelled mailbox
+                        // request remains outstanding for the ordinary path.
+                        autonomous_fallback = true;
+                        autonomous_scheduler.request_pause();
+                    }
+                }
+            }
+        }
+
+        if !autonomous_eligible && autonomous_scheduler.phase == AutonomousRunPhase::Running {
+            autonomous_scheduler.request_pause();
+        }
+
+        if running && autonomous_eligible && !autonomous_scheduler.is_active() {
+            autonomous_completed_time = mode.as_ref().map(SolverMode::sim_time_f64);
+            autonomous_scheduler.begin_run(autonomous_policy.expect("checked above"));
+        }
+
+        if running && autonomous_eligible {
+            while let Some(ticket) = autonomous_scheduler.reserve(std::time::Instant::now()) {
+                let tx = autonomous_completion_tx.clone();
+                let submitted = match mode.as_mut() {
+                    Some(SolverMode::Structured(s)) => s.submit_autonomous_batch(
+                        ticket.requested_steps as usize,
+                        params.adaptive_dt.then_some(params.target_cfl as f32),
+                        move |result| {
+                            let _ = tx.send(AutonomousCallbackMessage {
+                                ticket,
+                                result: result.map(AutonomousBackendStatus::Structured),
+                                completed_at: std::time::Instant::now(),
+                            });
+                        },
+                    ),
+                    Some(SolverMode::Static(d)) => d
+                        .submit_autonomous_explicit_gpu_batch(
+                            ticket.requested_steps,
+                            move |result| {
+                                let _ = tx.send(AutonomousCallbackMessage {
+                                    ticket,
+                                    result: result.map(AutonomousBackendStatus::Unstructured),
+                                    completed_at: std::time::Instant::now(),
+                                });
+                            },
+                        )
+                        .map(|submission| Some(submission.submission_index)),
+                    _ => Err("autonomous structured solver disappeared".to_string()),
+                };
+                match submitted {
+                    Ok(Some(_)) => {}
+                    Ok(None) => {
+                        autonomous_scheduler.cancel_reservation(ticket);
+                        autonomous_fallback = true;
+                        break;
+                    }
+                    Err(_) => {
+                        // Eligibility can change underneath a queued GUI
+                        // command. A pre-submit rejection is a clean fallback,
+                        // not a solver failure.
+                        autonomous_scheduler.cancel_reservation(ticket);
+                        autonomous_fallback = true;
+                        autonomous_scheduler.request_pause();
+                        break;
+                    }
+                }
+            }
+        }
+
+        if autonomous_scheduler.is_active() {
+            // Never block here: Poll callbacks return completion credits. A
+            // short yield keeps the command/UI threads schedulable without
+            // placing a latency floor on sub-millisecond GPU batches.
+            thread::yield_now();
+            continue;
+        }
+
         if !running {
+            // Plot -> Direct while paused must not keep displaying slot zero's
+            // initial rest state forever. Service at most the one coalesced
+            // outstanding request; no request means no paused-frame copy.
+            if !autonomous_backend_poisoned {
+                if let (Some(mode), Some(viz)) = (
+                    mode.as_ref(),
+                    viz_field.as_ref().filter(|viz| {
+                        viz.size_bytes > 0 && viz.mailbox.gpu_consumer_enabled()
+                    }),
+                ) {
+                    let result =
+                        service_pending_viz_snapshot(mode, viz, VizSnapshotSource::Current);
+                    debug_assert!(result.is_ok(), "paused visualization snapshot failed");
+                }
+            }
             match cmd_rx.recv_timeout(std::time::Duration::from_millis(16)) {
                 Ok(cmd) => {
                     if !solver_worker_handle_cmd(
@@ -7355,6 +11180,11 @@ fn solver_worker_main(
                         &mut completed_step_timing,
                         &mut last_stats_publish,
                         &mut last_snapshot_publish,
+                        &mut autonomous_scheduler,
+                        &mut autonomous_fallback,
+                        &mut autonomous_backend_poisoned,
+                        &mut pending_autonomous_param_apply,
+                        &mut retired_autonomous_modes,
                         &evt_tx,
                     ) {
                         return;
@@ -7501,28 +11331,6 @@ fn solver_worker_main(
             completed_step_timing.record_step(outcome.dt, outcome.readback.is_some());
         let step_time_ms = completed_sample.step_time_ms;
 
-        if let Some(viz_field) = viz_field.as_ref() {
-            if viz_field.size_bytes > 0 {
-                let n = viz_field.buffers.len().max(1);
-                let front = viz_field.front_idx.load(Ordering::Acquire) % n;
-                let ready = viz_field.ready_idx.load(Ordering::Acquire) % n;
-
-                let mut write_idx = (ready + 1) % n;
-                for _ in 0..n {
-                    if write_idx != front && write_idx != ready {
-                        break;
-                    }
-                    write_idx = (write_idx + 1) % n;
-                }
-                if write_idx == front || write_idx == ready {
-                    // Should be unreachable with n>=3, but keep a safe fallback.
-                    write_idx = (front + 1) % n;
-                }
-                mode.copy_state_to_buffer(&viz_field.buffers[write_idx]);
-                viz_field.ready_idx.store(write_idx, Ordering::Release);
-            }
-        }
-
         let linear_solves = outcome.linear_stats.len() as u32;
         let linear_last = outcome.linear_stats.last().copied().unwrap_or_default();
         if matches!(outcome.diverged, Some(DivergeReason::LinearSolver)) {
@@ -7534,7 +11342,22 @@ fn solver_worker_main(
             continue;
         }
 
+        // Service at most one coalesced screen-frame request at this accepted
+        // step boundary. Fast solvers no longer copy their complete state on
+        // every step; a slow step still publishes its accepted state as soon
+        // as it reaches the boundary. `finish_write` runs after the wgpu copy
+        // enqueue, establishing copy-before-render queue order.
+        if let Some(viz_field) = viz_field.as_ref().filter(|viz| viz.size_bytes > 0) {
+            let result =
+                service_pending_viz_snapshot(mode, viz_field, VizSnapshotSource::Current);
+            debug_assert!(
+                result.is_ok(),
+                "visualization producer lost exclusive WRITING ownership"
+            );
+        }
+
         let mut stats = CachedGpuStats {
+            sim_time: mode.sim_time_f64(),
             dt: mode.sim_dt(),
             step_time_ms,
             steps_per_second: completed_sample.steps_per_second,
@@ -7743,6 +11566,46 @@ fn solver_worker_main(
     }
 }
 
+/// Apply the worker's latest runtime policy only when no autonomous command
+/// buffer remains in flight.  Some unstructured setters need one packed-state
+/// readback, so this boundary is also what keeps command handling free of an
+/// accidental GPU `Wait` behind queued batches.
+fn solver_worker_apply_live_params(
+    mode: &mut Option<SolverMode>,
+    params: &mut RuntimeParams,
+    structured_prev_explicit_rate: &mut Option<f64>,
+) {
+    *structured_prev_explicit_rate = None;
+    let Some(mode) = mode.as_mut() else {
+        return;
+    };
+    // The moving path never runs solver-side adaptive dt: its driver owns the
+    // GCL-compatible controller and the configured timestep.
+    if let SolverMode::MovingMesh(moving) = mode {
+        let adaptive_dt = params.adaptive_dt;
+        params.adaptive_dt = false;
+        moving.set_adaptive_dt(adaptive_dt.then_some(params.target_cfl));
+        moving.set_configured_dt(params.requested_dt as f64);
+    }
+    mode.apply_params_any(params);
+}
+
+fn solver_worker_trace_params(
+    trace: &mut Option<SolverTraceSession>,
+    mode: Option<&SolverMode>,
+    step_idx: u64,
+    params: RuntimeParams,
+) {
+    if let (Some(trace), Some(mode)) = (trace.as_mut(), mode) {
+        let event = tracefmt::TraceEvent::Params(tracefmt::TraceParamsEvent {
+            step: step_idx,
+            sim_time: mode.sim_time(),
+            params: trace_runtime_params_from_worker(params),
+        });
+        let _ = trace.writer.write_event(&event);
+    }
+}
+
 fn solver_worker_handle_cmd(
     cmd: SolverWorkerCommand,
     mode: &mut Option<SolverMode>,
@@ -7757,6 +11620,11 @@ fn solver_worker_handle_cmd(
     completed_step_timing: &mut CompletedStepTiming,
     last_stats_publish: &mut std::time::Instant,
     last_snapshot_publish: &mut std::time::Instant,
+    autonomous_scheduler: &mut AutonomousBatchScheduler,
+    autonomous_fallback: &mut bool,
+    autonomous_backend_poisoned: &mut bool,
+    pending_autonomous_param_apply: &mut bool,
+    retired_autonomous_modes: &mut Vec<SolverMode>,
     evt_tx: &mpsc::Sender<SolverWorkerEvent>,
 ) -> bool {
     match cmd {
@@ -7764,8 +11632,17 @@ fn solver_worker_handle_cmd(
             mode: next,
             viz_field: next_viz_field,
         } => {
+            autonomous_scheduler.replace_backend();
+            *autonomous_fallback = false;
+            *autonomous_backend_poisoned = false;
+            *pending_autonomous_param_apply = false;
             if trace.is_some() {
                 solver_worker_stop_trace(trace, mode);
+            }
+            if autonomous_scheduler.is_active() {
+                if let Some(previous) = mode.take() {
+                    retired_autonomous_modes.push(previous);
+                }
             }
             *model_id = next.model_id_str();
             *mode = Some(next);
@@ -7797,7 +11674,16 @@ fn solver_worker_handle_cmd(
             }
         }
         SolverWorkerCommand::ClearSolver => {
+            autonomous_scheduler.replace_backend();
+            *autonomous_fallback = false;
+            *autonomous_backend_poisoned = false;
+            *pending_autonomous_param_apply = false;
             solver_worker_stop_trace(trace, mode);
+            if autonomous_scheduler.is_active() {
+                if let Some(previous) = mode.take() {
+                    retired_autonomous_modes.push(previous);
+                }
+            }
             *mode = None;
             *model_id = "<uninitialized>";
             *running = false;
@@ -7812,6 +11698,15 @@ fn solver_worker_handle_cmd(
             let _ = evt_tx.send(SolverWorkerEvent::Running(false));
         }
         SolverWorkerCommand::SetRunning(next_running) => {
+            if next_running && *autonomous_backend_poisoned {
+                let _ = evt_tx.send(SolverWorkerEvent::Error(
+                    "the previous autonomous GPU status could not be decoded; initialize/reset the solver before resuming"
+                        .to_string(),
+                ));
+                let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                *running = false;
+                return true;
+            }
             if next_running && mode.is_none() {
                 let _ = evt_tx.send(SolverWorkerEvent::Error(
                     "cannot start solver: no solver is initialized".to_string(),
@@ -7821,6 +11716,8 @@ fn solver_worker_handle_cmd(
                 return true;
             }
             if next_running {
+                autonomous_scheduler.invalidate(false);
+                *autonomous_fallback = false;
                 *step_idx = 0;
                 completed_step_timing.reset();
                 let now = std::time::Instant::now();
@@ -7828,38 +11725,38 @@ fn solver_worker_handle_cmd(
                 *last_snapshot_publish = now;
             }
             *running = next_running;
-            let _ = evt_tx.send(SolverWorkerEvent::Running(*running));
+            if next_running || autonomous_scheduler.request_pause() {
+                let _ = evt_tx.send(SolverWorkerEvent::Running(*running));
+            }
         }
         SolverWorkerCommand::UpdateParams(next_params) => {
-            *params = next_params;
-            // The all-Mach stability rate is parameter-dependent. Force one
-            // fresh packed-state sample before accepting the next adaptive dt.
-            *structured_prev_explicit_rate = None;
-            if let Some(m) = mode.as_mut() {
-                // The moving path never runs the SOLVER-side adaptive dt (a
-                // post-closure re-scale breaks the GCL) — the user's choice
-                // routes to the driver-side controller instead, and the live
-                // dt slider re-bases the pinned dt (configured_dt was
-                // previously captured at build only, leaving the slider
-                // silently inert mid-run on this path).
-                if let SolverMode::MovingMesh(moving) = m {
-                    let adaptive_dt = params.adaptive_dt;
-                    params.adaptive_dt = false;
-                    moving.set_adaptive_dt(adaptive_dt.then_some(params.target_cfl));
-                    moving.set_configured_dt(params.requested_dt as f64);
-                }
-                m.apply_params_any(params);
+            if *autonomous_backend_poisoned {
+                *params = next_params;
+                let _ = evt_tx.send(SolverWorkerEvent::Message(
+                    "parameter update retained, but the solver must be initialized/reset after an ambiguous GPU completion"
+                        .to_string(),
+                ));
+                return true;
             }
-            if let (Some(trace), Some(m)) = (trace.as_mut(), mode.as_ref()) {
-                let event = tracefmt::TraceEvent::Params(tracefmt::TraceParamsEvent {
-                    step: *step_idx,
-                    sim_time: m.sim_time(),
-                    params: trace_runtime_params_from_worker(*params),
-                });
-                let _ = trace.writer.write_event(&event);
+            let defer_apply = autonomous_scheduler.is_active();
+            autonomous_scheduler.invalidate(false);
+            *autonomous_fallback = false;
+            *params = next_params;
+            // The all-Mach stability rate is parameter-dependent.  Defer the
+            // mutation itself until every older completion has reconciled, so
+            // its dt cannot overwrite the requested policy.
+            *structured_prev_explicit_rate = None;
+            if defer_apply {
+                *pending_autonomous_param_apply = true;
+            } else {
+                *pending_autonomous_param_apply = false;
+                solver_worker_apply_live_params(mode, params, structured_prev_explicit_rate);
+                solver_worker_trace_params(trace, mode.as_ref(), *step_idx, *params);
             }
         }
         SolverWorkerCommand::StartTrace { path, header } => {
+            autonomous_scheduler.invalidate(false);
+            *autonomous_fallback = true;
             solver_worker_stop_trace(trace, mode);
 
             match tracefmt::TraceWriter::create(&path) {
@@ -7898,6 +11795,7 @@ fn solver_worker_handle_cmd(
         }
         SolverWorkerCommand::StopTrace => {
             solver_worker_stop_trace(trace, mode);
+            *autonomous_fallback = false;
         }
         SolverWorkerCommand::Shutdown => return false,
     }

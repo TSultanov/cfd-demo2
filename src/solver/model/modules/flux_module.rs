@@ -493,10 +493,12 @@ fn resolve_state_slots_for_flux(
 
 fn generate_flux_module_kernel_program_for_model(
     model: &crate::solver::model::ModelSpec,
-    _schemes: &crate::solver::ir::SchemeRegistry,
+    schemes: &crate::solver::ir::SchemeRegistry,
 ) -> Result<cfd2_ir::kernel::KernelProgram, String> {
     let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
-    let flux_stride = model.system.unknowns_per_cell();
+    let discrete = cfd2_codegen::solver::codegen::lower_system_unchecked(&model.system, schemes);
+    let face_channels = cfd2_codegen::solver::codegen::explicit_liveness::ExplicitFaceChannelLiveness::from_discrete_system(&discrete);
+    let flux_stride = face_channels.storage_stride();
     let prims = model
         .primitives
         .ordered()
@@ -524,6 +526,7 @@ fn generate_flux_module_kernel_program_for_model(
                 KernelId::FLUX_MODULE.as_str(),
                 resolved_slots,
                 &flux_layout,
+                &face_channels,
                 flux_stride,
                 &prims,
                 kernel,
@@ -572,6 +575,7 @@ fn generate_flux_module_kernel_program_for_model(
                 KernelId::FLUX_MODULE.as_str(),
                 resolved_slots,
                 &flux_layout,
+                &face_channels,
                 flux_stride,
                 &prims,
                 &variants,

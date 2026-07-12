@@ -883,8 +883,9 @@ fn constants_extra_params_for_program(program: &KernelProgram) -> Vec<ParamSpec>
         ("eos.gm1", "eos_gm1"),
         ("eos.r", "eos_r"),
         ("eos.dp_drho", "eos_dp_drho"),
-        ("eos.p_offset", "eos_p_offset"),
+        ("eos.p_ref", "eos_p_ref"),
         ("eos.theta_ref", "eos_theta_ref"),
+        ("eos.rho_ref", "eos_rho_ref"),
         ("buoyant.beta_g", "buoyant_beta_g"),
         ("buoyant.t0", "buoyant_t0"),
         ("buoyant.k_over_cp", "buoyant_k_over_cp"),
@@ -3140,7 +3141,7 @@ mod tests {
         );
         program.body = vec![cfd2_ir::ast::Stmt::Assign {
             target: cfd2_ir::ast::Expr::ident("state").index(cfd2_ir::ast::Expr::ident("idx")),
-            value: cfd2_ir::ast::Expr::ident("constants").field("eos_r"),
+            value: cfd2_ir::ast::Expr::ident("constants").field("eos_rho_ref"),
         }];
 
         let src = lower_kernel_program_to_wgsl(&program)
@@ -3148,9 +3149,22 @@ mod tests {
             .to_wgsl();
         let gamma = src.find("eos_gamma: f32").expect("gamma prefix");
         let gm1 = src.find("eos_gm1: f32").expect("gm1 prefix");
-        let gas_constant = src.find("eos_r: f32").expect("referenced R");
+        let gas_constant = src.find("eos_r: f32").expect("R prefix");
+        let dp_drho = src.find("eos_dp_drho: f32").expect("dp/drho prefix");
+        let p_ref = src.find("eos_p_ref: f32").expect("pressure reference prefix");
+        let theta_ref = src
+            .find("eos_theta_ref: f32")
+            .expect("theta reference prefix");
+        let rho_ref = src
+            .find("eos_rho_ref: f32")
+            .expect("referenced density reference");
         assert!(
-            gamma < gm1 && gm1 < gas_constant,
+            gamma < gm1
+                && gm1 < gas_constant
+                && gas_constant < dp_drho
+                && dp_drho < p_ref
+                && p_ref < theta_ref
+                && theta_ref < rho_ref,
             "noncanonical tail:\n{src}"
         );
     }

@@ -138,9 +138,10 @@ fn build_incompressible_momentum_system_ibm(
     }
     if with_mms_source {
         // Manufactured per-component momentum source (MMS).
-        let mms_src_typed = TypedFieldRef::<DivDim<Force, cfd2_ir::dimensions::Volume>, Vector2>::new(
-            INCOMPRESSIBLE_MMS_SOURCE_FIELD,
-        );
+        let mms_src_typed =
+            TypedFieldRef::<DivDim<Force, cfd2_ir::dimensions::Volume>, Vector2>::new(
+                INCOMPRESSIBLE_MMS_SOURCE_FIELD,
+            );
         momentum_sum =
             momentum_sum + typed_fvc::source_vector(mms_src_typed, u_typed).cast_to::<Force>();
     }
@@ -233,7 +234,10 @@ pub fn incompressible_momentum_structured_model() -> Result<ModelSpec, String> {
     )
 }
 
-fn incompressible_momentum_model_impl(with_mms_source: bool, ale: bool) -> Result<ModelSpec, String> {
+fn incompressible_momentum_model_impl(
+    with_mms_source: bool,
+    ale: bool,
+) -> Result<ModelSpec, String> {
     incompressible_momentum_model_impl_topo(
         with_mms_source,
         ale,
@@ -260,12 +264,16 @@ fn incompressible_momentum_model_impl_topo(
         fields.grad_p_old,
     ];
     if with_mms_source {
-        layout_fields.push(vol_vector_dim::<DivDim<Force, cfd2_ir::dimensions::Volume>>(
-            INCOMPRESSIBLE_MMS_SOURCE_FIELD,
-        ));
+        layout_fields.push(
+            vol_vector_dim::<DivDim<Force, cfd2_ir::dimensions::Volume>>(
+                INCOMPRESSIBLE_MMS_SOURCE_FIELD,
+            ),
+        );
     }
     if ibm {
-        layout_fields.push(vol_scalar_dim::<DivDim<Density, Time>>(IBM_MOMENTUM_PENALTY_FIELD));
+        layout_fields.push(vol_scalar_dim::<DivDim<Density, Time>>(
+            IBM_MOMENTUM_PENALTY_FIELD,
+        ));
     }
     let layout = PortRegistry::from_fields(layout_fields).into_state_layout();
     // d_p stays the closed form. Two assembled-matrix alternatives exist:
@@ -445,5 +453,8 @@ fn incompressible_momentum_model_impl_topo(
         }),
         primitives,
         explicit_primitives: None,
+        explicit_mass_closure_proof: super::ExplicitMassClosureProof::RuntimePivoted {
+            justification: "the momentum mass is the positive runtime density parameter; generated row-scaled pivot guards enforce its per-stage domain",
+        },
     })
 }

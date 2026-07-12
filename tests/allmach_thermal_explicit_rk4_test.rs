@@ -521,6 +521,74 @@ fn gui_fluid_and_advection_endpoints_remain_stable() {
 }
 
 #[test]
+fn mercury_extreme_and_live_eos_update_cover_both_topologies_and_backends() {
+    let mercury = Fluid::presets()
+        .into_iter()
+        .find(|fluid| fluid.name == "Mercury")
+        .expect("Mercury preset");
+    let mut mercury_params = params();
+    mercury_params.density = mercury.density as f32;
+    mercury_params.viscosity = mercury.viscosity as f32;
+    mercury_params.eos = mercury.eos;
+    mercury_params.compressibility_psi = mercury.compressibility() as f32;
+
+    for gpu in [false, true] {
+        let structured = structured_allmach_rk4_smoke(
+            "obstacle",
+            gpu,
+            16,
+            6,
+            5,
+            mercury_params,
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "structured {} Mercury: {error}",
+                if gpu { "GPU" } else { "CPU" }
+            )
+        });
+        assert_eq!(structured.steps, 5);
+        assert!(structured.min_dt > 0.0 && structured.min_rho > 0.0);
+
+        let unstructured = unstructured_allmach_rk4_smoke(
+            "obstacle",
+            "cutcell",
+            gpu,
+            0.2,
+            5,
+            mercury_params,
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "unstructured {} Mercury: {error}",
+                if gpu { "GPU" } else { "CPU" }
+            )
+        });
+        assert_eq!(unstructured.steps, 5);
+        assert!(unstructured.min_dt > 0.0 && unstructured.min_rho > 0.0);
+
+        let live = structured_allmach_rk4_live_update_smoke(
+            "obstacle",
+            gpu,
+            16,
+            6,
+            8,
+            params(),
+            mercury_params,
+        )
+        .unwrap_or_else(|error| {
+            panic!(
+                "structured {} Air-to-Mercury update: {error}",
+                if gpu { "GPU" } else { "CPU" }
+            )
+        });
+        assert_eq!(live.steps, 8);
+        assert!(live.min_dt > 0.0 && live.max_dt.is_finite());
+        assert!(live.min_rho > 0.0 && live.max_rho.is_finite());
+    }
+}
+
+#[test]
 fn shipping_resolution_risk_representatives_remain_stable() {
     for gpu in [false, true] {
         for (geometry, mesh, steps) in [

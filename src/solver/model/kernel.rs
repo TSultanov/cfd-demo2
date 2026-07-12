@@ -927,13 +927,14 @@ fn generate_explicit_rk4_stage_kernel_program_impl(
         })
         .collect();
     let eos_params = extract_eos_params(model);
-    cfd2_codegen::solver::codegen::explicit_rk::generate_rk4_stage_kernel_program(
+    cfd2_codegen::solver::codegen::explicit_rk::generate_rk4_stage_kernel_program_with_mass_floor(
         kernel_id.as_str(),
         &discrete,
         &slots,
         &primitives,
         stage,
         &eos_params,
+        model.explicit_mass_closure_proof.equilibration_floor(),
     )
 }
 
@@ -2399,5 +2400,73 @@ mod tests {
                 && !base_asm.contains("select(1.0, 0.0, abs(state["),
             "non-IBM assembly must keep the pre-fix blend and deferred correction"
         );
+    }
+
+    #[test]
+    fn shipped_structured_explicit_programs_support_typed_rhs_ping_pong_fusion() {
+        use cfd2_codegen::solver::codegen::fusion::{
+            lower_kernel_program_to_wgsl, synthesize_explicit_residual_rk_ping_pong,
+        };
+
+        let schemes = crate::solver::ir::SchemeRegistry::new(Scheme::Upwind);
+        let models = [
+            (
+                crate::solver::model::generic_diffusion_demo_structured_ibm_model()
+                    .expect("structured IBM diffusion"),
+                false,
+            ),
+            (
+                crate::solver::model::compressible_structured_model()
+                    .expect("structured compressible"),
+                false,
+            ),
+            (
+                crate::solver::model::allmach_thermal_structured_model()
+                    .expect("structured all-Mach"),
+                true,
+            ),
+        ];
+        let stage_generators: [fn(
+            &crate::solver::model::ModelSpec,
+            &crate::solver::ir::SchemeRegistry,
+        ) -> Result<crate::solver::ir::KernelProgram, String>; 4] = [
+            generate_explicit_rk4_stage_1_kernel_program,
+            generate_explicit_rk4_stage_2_kernel_program,
+            generate_explicit_rk4_stage_3_kernel_program,
+            generate_explicit_rk4_stage_4_kernel_program,
+        ];
+
+        for (model, needs_grad_state) in models {
+            model.validate_explicit_rk4().expect("explicit capability");
+            let residual = if needs_grad_state {
+                generate_explicit_residual_grad_state_kernel_program(&model, &schemes)
+            } else {
+                generate_explicit_residual_kernel_program(&model, &schemes)
+            }
+            .expect("matrix-free residual");
+            for (stage_index, generate_stage) in stage_generators.iter().enumerate() {
+                let stage = generate_stage(&model, &schemes).expect("RK stage");
+                let fused = synthesize_explicit_residual_rk_ping_pong(
+                    format!("{}_fused_stage_{}", model.id, stage_index + 1),
+                    &residual,
+                    &stage,
+                    "rk_input_state",
+                    "rk_output_state",
+                )
+                .unwrap_or_else(|error| {
+                    panic!(
+                        "{} stage {} fusion failed: {error}",
+                        model.id,
+                        stage_index + 1
+                    )
+                });
+                let wgsl = lower_kernel_program_to_wgsl(&fused)
+                    .expect("lower fused typed program")
+                    .to_wgsl();
+                assert!(!wgsl.contains(" rhs:"), "{} retained global RHS", model.id);
+                assert!(wgsl.contains("rk_input_state"));
+                assert!(wgsl.contains("rk_output_state"));
+            }
+        }
     }
 }

@@ -39,8 +39,14 @@ pub fn expand_schemes_unchecked(
             // cell gradients, so they need the gradients pipeline regardless
             // of the convection scheme (including under Upwind, where it
             // would otherwise be skipped entirely).
-            let needs_gradient = (matches!(term.op, TermOp::Div | TermOp::DivFlux)
-                && scheme != Scheme::Upwind)
+            // `Div` reconstructs the transported cell field in unified
+            // assembly, so high-order variants consume `grad_state`.
+            // `DivFlux` is categorically different: its face flux is already
+            // materialized by the model's flux module and assembly only takes
+            // its signed divergence. Any reconstruction gradients it needs are
+            // owned by that producer (for example `flux_module_gradients`), not
+            // by the generic packed-state gradient pass.
+            let needs_gradient = (term.op == TermOp::Div && scheme != Scheme::Upwind)
                 || term.transpose_dev2
                 // Viscous dissipation reads the velocity-gradient tensor from
                 // grad_state too, so its field needs the gradients pipeline.
@@ -132,5 +138,21 @@ mod tests {
         assert!(expansion.needs_gradients());
         assert!(expansion.gradient_fields().iter().any(|f| f.name() == "U"));
         assert!(expansion.gradient_fields().iter().any(|f| f.name() == "p"));
+    }
+
+    #[test]
+    fn precomputed_div_flux_does_not_request_packed_state_gradients() {
+        let rho = vol_scalar("rho", si::DENSITY);
+        let phi_rho = surface_scalar("phi_rho", si::MASS_FLUX);
+
+        let mut system = EquationSystem::new();
+        system.add_equation((fvm::div_flux(phi_rho, rho)).eqn(rho));
+
+        let registry = SchemeRegistry::new(Scheme::SecondOrderUpwind);
+        let expansion = expand_schemes(&system, &registry).unwrap();
+        assert!(
+            !expansion.needs_gradients(),
+            "DivFlux consumes a producer-owned face flux and never reconstructs rho in assembly"
+        );
     }
 }

@@ -1314,6 +1314,10 @@ fn allmach_pressure_model_impl_topo(
         }),
         primitives,
         explicit_primitives,
+        explicit_mass_closure_proof: super::ExplicitMassClosureProof::RuntimePivotedScaled {
+            justification: "all-Mach EOS/preconditioner closures are nonlinear; positive density/compressibility gives q_match >= 1/gamma and the GUI/MMS domain clears the model-owned f32 scale floor",
+            equilibration_floor_power: -22,
+        },
     })
 }
 

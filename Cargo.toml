@@ -30,6 +30,9 @@ ahash = { version = "0.8.12", optional = true }
 dashmap = "6.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+num-bigint = "0.4"
+num-rational = "0.4"
+num-traits = "0.2"
 
 [features]
 default = []
@@ -55,6 +58,9 @@ cfd2_macros = { path = "crates/cfd2_macros" }
 dashmap = "6.1"
 wgsl_bindgen = "0.21.2"
 glob = "0.3"
+num-bigint = "0.4"
+num-rational = "0.4"
+num-traits = "0.2"
 
 [[bin]]
 name = "cfd2"

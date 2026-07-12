@@ -432,14 +432,12 @@ pub fn rhie_chow_aux_module(
                 ),
             ],
             binding_remaps: vec![],
-            expected_hazards: vec![
-                ExpectedHazard {
-                    kind: HazardKind::WAR,
-                    kernel_id: "rhie_chow/grad_p_update",
-                    justification: "store_grad_p reads grad_p before grad_p_update writes it; \
+            expected_hazards: vec![ExpectedHazard {
+                kind: HazardKind::WAR,
+                kernel_id: "rhie_chow/grad_p_update",
+                justification: "store_grad_p reads grad_p before grad_p_update writes it; \
                                     safe because both operate on the same cell index",
-                },
-            ],
+            }],
         },
         ModelKernelFusionRule {
             name: "rhie_chow:grad_p_update_correct_velocity_delta_v1",
@@ -466,14 +464,12 @@ pub fn rhie_chow_aux_module(
                 ),
             ],
             binding_remaps: vec![],
-            expected_hazards: vec![
-                ExpectedHazard {
-                    kind: HazardKind::RAW,
-                    kernel_id: "rhie_chow/correct_velocity_delta",
-                    justification: "correct_velocity_delta reads grad_p written by grad_p_update; \
+            expected_hazards: vec![ExpectedHazard {
+                kind: HazardKind::RAW,
+                kernel_id: "rhie_chow/correct_velocity_delta",
+                justification: "correct_velocity_delta reads grad_p written by grad_p_update; \
                                     safe because both operate on the same cell index",
-                },
-            ],
+            }],
         },
         ModelKernelFusionRule {
             name: "rhie_chow:store_grad_p_grad_p_update_v1",
@@ -497,14 +493,12 @@ pub fn rhie_chow_aux_module(
                 ),
             ],
             binding_remaps: vec![],
-            expected_hazards: vec![
-                ExpectedHazard {
-                    kind: HazardKind::WAR,
-                    kernel_id: "rhie_chow/grad_p_update",
-                    justification: "store_grad_p reads grad_p before grad_p_update writes it; \
+            expected_hazards: vec![ExpectedHazard {
+                kind: HazardKind::WAR,
+                kernel_id: "rhie_chow/grad_p_update",
+                justification: "store_grad_p reads grad_p before grad_p_update writes it; \
                                     safe because both operate on the same cell index",
-                },
-            ],
+            }],
         },
     ];
 
@@ -743,8 +737,20 @@ fn rhie_chow_grad_p_update_bindings_structured() -> Vec<KernelBinding> {
         KernelBinding::new(0, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage),
         KernelBinding::new(0, 1, "constants", "Constants", BindingAccess::Uniform),
         structured_grid_binding(),
-        KernelBinding::new(2, 0, "bc_kind", "array<u32>", BindingAccess::ReadOnlyStorage),
-        KernelBinding::new(2, 1, "bc_value", "array<f32>", BindingAccess::ReadOnlyStorage),
+        KernelBinding::new(
+            2,
+            0,
+            "bc_kind",
+            "array<u32>",
+            BindingAccess::ReadOnlyStorage,
+        ),
+        KernelBinding::new(
+            2,
+            1,
+            "bc_value",
+            "array<f32>",
+            BindingAccess::ReadOnlyStorage,
+        ),
     ]
 }
 
@@ -813,9 +819,7 @@ fn generate_dp_update_from_diag_kernel_program(
                     dsl::max(
                         rho_offset.map_or_else(
                             || Expr::ident("constants").field("density"),
-                            |offset| {
-                                dsl::array_access("state", Expr::ident("base") + offset)
-                            },
+                            |offset| dsl::array_access("state", Expr::ident("base") + offset),
                         ),
                         Expr::lit_f32(1e-12),
                     ),
@@ -833,10 +837,7 @@ fn generate_dp_update_from_diag_kernel_program(
             // The value written to `d_p`: the plain closed form, or the
             // Brinkman-masked closed form when an IBM penalty field exists.
             let write_ident = if let Some(ibm_off) = ibm_penalty_offset {
-                let sp_abs = dsl::abs(dsl::array_access(
-                    "state",
-                    Expr::ident("base") + ibm_off,
-                ));
+                let sp_abs = dsl::abs(dsl::array_access("state", Expr::ident("base") + ibm_off));
                 let denom = Expr::lit_f32(1.0) + sp_abs * Expr::ident("d_p");
                 preamble_stmts.push(dsl::let_expr("d_p_ibm", Expr::ident("d_p") / denom));
                 "d_p_ibm"
@@ -948,8 +949,7 @@ fn generate_dp_update_from_assembled_diagonal(
     // Dense Cartesian topology: the cell volume is `dx*dy` from the grid
     // uniform; the assembled CSR buffers (row splits + matrix_values) are
     // provided in both topologies by the generic-coupled backend.
-    let structured =
-        model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D;
+    let structured = model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D;
     let flux_layout = crate::solver::ir::FluxLayout::from_system(&model.system);
     let unknowns: Vec<String> = flux_layout
         .components
@@ -1234,8 +1234,7 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
 
     // Dense Cartesian topology: the Green–Gauss face loop walks the 4 grid
     // neighbours by index arithmetic instead of the connectivity buffers.
-    let structured =
-        model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D;
+    let structured = model.system.topology() == cfd2_ir::equation::TopologyMode::Structured2D;
 
     let mut registry = PortRegistry::new(model.state_layout.clone());
     let p = registry
@@ -1270,7 +1269,8 @@ fn generate_rhie_chow_grad_p_update_kernel_program(
     let p_state_expr = dsl::array_access("state", Expr::ident("base") + p_offset);
     let p_other_state_expr =
         dsl::array_access("state", Expr::ident("other_idx") * state_stride + p_offset);
-    let p_boundary_expr = bc.ghost_value(p_unknown_offset, p_state_expr.clone(), Expr::ident("d_own"));
+    let p_boundary_expr =
+        bc.ghost_value(p_unknown_offset, p_state_expr.clone(), Expr::ident("d_own"));
     let p_interp_expr = p_state_expr.clone() * Expr::ident("lambda")
         + dsl::select(
             p_other_state_expr.clone(),
@@ -2062,7 +2062,8 @@ mod tests {
         let layout = StateLayout::new(vec![u, p, dp_custom, grad_p, grad_p_old]);
 
         let module =
-            rhie_chow_aux_module(&system, "dp_custom", true, true, DpFormulation::ClosedForm).expect("module creation failed");
+            rhie_chow_aux_module(&system, "dp_custom", true, true, DpFormulation::ClosedForm)
+                .expect("module creation failed");
 
         let model = crate::solver::model::ModelSpec {
             id: "rhie_chow_dp_custom_test",
@@ -2073,6 +2074,8 @@ mod tests {
             linear_solver: None,
             primitives: PrimitiveDerivations::identity(),
             explicit_primitives: None,
+            explicit_mass_closure_proof:
+                crate::solver::model::ExplicitMassClosureProof::ExactSymbolic,
         };
 
         let schemes = crate::solver::ir::SchemeRegistry::default();
@@ -2287,14 +2290,7 @@ mod tests {
             ("rhie_chow/store_grad_p", vec![]),
             (
                 "rhie_chow/grad_p_update",
-                vec![
-                    "k",
-                    "face_idx",
-                    "ls_ux",
-                    "ls_rhs",
-                    "ls_det",
-                    "grad_out_p",
-                ],
+                vec!["k", "face_idx", "ls_ux", "ls_rhs", "ls_det", "grad_out_p"],
             ),
             (
                 "rhie_chow/correct_velocity_delta",
@@ -2364,8 +2360,8 @@ mod tests {
         let layout = StateLayout::new(vec![u, p, dp, grad_p]);
 
         // Module creation should succeed (no StateLayout validation yet)
-        let module =
-            rhie_chow_aux_module(&system, "dp", true, true, DpFormulation::ClosedForm).expect("module creation failed");
+        let module = rhie_chow_aux_module(&system, "dp", true, true, DpFormulation::ClosedForm)
+            .expect("module creation failed");
 
         let model = crate::solver::model::ModelSpec {
             id: "rhie_chow_missing_grad_p_old_test",
@@ -2376,6 +2372,8 @@ mod tests {
             linear_solver: None,
             primitives: PrimitiveDerivations::identity(),
             explicit_primitives: None,
+            explicit_mass_closure_proof:
+                crate::solver::model::ExplicitMassClosureProof::ExactSymbolic,
         };
 
         let schemes = crate::solver::ir::SchemeRegistry::default();
@@ -2439,7 +2437,8 @@ mod tests {
 
         let _layout = StateLayout::new(vec![u, p, dp, grad_p, grad_p_old]);
 
-        let module = rhie_chow_aux_module(&system, "dp", true, true, DpFormulation::ClosedForm).expect("module creation");
+        let module = rhie_chow_aux_module(&system, "dp", true, true, DpFormulation::ClosedForm)
+            .expect("module creation");
 
         // Check that port_manifest is present
         let port_manifest = module
@@ -2511,10 +2510,14 @@ mod tests {
 
         for rule in &rules {
             // Only process rules that require Aggressive policy.
-            let is_aggressive = rule.guards.iter().any(|g| matches!(
-                g,
-                FusionGuard::MinPolicy(crate::solver::model::kernel::KernelFusionPolicy::Aggressive)
-            ));
+            let is_aggressive = rule.guards.iter().any(|g| {
+                matches!(
+                    g,
+                    FusionGuard::MinPolicy(
+                        crate::solver::model::kernel::KernelFusionPolicy::Aggressive
+                    )
+                )
+            });
             if !is_aggressive {
                 continue;
             }
@@ -2545,7 +2548,9 @@ mod tests {
                     rule.expected_hazards.iter().any(|e| e.matches(h)),
                     "Rule '{}': unwhitelisted {} hazard at kernel '{}' — \
                      add an ExpectedHazard entry with a justification",
-                    rule.name, h.kind, h.kernel_id
+                    rule.name,
+                    h.kind,
+                    h.kernel_id
                 );
             }
             // Verify no stale entries.
@@ -2554,7 +2559,9 @@ mod tests {
                     hazards.iter().any(|h| e.matches(h)),
                     "Rule '{}': stale expected_hazards entry: {} at '{}' — \
                      remove it or update the kernel side-effects",
-                    rule.name, e.kind, e.kernel_id
+                    rule.name,
+                    e.kind,
+                    e.kernel_id
                 );
             }
         }

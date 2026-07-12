@@ -183,6 +183,42 @@ impl CoupledAccumulators {
             })
             .collect()
     }
+
+    /// Write a compact projection of the residual vector.
+    ///
+    /// `source_indices[destination_rank]` selects one full coupled
+    /// accumulator. This keeps local assembly and all coupled/BC/flux indexing
+    /// unchanged while a method-of-lines consumer avoids materialising
+    /// algebraic rows whose rates are absent.
+    pub fn write_rhs_projection(
+        &self,
+        rhs_array: &str,
+        idx_expr: Expr,
+        source_indices: &[u32],
+    ) -> Vec<Stmt> {
+        assert!(
+            source_indices
+                .iter()
+                .all(|&source| source < self.coupled_stride),
+            "RHS projection source must be inside the coupled accumulator"
+        );
+        let destination_stride = source_indices.len() as u32;
+        source_indices
+            .iter()
+            .enumerate()
+            .map(|(destination, &source)| {
+                dsl::assign_expr(
+                    dsl::array_access_linear(
+                        rhs_array,
+                        idx_expr.clone(),
+                        destination_stride,
+                        destination as u32,
+                    ),
+                    self.rhs(source),
+                )
+            })
+            .collect()
+    }
 }
 
 /// Thin wrapper allowing both `u32` literals and pre-computed `u32`

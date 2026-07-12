@@ -3,6 +3,7 @@ pub mod coeff_expr;
 pub mod constants;
 pub mod coupled_common;
 pub mod dsl;
+pub mod explicit_liveness;
 pub mod explicit_rk;
 pub mod fusion;
 pub mod generic_coupled_kernels;

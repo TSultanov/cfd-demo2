@@ -45,11 +45,10 @@
 
 use super::KernelWgsl;
 use cfd2_ir::dimensions::{Dimensionless, UnitDimension};
-use cfd2_ir::ports::ParamSpec;
 use cfd2_ir::kernel::{
-    BindingAccess, DispatchDomain, EffectResource, KernelBinding,
-    KernelProgram, SideEffectMetadata,
+    BindingAccess, DispatchDomain, EffectResource, KernelBinding, KernelProgram, SideEffectMetadata,
 };
+use cfd2_ir::ports::ParamSpec;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// A single binding slot remap for fusion synthesis.
@@ -326,7 +325,12 @@ pub fn synthesize_fused_program_with_report(
     policy: FusionSafetyPolicy,
 ) -> Result<(KernelProgram, Vec<HazardReport>), String> {
     synthesize_fused_program_with_report_remapped(
-        replacement_id, rule_name, programs, policy, &[], &[],
+        replacement_id,
+        rule_name,
+        programs,
+        policy,
+        &[],
+        &[],
     )
 }
 
@@ -350,8 +354,7 @@ pub fn synthesize_fused_program_with_report_remapped(
         apply_binding_remaps(programs, binding_remaps)?
     };
 
-    if policy == FusionSafetyPolicy::Aggressive {
-    }
+    if policy == FusionSafetyPolicy::Aggressive {}
 
     let hazards = ensure_safe_composition(&remapped, policy, expected_hazards)?;
 
@@ -373,10 +376,16 @@ pub fn synthesize_fused_program_with_report_remapped(
             }
         }
 
-        fused_body.push(cfd2_ir::ast::Stmt::Comment(format!("begin fused segment: {}", program.id)));
+        fused_body.push(cfd2_ir::ast::Stmt::Comment(format!(
+            "begin fused segment: {}",
+            program.id
+        )));
         fused_body.extend(rename_stmts(&program.preamble, &rename_map));
         fused_body.extend(rename_stmts(&program.body, &rename_map));
-        fused_body.push(cfd2_ir::ast::Stmt::Comment(format!("end fused segment: {}", program.id)));
+        fused_body.push(cfd2_ir::ast::Stmt::Comment(format!(
+            "end fused segment: {}",
+            program.id
+        )));
 
         side_effects
             .read_set
@@ -410,9 +419,10 @@ pub fn synthesize_fused_program_with_report_remapped(
         apply_fusion_cleanup(&mut fused);
     }
 
-    fused
-        .preamble
-        .insert(0, cfd2_ir::ast::Stmt::Comment(format!("synthesized by fusion rule: {rule_name}")));
+    fused.preamble.insert(
+        0,
+        cfd2_ir::ast::Stmt::Comment(format!("synthesized by fusion rule: {rule_name}")),
+    );
 
     Ok((fused, hazards))
 }
@@ -647,9 +657,25 @@ fn merge_bindings(
     programs: &[KernelProgram],
 ) -> Result<BTreeMap<(u32, u32), KernelBinding>, String> {
     let mut merged = BTreeMap::<(u32, u32), KernelBinding>::new();
+    let mut slots_by_name = BTreeMap::<String, (u32, u32)>::new();
     for program in programs {
         for binding in &program.bindings {
             let key = (binding.group, binding.binding);
+            if let Some(previous_slot) = slots_by_name.get(&binding.name) {
+                if *previous_slot != key {
+                    return Err(format!(
+                        "binding name '{}' occupies both @group({}) @binding({}) and @group({}) @binding({}) while fusing '{}'",
+                        binding.name,
+                        previous_slot.0,
+                        previous_slot.1,
+                        key.0,
+                        key.1,
+                        program.id,
+                    ));
+                }
+            } else {
+                slots_by_name.insert(binding.name.clone(), key);
+            }
             if let Some(prev) = merged.get_mut(&key) {
                 if prev.name != binding.name || prev.wgsl_type != binding.wgsl_type {
                     return Err(format!(
@@ -735,7 +761,9 @@ fn deterministic_symbol_rename_map(
 fn program_references_constants_field(program: &KernelProgram, field: &str) -> bool {
     let needle = format!("constants.{field}");
 
-    let all_stmts = program.indexing.iter()
+    let all_stmts = program
+        .indexing
+        .iter()
         .chain(program.preamble.iter())
         .chain(program.body.iter());
     for stmt in all_stmts {
@@ -759,7 +787,10 @@ fn program_references_constants_field(program: &KernelProgram, field: &str) -> b
 fn ast_expr_references_field(expr: &cfd2_ir::ast::Expr, base: &str, field: &str) -> bool {
     use cfd2_ir::ast::ExprNode;
     match expr.node() {
-        ExprNode::Field { base: base_expr, field: f } => {
+        ExprNode::Field {
+            base: base_expr,
+            field: f,
+        } => {
             if f == field {
                 if let ExprNode::Ident(name) = base_expr.node() {
                     if name == base {
@@ -770,15 +801,19 @@ fn ast_expr_references_field(expr: &cfd2_ir::ast::Expr, base: &str, field: &str)
             ast_expr_references_field(base_expr, base, field)
         }
         ExprNode::Binary { left, right, .. } => {
-            ast_expr_references_field(left, base, field) || ast_expr_references_field(right, base, field)
+            ast_expr_references_field(left, base, field)
+                || ast_expr_references_field(right, base, field)
         }
         ExprNode::Unary { expr: inner, .. } => ast_expr_references_field(inner, base, field),
         ExprNode::Call { callee, args } => {
             ast_expr_references_field(callee, base, field)
-                || args.iter().any(|a| ast_expr_references_field(a, base, field))
+                || args
+                    .iter()
+                    .any(|a| ast_expr_references_field(a, base, field))
         }
         ExprNode::Index { base: b, index } => {
-            ast_expr_references_field(b, base, field) || ast_expr_references_field(index, base, field)
+            ast_expr_references_field(b, base, field)
+                || ast_expr_references_field(index, base, field)
         }
         ExprNode::Ident(_) | ExprNode::Literal(_) => false,
     }
@@ -789,29 +824,50 @@ fn ast_stmt_references_field(stmt: &cfd2_ir::ast::Stmt, base: &str, field: &str)
     use cfd2_ir::ast::Stmt;
     match stmt {
         Stmt::Let { expr, .. } => ast_expr_references_field(expr, base, field),
-        Stmt::Var { expr, .. } => expr.as_ref().map_or(false, |e| ast_expr_references_field(e, base, field)),
+        Stmt::Var { expr, .. } => expr
+            .as_ref()
+            .map_or(false, |e| ast_expr_references_field(e, base, field)),
         Stmt::Assign { target, value } => {
-            ast_expr_references_field(target, base, field) || ast_expr_references_field(value, base, field)
+            ast_expr_references_field(target, base, field)
+                || ast_expr_references_field(value, base, field)
         }
         Stmt::AssignOp { target, value, .. } => {
-            ast_expr_references_field(target, base, field) || ast_expr_references_field(value, base, field)
+            ast_expr_references_field(target, base, field)
+                || ast_expr_references_field(value, base, field)
         }
-        Stmt::If { cond, then_block, else_block } => {
+        Stmt::If {
+            cond,
+            then_block,
+            else_block,
+        } => {
             ast_expr_references_field(cond, base, field)
-                || then_block.stmts.iter().any(|s| ast_stmt_references_field(s, base, field))
-                || else_block.as_ref().map_or(false, |b| b.stmts.iter().any(|s| ast_stmt_references_field(s, base, field)))
+                || then_block
+                    .stmts
+                    .iter()
+                    .any(|s| ast_stmt_references_field(s, base, field))
+                || else_block.as_ref().map_or(false, |b| {
+                    b.stmts
+                        .iter()
+                        .any(|s| ast_stmt_references_field(s, base, field))
+                })
         }
         Stmt::For { cond, body, .. } => {
             ast_expr_references_field(cond, base, field)
-                || body.stmts.iter().any(|s| ast_stmt_references_field(s, base, field))
+                || body
+                    .stmts
+                    .iter()
+                    .any(|s| ast_stmt_references_field(s, base, field))
         }
-        Stmt::Loop { body } | Stmt::While { body, .. } => {
-            body.stmts.iter().any(|s| ast_stmt_references_field(s, base, field))
-        }
+        Stmt::Loop { body } | Stmt::While { body, .. } => body
+            .stmts
+            .iter()
+            .any(|s| ast_stmt_references_field(s, base, field)),
         Stmt::Call(expr) | Stmt::Increment(expr) | Stmt::Decrement(expr) => {
             ast_expr_references_field(expr, base, field)
         }
-        Stmt::Return(expr) => expr.as_ref().map_or(false, |e| ast_expr_references_field(e, base, field)),
+        Stmt::Return(expr) => expr
+            .as_ref()
+            .map_or(false, |e| ast_expr_references_field(e, base, field)),
         Stmt::Comment(_) | Stmt::Break | Stmt::Continue => false,
     }
 }
@@ -851,7 +907,10 @@ fn constants_extra_params_for_program(program: &KernelProgram) -> Vec<ParamSpec>
 }
 
 /// Rename identifiers in an expression tree using a rename map.
-fn rename_expr(expr: &cfd2_ir::ast::Expr, rename_map: &BTreeMap<String, String>) -> cfd2_ir::ast::Expr {
+fn rename_expr(
+    expr: &cfd2_ir::ast::Expr,
+    rename_map: &BTreeMap<String, String>,
+) -> cfd2_ir::ast::Expr {
     use cfd2_ir::ast::{Expr, ExprNode};
     match expr.node() {
         ExprNode::Ident(name) => {
@@ -862,9 +921,7 @@ fn rename_expr(expr: &cfd2_ir::ast::Expr, rename_map: &BTreeMap<String, String>)
             }
         }
         ExprNode::Literal(_) => expr.clone(),
-        ExprNode::Field { base, field } => {
-            rename_expr(base, rename_map).field(field.clone())
-        }
+        ExprNode::Field { base, field } => rename_expr(base, rename_map).field(field.clone()),
         ExprNode::Index { base, index } => {
             rename_expr(base, rename_map).index(rename_expr(index, rename_map))
         }
@@ -877,13 +934,11 @@ fn rename_expr(expr: &cfd2_ir::ast::Expr, rename_map: &BTreeMap<String, String>)
                 cfd2_ir::ast::UnaryOp::Deref => new_inner.deref(),
             }
         }
-        ExprNode::Binary { left, op, right } => {
-            Expr::binary(
-                rename_expr(left, rename_map),
-                *op,
-                rename_expr(right, rename_map),
-            )
-        }
+        ExprNode::Binary { left, op, right } => Expr::binary(
+            rename_expr(left, rename_map),
+            *op,
+            rename_expr(right, rename_map),
+        ),
         ExprNode::Call { callee, args } => {
             let new_callee = rename_expr(callee, rename_map);
             let new_args: Vec<Expr> = args.iter().map(|a| rename_expr(a, rename_map)).collect();
@@ -893,17 +948,26 @@ fn rename_expr(expr: &cfd2_ir::ast::Expr, rename_map: &BTreeMap<String, String>)
 }
 
 /// Rename identifiers in a statement tree using a rename map.
-fn rename_stmt(stmt: &cfd2_ir::ast::Stmt, rename_map: &BTreeMap<String, String>) -> cfd2_ir::ast::Stmt {
-    use cfd2_ir::ast::{Stmt};
+fn rename_stmt(
+    stmt: &cfd2_ir::ast::Stmt,
+    rename_map: &BTreeMap<String, String>,
+) -> cfd2_ir::ast::Stmt {
+    use cfd2_ir::ast::Stmt;
     match stmt {
         Stmt::Comment(text) => Stmt::Comment(text.clone()),
         Stmt::Let { name, ty, expr } => Stmt::Let {
-            name: rename_map.get(name).cloned().unwrap_or_else(|| name.clone()),
+            name: rename_map
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| name.clone()),
             ty: ty.clone(),
             expr: rename_expr(expr, rename_map),
         },
         Stmt::Var { name, ty, expr } => Stmt::Var {
-            name: rename_map.get(name).cloned().unwrap_or_else(|| name.clone()),
+            name: rename_map
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| name.clone()),
             ty: ty.clone(),
             expr: expr.as_ref().map(|e| rename_expr(e, rename_map)),
         },
@@ -916,12 +980,21 @@ fn rename_stmt(stmt: &cfd2_ir::ast::Stmt, rename_map: &BTreeMap<String, String>)
             op: *op,
             value: rename_expr(value, rename_map),
         },
-        Stmt::If { cond, then_block, else_block } => Stmt::If {
+        Stmt::If {
+            cond,
+            then_block,
+            else_block,
+        } => Stmt::If {
             cond: rename_expr(cond, rename_map),
             then_block: rename_block(then_block, rename_map),
             else_block: else_block.as_ref().map(|b| rename_block(b, rename_map)),
         },
-        Stmt::For { init, cond, step, body } => Stmt::For {
+        Stmt::For {
+            init,
+            cond,
+            step,
+            body,
+        } => Stmt::For {
             init: rename_for_init(init, rename_map),
             cond: rename_expr(cond, rename_map),
             step: rename_for_step(step, rename_map),
@@ -943,20 +1016,38 @@ fn rename_stmt(stmt: &cfd2_ir::ast::Stmt, rename_map: &BTreeMap<String, String>)
     }
 }
 
-fn rename_block(block: &cfd2_ir::ast::Block, rename_map: &BTreeMap<String, String>) -> cfd2_ir::ast::Block {
-    cfd2_ir::ast::Block::new(block.stmts.iter().map(|s| rename_stmt(s, rename_map)).collect())
+fn rename_block(
+    block: &cfd2_ir::ast::Block,
+    rename_map: &BTreeMap<String, String>,
+) -> cfd2_ir::ast::Block {
+    cfd2_ir::ast::Block::new(
+        block
+            .stmts
+            .iter()
+            .map(|s| rename_stmt(s, rename_map))
+            .collect(),
+    )
 }
 
-fn rename_for_init(init: &cfd2_ir::ast::ForInit, rename_map: &BTreeMap<String, String>) -> cfd2_ir::ast::ForInit {
+fn rename_for_init(
+    init: &cfd2_ir::ast::ForInit,
+    rename_map: &BTreeMap<String, String>,
+) -> cfd2_ir::ast::ForInit {
     use cfd2_ir::ast::ForInit;
     match init {
         ForInit::Let { name, ty, expr } => ForInit::Let {
-            name: rename_map.get(name).cloned().unwrap_or_else(|| name.clone()),
+            name: rename_map
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| name.clone()),
             ty: ty.clone(),
             expr: rename_expr(expr, rename_map),
         },
         ForInit::Var { name, ty, expr } => ForInit::Var {
-            name: rename_map.get(name).cloned().unwrap_or_else(|| name.clone()),
+            name: rename_map
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| name.clone()),
             ty: ty.clone(),
             expr: rename_expr(expr, rename_map),
         },
@@ -967,7 +1058,10 @@ fn rename_for_init(init: &cfd2_ir::ast::ForInit, rename_map: &BTreeMap<String, S
     }
 }
 
-fn rename_for_step(step: &cfd2_ir::ast::ForStep, rename_map: &BTreeMap<String, String>) -> cfd2_ir::ast::ForStep {
+fn rename_for_step(
+    step: &cfd2_ir::ast::ForStep,
+    rename_map: &BTreeMap<String, String>,
+) -> cfd2_ir::ast::ForStep {
     use cfd2_ir::ast::ForStep;
     match step {
         ForStep::Increment(expr) => ForStep::Increment(rename_expr(expr, rename_map)),
@@ -985,7 +1079,10 @@ fn rename_for_step(step: &cfd2_ir::ast::ForStep, rename_map: &BTreeMap<String, S
 }
 
 /// Rename identifiers in a slice of statements using a rename map.
-fn rename_stmts(stmts: &[cfd2_ir::ast::Stmt], rename_map: &BTreeMap<String, String>) -> Vec<cfd2_ir::ast::Stmt> {
+fn rename_stmts(
+    stmts: &[cfd2_ir::ast::Stmt],
+    rename_map: &BTreeMap<String, String>,
+) -> Vec<cfd2_ir::ast::Stmt> {
     stmts.iter().map(|s| rename_stmt(s, rename_map)).collect()
 }
 
@@ -997,6 +1094,1035 @@ fn rename_stmts(stmts: &[cfd2_ir::ast::Stmt], rename_map: &BTreeMap<String, Stri
 fn apply_fusion_cleanup(program: &mut KernelProgram) {
     apply_ast_load_after_store_forwarding(program);
     apply_ast_noop_self_assign_cleanup(program);
+}
+
+/// Clone a typed kernel while renaming one storage binding and every typed AST
+/// reference to it.  This is used by explicit stage ping-pong lowering: the
+/// generated mathematics still refers to the model's logical `state`, while
+/// each stage pipeline binds a fixed physical input role.
+///
+/// Raw helper WGSL is deliberately rejected when it mentions the binding.  A
+/// string substitution there would evade the typed proof this transform is
+/// intended to provide.
+pub fn rename_program_buffer_binding(
+    program: &KernelProgram,
+    replacement_id: impl Into<String>,
+    from: &str,
+    to: &str,
+) -> Result<KernelProgram, String> {
+    validate_wgsl_identifier(to)?;
+    if from == to {
+        let mut out = program.clone();
+        out.id = replacement_id.into();
+        return Ok(out);
+    }
+    if program.launch.invocation_index_expr.contains(from)
+        || program
+            .launch
+            .bounds_check_expr
+            .as_ref()
+            .is_some_and(|bounds| bounds.contains(from))
+    {
+        return Err(format!(
+            "buffer rename rejected for '{}': raw launch semantics reference '{from}'",
+            program.id
+        ));
+    }
+    if program
+        .helper_functions
+        .iter()
+        .any(|helper| helper.contains(from))
+    {
+        return Err(format!(
+            "buffer rename rejected for '{}': raw helper WGSL references '{from}'",
+            program.id
+        ));
+    }
+
+    let mut out = program.clone();
+    out.id = replacement_id.into();
+    if out.bindings.iter().any(|binding| binding.name == to) {
+        return Err(format!(
+            "buffer rename for '{}' would collide with existing binding '{to}'",
+            program.id
+        ));
+    }
+    let mut found = 0usize;
+    for binding in &mut out.bindings {
+        if binding.name == from {
+            binding.name = to.to_string();
+            found += 1;
+        }
+    }
+    if found != 1 {
+        return Err(format!(
+            "buffer rename for '{}' expected one '{from}' binding, found {found}",
+            program.id
+        ));
+    }
+
+    let rename = BTreeMap::from([(from.to_string(), to.to_string())]);
+    out.indexing = rename_stmts(&out.indexing, &rename);
+    out.preamble = rename_stmts(&out.preamble, &rename);
+    out.body = rename_stmts(&out.body, &rename);
+    Ok(out)
+}
+
+/// Fuse one matrix-free cell residual with one cell-local RK stage while:
+///
+/// - replacing the global `rhs` hand-off with invocation-local expressions;
+/// - reading the spatial operator from an immutable stage input buffer; and
+/// - writing the updated/closed state to a distinct stage output buffer.
+///
+/// The distinct output is a correctness requirement, not merely an
+/// optimization.  An in-place fused dispatch has no grid-wide barrier: one
+/// invocation could update a cell while a neighboring invocation still reads
+/// that cell for its residual.
+pub fn synthesize_explicit_residual_rk_ping_pong(
+    replacement_id: impl Into<String>,
+    residual: &KernelProgram,
+    stage: &KernelProgram,
+    input_state_binding: &str,
+    output_state_binding: &str,
+) -> Result<KernelProgram, String> {
+    let replacement_id = replacement_id.into();
+    validate_wgsl_identifier(input_state_binding)?;
+    validate_wgsl_identifier(output_state_binding)?;
+    if input_state_binding == output_state_binding {
+        return Err(
+            "explicit residual/RK fusion requires distinct input and output state buffers"
+                .to_string(),
+        );
+    }
+    if residual.dispatch != DispatchDomain::Cells || stage.dispatch != DispatchDomain::Cells {
+        return Err(
+            "explicit residual/RK fusion requires two cell-dispatched programs".to_string(),
+        );
+    }
+    let residual_locals: BTreeSet<String> = residual.local_symbols().into_iter().collect();
+    let stage_locals: BTreeSet<String> = stage.local_symbols().into_iter().collect();
+    for binding_name in [input_state_binding, output_state_binding] {
+        if residual_locals.contains(binding_name) || stage_locals.contains(binding_name) {
+            return Err(format!(
+                "explicit residual/RK binding name '{binding_name}' collides with a local symbol"
+            ));
+        }
+    }
+    if !residual.helper_functions.is_empty() || !stage.helper_functions.is_empty() {
+        return Err(
+            "explicit residual/RK fusion requires helper-free typed programs; raw helper symbol capture is unproven"
+                .to_string(),
+        );
+    }
+    if residual.launch != stage.launch {
+        return Err(format!(
+            "explicit residual/RK fusion launch mismatch: '{}' vs '{}'",
+            residual.id, stage.id
+        ));
+    }
+    // The residual owns the structured/unstructured cell-indexing preamble.
+    // RK stages normally need only `idx`; accepting a second, different
+    // indexing program would silently discard locals when ordinary fusion
+    // keeps the first program's indexing block.
+    if !stage.indexing.is_empty() && residual.indexing != stage.indexing {
+        return Err(format!(
+            "explicit residual/RK fusion indexing mismatch: '{}' vs '{}'",
+            residual.id, stage.id
+        ));
+    }
+
+    let mut residual = rename_program_buffer_binding(
+        residual,
+        format!("{}:input", residual.id),
+        "state",
+        input_state_binding,
+    )?;
+    if residual
+        .body
+        .iter()
+        .any(|statement| stmt_writes_buffer(statement, input_state_binding))
+    {
+        return Err(format!(
+            "explicit residual '{}' writes its stage input state",
+            residual.id
+        ));
+    }
+    if let Some(input) = residual
+        .bindings
+        .iter_mut()
+        .find(|binding| binding.name == input_state_binding)
+    {
+        input.access = BindingAccess::ReadOnlyStorage;
+    }
+    let rhs_binding = remove_named_binding(&mut residual, "rhs")?;
+    let rhs_values = extract_top_level_buffer_stores(&mut residual.body, "rhs")?;
+    if rhs_values.is_empty() {
+        return Err(format!(
+            "explicit residual '{}' produced no invocation-local rhs values",
+            residual.id
+        ));
+    }
+    if stmts_reference_ident(&residual.preamble, "rhs")
+        || stmts_reference_ident(&residual.indexing, "rhs")
+        || stmts_reference_ident(&residual.body, "rhs")
+        || residual
+            .helper_functions
+            .iter()
+            .any(|helper| helper.contains("rhs"))
+    {
+        return Err(format!(
+            "explicit residual '{}' has non-output rhs accesses",
+            residual.id
+        ));
+    }
+    remove_effect_binding(&mut residual, rhs_binding.group, rhs_binding.binding);
+
+    let mut stage = alpha_rename_stage_locals(stage, &residual)?;
+    let stage_rhs = remove_named_binding(&mut stage, "rhs")?;
+    remove_effect_binding(&mut stage, stage_rhs.group, stage_rhs.binding);
+    let stage_state = remove_named_binding(&mut stage, "state")?;
+    remove_effect_binding(&mut stage, stage_state.group, stage_state.binding);
+    for binding in residual.bindings.iter().chain(stage.bindings.iter()) {
+        if binding.name == output_state_binding {
+            return Err(format!(
+                "explicit residual/RK output name '{output_state_binding}' collides with retained binding @group({}) @binding({})",
+                binding.group, binding.binding
+            ));
+        }
+        if binding.name == input_state_binding && !(binding.group == 1 && binding.binding == 0) {
+            return Err(format!(
+                "explicit residual/RK input name '{input_state_binding}' collides with retained binding @group({}) @binding({})",
+                binding.group, binding.binding
+            ));
+        }
+    }
+
+    stage.indexing = rewrite_buffer_reads_in_stmts(&stage.indexing, "rhs", &rhs_values)?;
+    stage.preamble = rewrite_buffer_reads_in_stmts(&stage.preamble, "rhs", &rhs_values)?;
+    stage.body = rewrite_buffer_reads_in_stmts(&stage.body, "rhs", &rhs_values)?;
+    if stmts_reference_ident(&stage.indexing, "rhs")
+        || stmts_reference_ident(&stage.preamble, "rhs")
+        || stmts_reference_ident(&stage.body, "rhs")
+    {
+        return Err(format!(
+            "RK stage '{}' contains an rhs access that could not be privatized",
+            stage.id
+        ));
+    }
+
+    let mut written_state = BTreeSet::<BufferIndexKey>::new();
+    stage.indexing = rewrite_state_reads_in_stmts(
+        &stage.indexing,
+        &written_state,
+        input_state_binding,
+        output_state_binding,
+    )?;
+    stage.preamble = rewrite_state_reads_in_stmts(
+        &stage.preamble,
+        &written_state,
+        input_state_binding,
+        output_state_binding,
+    )?;
+    stage.body = rewrite_top_level_state_writes(
+        &stage.body,
+        &mut written_state,
+        input_state_binding,
+        output_state_binding,
+    )?;
+    if written_state.is_empty() {
+        return Err(format!(
+            "RK stage '{}' writes no state components",
+            stage.id
+        ));
+    }
+    if stmts_reference_ident(&stage.indexing, "state")
+        || stmts_reference_ident(&stage.preamble, "state")
+        || stmts_reference_ident(&stage.body, "state")
+    {
+        return Err(format!(
+            "RK stage '{}' contains a state access that could not be ping-pong lowered",
+            stage.id
+        ));
+    }
+
+    // Reuse the removed RHS slot when possible.  This keeps the interface
+    // within the same per-stage storage-binding budget; if a residual happens
+    // to occupy that slot, select the first deterministic free slot instead.
+    let mut occupied = BTreeSet::new();
+    for binding in residual.bindings.iter().chain(stage.bindings.iter()) {
+        if binding.group == stage_rhs.group {
+            occupied.insert(binding.binding);
+        }
+    }
+    let output_slot = if !occupied.contains(&stage_rhs.binding) {
+        stage_rhs.binding
+    } else {
+        (0..=u32::MAX)
+            .find(|slot| !occupied.contains(slot))
+            .ok_or_else(|| "explicit residual/RK fusion found no free output binding".to_string())?
+    };
+    stage.bindings.push(KernelBinding::new(
+        stage_rhs.group,
+        output_slot,
+        output_state_binding,
+        stage_state.wgsl_type,
+        BindingAccess::ReadWriteStorage,
+    ));
+    stage.side_effects.write_set.insert(EffectResource {
+        group: stage_rhs.group,
+        binding: output_slot,
+        component: None,
+    });
+
+    // Shared coupled interfaces deliberately declare history/iteration
+    // buffers that static explicit residuals do not use.  Remove only those
+    // bindings whose absence is proven by both typed AST and raw-helper scans;
+    // this also prevents accidental physical aliasing with ping-pong scratch.
+    for dead_candidate in ["state_old", "state_old_old", "state_iter"] {
+        remove_unreferenced_binding(&mut residual, dead_candidate)?;
+    }
+
+    // After the dedicated cross-invocation proof above, ordinary safe fusion
+    // still checks dispatch/launch/indexing, interface compatibility, barriers,
+    // atomics, and any side-effect metadata unrelated to the privatized streams.
+    synthesize_fused_program(
+        replacement_id,
+        "explicit:residual_rk_ping_pong_v1",
+        &[residual, stage],
+        FusionSafetyPolicy::Safe,
+    )
+}
+
+fn remove_named_binding(program: &mut KernelProgram, name: &str) -> Result<KernelBinding, String> {
+    let positions: Vec<usize> = program
+        .bindings
+        .iter()
+        .enumerate()
+        .filter_map(|(index, binding)| (binding.name == name).then_some(index))
+        .collect();
+    if positions.len() != 1 {
+        return Err(format!(
+            "kernel '{}' expected one '{name}' binding, found {}",
+            program.id,
+            positions.len()
+        ));
+    }
+    Ok(program.bindings.remove(positions[0]))
+}
+
+fn validate_wgsl_identifier(name: &str) -> Result<(), String> {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return Err("WGSL binding identifier must not be empty".to_string());
+    };
+    if !(first == '_' || first.is_ascii_alphabetic())
+        || !chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+    {
+        return Err(format!("'{name}' is not a valid WGSL binding identifier"));
+    }
+    // Core WGSL keywords plus reserved scalar/control words. This transform is
+    // intentionally conservative because names become module-scope globals.
+    if matches!(
+        name,
+        "alias"
+            | "array"
+            | "atomic"
+            | "bool"
+            | "break"
+            | "case"
+            | "const"
+            | "const_assert"
+            | "continue"
+            | "continuing"
+            | "default"
+            | "diagnostic"
+            | "discard"
+            | "else"
+            | "enable"
+            | "false"
+            | "f16"
+            | "f32"
+            | "fn"
+            | "for"
+            | "i32"
+            | "if"
+            | "let"
+            | "loop"
+            | "override"
+            | "ptr"
+            | "requires"
+            | "return"
+            | "struct"
+            | "switch"
+            | "true"
+            | "u32"
+            | "var"
+            | "while"
+    ) {
+        return Err(format!("'{name}' is reserved by WGSL"));
+    }
+    Ok(())
+}
+
+/// Give the second program a namespace that is disjoint from every residual
+/// local before residual expressions are substituted into its AST. Ordinary
+/// fusion alpha-renames program 1 later; doing this first prevents that pass
+/// from capturing an ident that originated in program 0.
+fn alpha_rename_stage_locals(
+    stage: &KernelProgram,
+    residual: &KernelProgram,
+) -> Result<KernelProgram, String> {
+    let mut out = stage.clone();
+    let forbidden: BTreeSet<String> = residual
+        .local_symbols()
+        .into_iter()
+        .chain(stage.local_symbols())
+        .chain(residual.bindings.iter().map(|binding| binding.name.clone()))
+        .chain(stage.bindings.iter().map(|binding| binding.name.clone()))
+        .collect();
+    let mut map = BTreeMap::new();
+    for (ordinal, local) in stage.local_symbols().into_iter().enumerate() {
+        let mut candidate = format!("cfd2_stage_local_{ordinal}_{local}");
+        let mut discriminator = 0usize;
+        while forbidden.contains(&candidate) || map.values().any(|value| value == &candidate) {
+            discriminator += 1;
+            candidate = format!("cfd2_stage_local_{ordinal}_{discriminator}_{local}");
+        }
+        validate_wgsl_identifier(&candidate)?;
+        map.insert(local, candidate);
+    }
+    out.preamble = rename_stmts(&out.preamble, &map);
+    out.body = rename_stmts(&out.body, &map);
+    Ok(out)
+}
+
+fn remove_effect_binding(program: &mut KernelProgram, group: u32, binding: u32) {
+    program
+        .side_effects
+        .read_set
+        .retain(|resource| resource.group != group || resource.binding != binding);
+    program
+        .side_effects
+        .write_set
+        .retain(|resource| resource.group != group || resource.binding != binding);
+}
+
+fn remove_unreferenced_binding(program: &mut KernelProgram, name: &str) -> Result<(), String> {
+    let Some(binding) = program
+        .bindings
+        .iter()
+        .find(|binding| binding.name == name)
+        .cloned()
+    else {
+        return Ok(());
+    };
+    let referenced = stmts_reference_ident(&program.indexing, name)
+        || stmts_reference_ident(&program.preamble, name)
+        || stmts_reference_ident(&program.body, name)
+        || program
+            .helper_functions
+            .iter()
+            .any(|helper| helper.contains(name));
+    if referenced {
+        return Ok(());
+    }
+    let _ = remove_named_binding(program, name)?;
+    remove_effect_binding(program, binding.group, binding.binding);
+    Ok(())
+}
+
+fn extract_top_level_buffer_stores(
+    statements: &mut Vec<cfd2_ir::ast::Stmt>,
+    buffer: &str,
+) -> Result<BTreeMap<BufferIndexKey, cfd2_ir::ast::Expr>, String> {
+    use cfd2_ir::ast::{ExprNode, Stmt};
+    let mut values = BTreeMap::new();
+    let mut kept = Vec::with_capacity(statements.len());
+    for statement in std::mem::take(statements) {
+        if let Stmt::Assign { target, value } = &statement {
+            if let ExprNode::Index { base, index } = target.node() {
+                if matches!(base.node(), ExprNode::Ident(name) if name == buffer) {
+                    let key = BufferIndexKey::from_expr(index);
+                    if values.insert(key.clone(), value.clone()).is_some() {
+                        return Err(format!(
+                            "buffer '{buffer}' component '{key}' is stored more than once"
+                        ));
+                    }
+                    continue;
+                }
+            }
+        }
+        if stmt_writes_buffer(&statement, buffer) {
+            return Err(format!(
+                "buffer '{buffer}' has a nested or compound write; local scalar replacement is unproven"
+            ));
+        }
+        kept.push(statement);
+    }
+    *statements = kept;
+    Ok(values)
+}
+
+fn rewrite_buffer_reads_in_stmts(
+    statements: &[cfd2_ir::ast::Stmt],
+    buffer: &str,
+    values: &BTreeMap<BufferIndexKey, cfd2_ir::ast::Expr>,
+) -> Result<Vec<cfd2_ir::ast::Stmt>, String> {
+    statements
+        .iter()
+        .map(|statement| rewrite_stmt_buffer_reads(statement, buffer, values))
+        .collect()
+}
+
+fn rewrite_stmt_buffer_reads(
+    statement: &cfd2_ir::ast::Stmt,
+    buffer: &str,
+    values: &BTreeMap<BufferIndexKey, cfd2_ir::ast::Expr>,
+) -> Result<cfd2_ir::ast::Stmt, String> {
+    use cfd2_ir::ast::{Block, ForInit, ForStep, Stmt};
+    let expr = |value: &cfd2_ir::ast::Expr| rewrite_expr_buffer_reads(value, buffer, values);
+    let block = |value: &Block| -> Result<Block, String> {
+        Ok(Block::new(rewrite_buffer_reads_in_stmts(
+            &value.stmts,
+            buffer,
+            values,
+        )?))
+    };
+    Ok(match statement {
+        Stmt::Comment(text) => Stmt::Comment(text.clone()),
+        Stmt::Let {
+            name,
+            ty,
+            expr: value,
+        } => Stmt::Let {
+            name: name.clone(),
+            ty: ty.clone(),
+            expr: expr(value)?,
+        },
+        Stmt::Var {
+            name,
+            ty,
+            expr: value,
+        } => Stmt::Var {
+            name: name.clone(),
+            ty: ty.clone(),
+            expr: value.as_ref().map(expr).transpose()?,
+        },
+        Stmt::Assign { target, value } => Stmt::Assign {
+            target: expr(target)?,
+            value: expr(value)?,
+        },
+        Stmt::AssignOp { target, op, value } => Stmt::AssignOp {
+            target: expr(target)?,
+            op: *op,
+            value: expr(value)?,
+        },
+        Stmt::If {
+            cond,
+            then_block,
+            else_block,
+        } => Stmt::If {
+            cond: expr(cond)?,
+            then_block: block(then_block)?,
+            else_block: else_block.as_ref().map(block).transpose()?,
+        },
+        Stmt::For {
+            init,
+            cond,
+            step,
+            body,
+        } => Stmt::For {
+            init: match init {
+                ForInit::Let {
+                    name,
+                    ty,
+                    expr: value,
+                } => ForInit::Let {
+                    name: name.clone(),
+                    ty: ty.clone(),
+                    expr: expr(value)?,
+                },
+                ForInit::Var {
+                    name,
+                    ty,
+                    expr: value,
+                } => ForInit::Var {
+                    name: name.clone(),
+                    ty: ty.clone(),
+                    expr: expr(value)?,
+                },
+                ForInit::Assign { target, value } => ForInit::Assign {
+                    target: expr(target)?,
+                    value: expr(value)?,
+                },
+            },
+            cond: expr(cond)?,
+            step: match step {
+                ForStep::Increment(value) => ForStep::Increment(expr(value)?),
+                ForStep::Decrement(value) => ForStep::Decrement(expr(value)?),
+                ForStep::Assign { target, value } => ForStep::Assign {
+                    target: expr(target)?,
+                    value: expr(value)?,
+                },
+                ForStep::AssignOp { target, op, value } => ForStep::AssignOp {
+                    target: expr(target)?,
+                    op: *op,
+                    value: expr(value)?,
+                },
+            },
+            body: block(body)?,
+        },
+        Stmt::Loop { body } => Stmt::Loop { body: block(body)? },
+        Stmt::While { cond, body } => Stmt::While {
+            cond: expr(cond)?,
+            body: block(body)?,
+        },
+        Stmt::Break => Stmt::Break,
+        Stmt::Continue => Stmt::Continue,
+        Stmt::Return(value) => Stmt::Return(value.as_ref().map(expr).transpose()?),
+        Stmt::Call(value) => Stmt::Call(expr(value)?),
+        Stmt::Increment(value) => Stmt::Increment(expr(value)?),
+        Stmt::Decrement(value) => Stmt::Decrement(expr(value)?),
+    })
+}
+
+fn rewrite_expr_buffer_reads(
+    expression: &cfd2_ir::ast::Expr,
+    buffer: &str,
+    values: &BTreeMap<BufferIndexKey, cfd2_ir::ast::Expr>,
+) -> Result<cfd2_ir::ast::Expr, String> {
+    use cfd2_ir::ast::{Expr, ExprNode};
+    if let ExprNode::Index { base, index } = expression.node() {
+        if matches!(base.node(), ExprNode::Ident(name) if name == buffer) {
+            let key = BufferIndexKey::from_expr(index);
+            return values.get(&key).cloned().ok_or_else(|| {
+                format!("buffer '{buffer}' read '{key}' has no dominating local producer")
+            });
+        }
+    }
+    Ok(match expression.node() {
+        ExprNode::Ident(_) | ExprNode::Literal(_) => expression.clone(),
+        ExprNode::Field { base, field } => {
+            rewrite_expr_buffer_reads(base, buffer, values)?.field(field.clone())
+        }
+        ExprNode::Index { base, index } => rewrite_expr_buffer_reads(base, buffer, values)?
+            .index(rewrite_expr_buffer_reads(index, buffer, values)?),
+        ExprNode::Unary { op, expr } => Expr::alloc_node(ExprNode::Unary {
+            op: *op,
+            expr: rewrite_expr_buffer_reads(expr, buffer, values)?,
+        }),
+        ExprNode::Binary { left, op, right } => Expr::binary(
+            rewrite_expr_buffer_reads(left, buffer, values)?,
+            *op,
+            rewrite_expr_buffer_reads(right, buffer, values)?,
+        ),
+        ExprNode::Call { callee, args } => Expr::call(
+            rewrite_expr_buffer_reads(callee, buffer, values)?,
+            args.iter()
+                .map(|arg| rewrite_expr_buffer_reads(arg, buffer, values))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+    })
+}
+
+fn rewrite_top_level_state_writes(
+    statements: &[cfd2_ir::ast::Stmt],
+    written: &mut BTreeSet<BufferIndexKey>,
+    input: &str,
+    output: &str,
+) -> Result<Vec<cfd2_ir::ast::Stmt>, String> {
+    use cfd2_ir::ast::{Expr, ExprNode, Stmt};
+    let mut result = Vec::with_capacity(statements.len());
+    for statement in statements {
+        if let Stmt::Assign { target, value } = statement {
+            if let ExprNode::Index { base, index } = target.node() {
+                if matches!(base.node(), ExprNode::Ident(name) if name == "state") {
+                    let key = BufferIndexKey::from_expr(index);
+                    let value = rewrite_state_read_expr(value, written, input, output)?;
+                    result.push(Stmt::Assign {
+                        target: Expr::ident(output).index(index.clone()),
+                        value,
+                    });
+                    written.insert(key);
+                    continue;
+                }
+            }
+        }
+        if stmt_writes_buffer(statement, "state") {
+            return Err(
+                "RK stage has a nested or compound state write; ping-pong dominance is unproven"
+                    .to_string(),
+            );
+        }
+        result.push(rewrite_state_read_stmt(statement, written, input, output)?);
+    }
+    Ok(result)
+}
+
+fn rewrite_state_reads_in_stmts(
+    statements: &[cfd2_ir::ast::Stmt],
+    written: &BTreeSet<BufferIndexKey>,
+    input: &str,
+    output: &str,
+) -> Result<Vec<cfd2_ir::ast::Stmt>, String> {
+    statements
+        .iter()
+        .map(|statement| rewrite_state_read_stmt(statement, written, input, output))
+        .collect()
+}
+
+fn rewrite_state_read_stmt(
+    statement: &cfd2_ir::ast::Stmt,
+    written: &BTreeSet<BufferIndexKey>,
+    input: &str,
+    output: &str,
+) -> Result<cfd2_ir::ast::Stmt, String> {
+    rewrite_stmt_with_expr(statement, &|expr| {
+        rewrite_state_read_expr(expr, written, input, output)
+    })
+}
+
+fn rewrite_stmt_with_expr(
+    statement: &cfd2_ir::ast::Stmt,
+    rewrite: &impl Fn(&cfd2_ir::ast::Expr) -> Result<cfd2_ir::ast::Expr, String>,
+) -> Result<cfd2_ir::ast::Stmt, String> {
+    use cfd2_ir::ast::{Block, ForInit, ForStep, Stmt};
+    let block = |value: &Block| -> Result<Block, String> {
+        Ok(Block::new(
+            value
+                .stmts
+                .iter()
+                .map(|statement| rewrite_stmt_with_expr(statement, rewrite))
+                .collect::<Result<Vec<_>, _>>()?,
+        ))
+    };
+    Ok(match statement {
+        Stmt::Comment(text) => Stmt::Comment(text.clone()),
+        Stmt::Let { name, ty, expr } => Stmt::Let {
+            name: name.clone(),
+            ty: ty.clone(),
+            expr: rewrite(expr)?,
+        },
+        Stmt::Var { name, ty, expr } => Stmt::Var {
+            name: name.clone(),
+            ty: ty.clone(),
+            expr: expr.as_ref().map(rewrite).transpose()?,
+        },
+        Stmt::Assign { target, value } => Stmt::Assign {
+            target: rewrite(target)?,
+            value: rewrite(value)?,
+        },
+        Stmt::AssignOp { target, op, value } => Stmt::AssignOp {
+            target: rewrite(target)?,
+            op: *op,
+            value: rewrite(value)?,
+        },
+        Stmt::If {
+            cond,
+            then_block,
+            else_block,
+        } => Stmt::If {
+            cond: rewrite(cond)?,
+            then_block: block(then_block)?,
+            else_block: else_block.as_ref().map(block).transpose()?,
+        },
+        Stmt::For {
+            init,
+            cond,
+            step,
+            body,
+        } => Stmt::For {
+            init: match init {
+                ForInit::Let { name, ty, expr } => ForInit::Let {
+                    name: name.clone(),
+                    ty: ty.clone(),
+                    expr: rewrite(expr)?,
+                },
+                ForInit::Var { name, ty, expr } => ForInit::Var {
+                    name: name.clone(),
+                    ty: ty.clone(),
+                    expr: rewrite(expr)?,
+                },
+                ForInit::Assign { target, value } => ForInit::Assign {
+                    target: rewrite(target)?,
+                    value: rewrite(value)?,
+                },
+            },
+            cond: rewrite(cond)?,
+            step: match step {
+                ForStep::Increment(value) => ForStep::Increment(rewrite(value)?),
+                ForStep::Decrement(value) => ForStep::Decrement(rewrite(value)?),
+                ForStep::Assign { target, value } => ForStep::Assign {
+                    target: rewrite(target)?,
+                    value: rewrite(value)?,
+                },
+                ForStep::AssignOp { target, op, value } => ForStep::AssignOp {
+                    target: rewrite(target)?,
+                    op: *op,
+                    value: rewrite(value)?,
+                },
+            },
+            body: block(body)?,
+        },
+        Stmt::Loop { body } => Stmt::Loop { body: block(body)? },
+        Stmt::While { cond, body } => Stmt::While {
+            cond: rewrite(cond)?,
+            body: block(body)?,
+        },
+        Stmt::Break => Stmt::Break,
+        Stmt::Continue => Stmt::Continue,
+        Stmt::Return(value) => Stmt::Return(value.as_ref().map(rewrite).transpose()?),
+        Stmt::Call(value) => Stmt::Call(rewrite(value)?),
+        Stmt::Increment(value) => Stmt::Increment(rewrite(value)?),
+        Stmt::Decrement(value) => Stmt::Decrement(rewrite(value)?),
+    })
+}
+
+fn rewrite_state_read_expr(
+    expression: &cfd2_ir::ast::Expr,
+    written: &BTreeSet<BufferIndexKey>,
+    input: &str,
+    output: &str,
+) -> Result<cfd2_ir::ast::Expr, String> {
+    use cfd2_ir::ast::{Expr, ExprNode};
+    if let ExprNode::Index { base, index } = expression.node() {
+        if matches!(base.node(), ExprNode::Ident(name) if name == "state") {
+            let key = BufferIndexKey::from_expr(index);
+            let binding = if written.contains(&key) {
+                output
+            } else {
+                input
+            };
+            return Ok(Expr::ident(binding).index(index.clone()));
+        }
+    }
+    Ok(match expression.node() {
+        ExprNode::Ident(_) | ExprNode::Literal(_) => expression.clone(),
+        ExprNode::Field { base, field } => {
+            rewrite_state_read_expr(base, written, input, output)?.field(field.clone())
+        }
+        ExprNode::Index { base, index } => rewrite_state_read_expr(base, written, input, output)?
+            .index(rewrite_state_read_expr(index, written, input, output)?),
+        ExprNode::Unary { op, expr } => Expr::alloc_node(ExprNode::Unary {
+            op: *op,
+            expr: rewrite_state_read_expr(expr, written, input, output)?,
+        }),
+        ExprNode::Binary { left, op, right } => Expr::binary(
+            rewrite_state_read_expr(left, written, input, output)?,
+            *op,
+            rewrite_state_read_expr(right, written, input, output)?,
+        ),
+        ExprNode::Call { callee, args } => Expr::call(
+            rewrite_state_read_expr(callee, written, input, output)?,
+            args.iter()
+                .map(|arg| rewrite_state_read_expr(arg, written, input, output))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum BufferIndexKey {
+    /// Canonical `cell * stride + offset`; an omitted `+ 0` has the same key.
+    Affine {
+        cell: String,
+        stride: u32,
+        offset: u32,
+    },
+    /// Conservative fallback: only syntactically identical unsupported forms
+    /// are considered the same access.
+    Exact(String),
+}
+
+impl BufferIndexKey {
+    fn from_expr(expression: &cfd2_ir::ast::Expr) -> Self {
+        use cfd2_ir::ast::{BinaryOp, ExprNode, Literal};
+
+        let uint = |expr: &cfd2_ir::ast::Expr| match expr.node() {
+            ExprNode::Literal(Literal::Uint(value)) => Some(*value),
+            _ => None,
+        };
+        let product = |expr: &cfd2_ir::ast::Expr| match expr.node() {
+            ExprNode::Binary {
+                left,
+                op: BinaryOp::Mul,
+                right,
+            } => {
+                if let Some(stride) = uint(right) {
+                    Some((left.to_string(), stride))
+                } else {
+                    uint(left).map(|stride| (right.to_string(), stride))
+                }
+            }
+            _ => None,
+        };
+
+        match expression.node() {
+            ExprNode::Binary {
+                left,
+                op: BinaryOp::Add,
+                right,
+            } => {
+                if let (Some((cell, stride)), Some(offset)) = (product(left), uint(right)) {
+                    Self::Affine {
+                        cell,
+                        stride,
+                        offset,
+                    }
+                } else if let (Some(offset), Some((cell, stride))) = (uint(left), product(right)) {
+                    Self::Affine {
+                        cell,
+                        stride,
+                        offset,
+                    }
+                } else {
+                    Self::Exact(expression.to_string())
+                }
+            }
+            _ => product(expression)
+                .map(|(cell, stride)| Self::Affine {
+                    cell,
+                    stride,
+                    offset: 0,
+                })
+                .unwrap_or_else(|| Self::Exact(expression.to_string())),
+        }
+    }
+}
+
+impl std::fmt::Display for BufferIndexKey {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Affine {
+                cell,
+                stride,
+                offset,
+            } => write!(formatter, "{cell}*{stride}+{offset}"),
+            Self::Exact(expression) => formatter.write_str(expression),
+        }
+    }
+}
+
+fn stmts_reference_ident(statements: &[cfd2_ir::ast::Stmt], ident: &str) -> bool {
+    statements
+        .iter()
+        .any(|statement| stmt_references_ident(statement, ident))
+}
+
+fn stmt_writes_buffer(statement: &cfd2_ir::ast::Stmt, buffer: &str) -> bool {
+    use cfd2_ir::ast::{ExprNode, ForInit, ForStep, Stmt};
+    let target_is_buffer = |target: &cfd2_ir::ast::Expr| {
+        matches!(
+            target.node(),
+            ExprNode::Index { base, .. }
+                if matches!(base.node(), ExprNode::Ident(name) if name == buffer)
+        )
+    };
+    match statement {
+        Stmt::Assign { target, .. }
+        | Stmt::AssignOp { target, .. }
+        | Stmt::Increment(target)
+        | Stmt::Decrement(target) => target_is_buffer(target),
+        Stmt::If {
+            then_block,
+            else_block,
+            ..
+        } => {
+            then_block
+                .stmts
+                .iter()
+                .any(|s| stmt_writes_buffer(s, buffer))
+                || else_block
+                    .as_ref()
+                    .is_some_and(|block| block.stmts.iter().any(|s| stmt_writes_buffer(s, buffer)))
+        }
+        Stmt::For {
+            init, step, body, ..
+        } => {
+            let init_writes = matches!(
+                init,
+                ForInit::Assign { target, .. } if target_is_buffer(target)
+            );
+            let step_writes = match step {
+                ForStep::Increment(target)
+                | ForStep::Decrement(target)
+                | ForStep::Assign { target, .. }
+                | ForStep::AssignOp { target, .. } => target_is_buffer(target),
+            };
+            init_writes || step_writes || body.stmts.iter().any(|s| stmt_writes_buffer(s, buffer))
+        }
+        Stmt::Loop { body } | Stmt::While { body, .. } => {
+            body.stmts.iter().any(|s| stmt_writes_buffer(s, buffer))
+        }
+        _ => false,
+    }
+}
+
+fn stmt_references_ident(statement: &cfd2_ir::ast::Stmt, ident: &str) -> bool {
+    use cfd2_ir::ast::{ForInit, ForStep, Stmt};
+    let expr = |value: &cfd2_ir::ast::Expr| expr_references_ident(value, ident);
+    match statement {
+        Stmt::Comment(_) | Stmt::Break | Stmt::Continue => false,
+        Stmt::Let { expr: value, .. } => expr(value),
+        Stmt::Var { expr: value, .. } => value.as_ref().is_some_and(expr),
+        Stmt::Assign { target, value } | Stmt::AssignOp { target, value, .. } => {
+            expr(target) || expr(value)
+        }
+        Stmt::If {
+            cond,
+            then_block,
+            else_block,
+        } => {
+            expr(cond)
+                || stmts_reference_ident(&then_block.stmts, ident)
+                || else_block
+                    .as_ref()
+                    .is_some_and(|block| stmts_reference_ident(&block.stmts, ident))
+        }
+        Stmt::For {
+            init,
+            cond,
+            step,
+            body,
+        } => {
+            let init = match init {
+                ForInit::Let { expr: value, .. } | ForInit::Var { expr: value, .. } => expr(value),
+                ForInit::Assign { target, value } => expr(target) || expr(value),
+            };
+            let step = match step {
+                ForStep::Increment(value) | ForStep::Decrement(value) => expr(value),
+                ForStep::Assign { target, value } | ForStep::AssignOp { target, value, .. } => {
+                    expr(target) || expr(value)
+                }
+            };
+            init || expr(cond) || step || stmts_reference_ident(&body.stmts, ident)
+        }
+        Stmt::Loop { body } => stmts_reference_ident(&body.stmts, ident),
+        Stmt::While { cond, body } => expr(cond) || stmts_reference_ident(&body.stmts, ident),
+        Stmt::Return(value) => value.as_ref().is_some_and(expr),
+        Stmt::Call(value) | Stmt::Increment(value) | Stmt::Decrement(value) => expr(value),
+    }
+}
+
+fn expr_references_ident(expression: &cfd2_ir::ast::Expr, ident: &str) -> bool {
+    use cfd2_ir::ast::ExprNode;
+    match expression.node() {
+        ExprNode::Ident(name) => name == ident,
+        ExprNode::Literal(_) => false,
+        ExprNode::Field { base, .. } | ExprNode::Unary { expr: base, .. } => {
+            expr_references_ident(base, ident)
+        }
+        ExprNode::Index { base, index }
+        | ExprNode::Binary {
+            left: base,
+            right: index,
+            ..
+        } => expr_references_ident(base, ident) || expr_references_ident(index, ident),
+        ExprNode::Call { callee, args } => {
+            expr_references_ident(callee, ident)
+                || args.iter().any(|arg| expr_references_ident(arg, ident))
+        }
+    }
 }
 
 /// AST-based load-after-store forwarding.
@@ -1091,7 +2217,10 @@ fn ast_collect_buffer_accesses(expr: &cfd2_ir::ast::Expr) -> Vec<(String, String
     accesses
 }
 
-fn ast_collect_buffer_accesses_recursive(expr: &cfd2_ir::ast::Expr, out: &mut Vec<(String, String)>) {
+fn ast_collect_buffer_accesses_recursive(
+    expr: &cfd2_ir::ast::Expr,
+    out: &mut Vec<(String, String)>,
+) {
     use cfd2_ir::ast::ExprNode;
     match expr.node() {
         ExprNode::Index { base, index } => {
@@ -1120,7 +2249,6 @@ fn ast_collect_buffer_accesses_recursive(expr: &cfd2_ir::ast::Expr, out: &mut Ve
         ExprNode::Ident(_) | ExprNode::Literal(_) => {}
     }
 }
-
 
 pub fn lower_kernel_program_to_wgsl(program: &KernelProgram) -> Result<KernelWgsl, String> {
     let mut lines = Vec::<String>::new();
@@ -1376,8 +2504,14 @@ mod tests {
                 .expect("fused synthesis");
         let rendered = cfd2_ir::ast::stmt::render_stmt_lines(&fused.body);
         let joined = rendered.join("\n");
-        assert!(joined.contains("value = value + 1.0;"), "missing original value assignment in:\n{joined}");
-        assert!(joined.contains("k1_value = k1_value + 1.0;"), "missing renamed value assignment in:\n{joined}");
+        assert!(
+            joined.contains("value = value + 1.0;"),
+            "missing original value assignment in:\n{joined}"
+        );
+        assert!(
+            joined.contains("k1_value = k1_value + 1.0;"),
+            "missing renamed value assignment in:\n{joined}"
+        );
     }
 
     #[test]
@@ -1492,10 +2626,13 @@ mod tests {
     fn aggressive_cleanup_removes_noop_local_self_assignment() {
         use cfd2_ir::ast::{Expr, Stmt};
         let mut a = sample_program("a");
-        a.body.insert(0, Stmt::Assign {
-            target: Expr::ident("value"),
-            value: Expr::ident("value"),
-        });
+        a.body.insert(
+            0,
+            Stmt::Assign {
+                target: Expr::ident("value"),
+                value: Expr::ident("value"),
+            },
+        );
         let b = sample_program("b");
 
         let safe = synthesize_fused_program(
@@ -1560,7 +2697,11 @@ mod tests {
             DispatchDomain::Cells,
             launch,
             vec![KernelBinding::new(
-                0, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage,
+                0,
+                0,
+                "state",
+                "array<f32>",
+                BindingAccess::ReadWriteStorage,
             )],
         );
         program.body = vec![
@@ -1594,7 +2735,11 @@ mod tests {
             DispatchDomain::Cells,
             launch,
             vec![KernelBinding::new(
-                0, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage,
+                0,
+                0,
+                "state",
+                "array<f32>",
+                BindingAccess::ReadWriteStorage,
             )],
         );
         program.body = vec![
@@ -1628,7 +2773,11 @@ mod tests {
             DispatchDomain::Cells,
             launch,
             vec![KernelBinding::new(
-                0, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage,
+                0,
+                0,
+                "state",
+                "array<f32>",
+                BindingAccess::ReadWriteStorage,
             )],
         );
         program.body = vec![
@@ -1657,7 +2806,6 @@ mod tests {
             other => panic!("expected Let, got {:?}", other),
         }
     }
-
 
     #[test]
     fn detect_hazards_finds_raw() {
@@ -1991,8 +3139,7 @@ mod tests {
             ],
         );
         program.body = vec![cfd2_ir::ast::Stmt::Assign {
-            target: cfd2_ir::ast::Expr::ident("state")
-                .index(cfd2_ir::ast::Expr::ident("idx")),
+            target: cfd2_ir::ast::Expr::ident("state").index(cfd2_ir::ast::Expr::ident("idx")),
             value: cfd2_ir::ast::Expr::ident("constants").field("eos_r"),
         }];
 
@@ -2002,7 +3149,10 @@ mod tests {
         let gamma = src.find("eos_gamma: f32").expect("gamma prefix");
         let gm1 = src.find("eos_gm1: f32").expect("gm1 prefix");
         let gas_constant = src.find("eos_r: f32").expect("referenced R");
-        assert!(gamma < gm1 && gm1 < gas_constant, "noncanonical tail:\n{src}");
+        assert!(
+            gamma < gm1 && gm1 < gas_constant,
+            "noncanonical tail:\n{src}"
+        );
     }
 
     #[test]
@@ -2040,5 +3190,265 @@ mod tests {
         let fields: Vec<&str> = fused.eos_params.iter().map(|p| p.wgsl_field).collect();
         assert!(fields.contains(&"eos_gamma"));
         assert!(fields.contains(&"eos_r"));
+    }
+
+    fn explicit_residual_stage_fixture() -> (KernelProgram, KernelProgram) {
+        use cfd2_ir::ast::{Expr, Stmt, Type};
+
+        let launch = LaunchSemantics::new([64, 1, 1], "global_id.x", None::<String>);
+        let mut residual = KernelProgram::new(
+            "residual",
+            DispatchDomain::Cells,
+            launch.clone(),
+            vec![
+                KernelBinding::new(1, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage),
+                KernelBinding::new(
+                    1,
+                    1,
+                    "state_old",
+                    "array<f32>",
+                    BindingAccess::ReadOnlyStorage,
+                ),
+                KernelBinding::new(
+                    1,
+                    2,
+                    "state_old_old",
+                    "array<f32>",
+                    BindingAccess::ReadOnlyStorage,
+                ),
+                KernelBinding::new(
+                    1,
+                    4,
+                    "state_iter",
+                    "array<f32>",
+                    BindingAccess::ReadOnlyStorage,
+                ),
+                KernelBinding::new(2, 0, "rhs", "array<f32>", BindingAccess::ReadWriteStorage),
+            ],
+        );
+        let idx0 = Expr::ident("idx") * Expr::lit_u32(2) + Expr::lit_u32(0);
+        let idx1 = Expr::ident("idx") * Expr::lit_u32(2) + Expr::lit_u32(1);
+        residual.body = vec![
+            Stmt::Let {
+                name: "r0".into(),
+                ty: Some(Type::F32),
+                expr: Expr::ident("state").index(Expr::ident("idx") * Expr::lit_u32(3))
+                    * Expr::lit_f32(2.0),
+            },
+            Stmt::Assign {
+                target: Expr::ident("rhs").index(idx0.clone()),
+                value: Expr::ident("r0"),
+            },
+            Stmt::Assign {
+                target: Expr::ident("rhs").index(idx1.clone()),
+                value: Expr::lit_f32(0.0),
+            },
+        ];
+
+        let mut stage = KernelProgram::new(
+            "stage",
+            DispatchDomain::Cells,
+            launch,
+            vec![
+                KernelBinding::new(1, 0, "state", "array<f32>", BindingAccess::ReadWriteStorage),
+                KernelBinding::new(2, 0, "rhs", "array<f32>", BindingAccess::ReadOnlyStorage),
+                KernelBinding::new(
+                    2,
+                    1,
+                    "rk_base",
+                    "array<f32>",
+                    BindingAccess::ReadWriteStorage,
+                ),
+                KernelBinding::new(
+                    2,
+                    2,
+                    "rk_accum",
+                    "array<f32>",
+                    BindingAccess::ReadWriteStorage,
+                ),
+            ],
+        );
+        let state0 = Expr::ident("idx") * Expr::lit_u32(3) + Expr::lit_u32(0);
+        let state1 = Expr::ident("idx") * Expr::lit_u32(3) + Expr::lit_u32(1);
+        let state2 = Expr::ident("idx") * Expr::lit_u32(3) + Expr::lit_u32(2);
+        stage.body = vec![
+            Stmt::Let {
+                name: "rate".into(),
+                ty: Some(Type::F32),
+                expr: Expr::ident("rhs").index(idx0),
+            },
+            Stmt::Assign {
+                target: Expr::ident("state").index(state0.clone()),
+                value: Expr::ident("state").index(state0.clone()) + Expr::ident("rate"),
+            },
+            // A closure expression must observe the just-written differential
+            // component from the output, but an immutable coefficient from the
+            // input buffer.
+            Stmt::Assign {
+                target: Expr::ident("state").index(state1),
+                value: Expr::ident("state").index(state0) + Expr::ident("state").index(state2),
+            },
+        ];
+        (residual, stage)
+    }
+
+    #[test]
+    fn explicit_ping_pong_fusion_privatises_rhs_and_routes_state_dominance() {
+        let (residual, stage) = explicit_residual_stage_fixture();
+        let fused = synthesize_explicit_residual_rk_ping_pong(
+            "fused_stage",
+            &residual,
+            &stage,
+            "rk_input_state",
+            "rk_output_state",
+        )
+        .expect("ping-pong fusion");
+        let src = lower_kernel_program_to_wgsl(&fused)
+            .expect("lower fused WGSL")
+            .to_wgsl();
+
+        assert!(!fused.bindings.iter().any(|binding| binding.name == "rhs"));
+        assert!(!fused.bindings.iter().any(|binding| {
+            matches!(
+                binding.name.as_str(),
+                "state_old" | "state_old_old" | "state_iter"
+            )
+        }));
+        assert!(src.contains("var<storage, read> rk_input_state: array<f32>"));
+        assert!(src.contains("var<storage, read_write> rk_output_state: array<f32>"));
+        assert!(
+            !src.contains(" rhs:"),
+            "global rhs hand-off survived:\n{src}"
+        );
+        assert!(
+            src.contains("rk_output_state[idx * 3u + 0u] = rk_input_state[idx * 3u + 0u] + k1_cfd2_stage_local_"),
+            "differential write did not read input state:\n{src}"
+        );
+        assert!(
+            src.contains("rk_output_state[idx * 3u + 1u] = rk_output_state[idx * 3u + 0u] + rk_input_state[idx * 3u + 2u]"),
+            "closure dominance routing is wrong:\n{src}"
+        );
+    }
+
+    #[test]
+    fn explicit_ping_pong_fusion_rejects_alias_and_unproven_control_flow() {
+        use cfd2_ir::ast::{Block, Expr, Stmt};
+        let (residual, stage) = explicit_residual_stage_fixture();
+        let alias_error = synthesize_explicit_residual_rk_ping_pong(
+            "bad_alias",
+            &residual,
+            &stage,
+            "state_a",
+            "state_a",
+        )
+        .unwrap_err();
+        assert!(alias_error.contains("distinct input and output"));
+
+        let mut nested = residual;
+        let rhs_store = nested.body.pop().expect("fixture rhs store");
+        nested.body.push(Stmt::If {
+            cond: Expr::lit_bool(true),
+            then_block: Block::new(vec![rhs_store]),
+            else_block: None,
+        });
+        let nested_error = synthesize_explicit_residual_rk_ping_pong(
+            "bad_nested",
+            &nested,
+            &stage,
+            "state_a",
+            "state_b",
+        )
+        .unwrap_err();
+        assert!(nested_error.contains("nested or compound write"));
+    }
+
+    #[test]
+    fn explicit_ping_pong_fusion_rejects_global_name_collisions_and_invalid_names() {
+        let (residual, stage) = explicit_residual_stage_fixture();
+        for (input, output) in [
+            ("rk_base", "stage_out"),
+            ("stage_in", "rk_base"),
+            ("r0", "stage_out"),
+            ("stage_in", "rate"),
+        ] {
+            let error = synthesize_explicit_residual_rk_ping_pong(
+                "bad_name_collision",
+                &residual,
+                &stage,
+                input,
+                output,
+            )
+            .unwrap_err();
+            assert!(
+                error.contains("collide") || error.contains("binding name"),
+                "unexpected collision error for {input}->{output}: {error}"
+            );
+        }
+        for invalid in ["1stage", "var", "has-dash"] {
+            let error = synthesize_explicit_residual_rk_ping_pong(
+                "bad_identifier",
+                &residual,
+                &stage,
+                invalid,
+                "stage_out",
+            )
+            .unwrap_err();
+            assert!(
+                error.contains("WGSL") || error.contains("reserved"),
+                "unexpected identifier error for {invalid}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn explicit_ping_pong_fusion_alpha_renames_before_rhs_substitution() {
+        let (residual, mut stage) = explicit_residual_stage_fixture();
+        let rename = BTreeMap::from([("rate".to_string(), "r0".to_string())]);
+        stage.body = rename_stmts(&stage.body, &rename);
+        let fused = synthesize_explicit_residual_rk_ping_pong(
+            "capture_safe",
+            &residual,
+            &stage,
+            "stage_in",
+            "stage_out",
+        )
+        .expect("disjoint alpha-renaming must make same-spelled locals safe");
+        let src = lower_kernel_program_to_wgsl(&fused)
+            .expect("lower capture-safe program")
+            .to_wgsl();
+        assert!(
+            src.contains("let r0: f32 = stage_in"),
+            "residual local missing:\n{src}"
+        );
+        assert!(
+            src.contains("let k1_cfd2_stage_local_0_r0: f32 = r0;"),
+            "substituted residual expression was captured by the stage alpha-renamer:\n{src}"
+        );
+    }
+
+    #[test]
+    fn explicit_ping_pong_dominance_canonicalizes_omitted_zero_offset() {
+        use cfd2_ir::ast::{Expr, Stmt};
+        let (residual, mut stage) = explicit_residual_stage_fixture();
+        let slot1 = Expr::ident("idx") * Expr::lit_u32(3) + Expr::lit_u32(1);
+        stage.body[2] = Stmt::Assign {
+            target: Expr::ident("state").index(slot1),
+            value: Expr::ident("state").index(Expr::ident("idx") * Expr::lit_u32(3)),
+        };
+        let fused = synthesize_explicit_residual_rk_ping_pong(
+            "zero_offset_canonical",
+            &residual,
+            &stage,
+            "stage_in",
+            "stage_out",
+        )
+        .expect("canonical zero-offset dominance");
+        let src = lower_kernel_program_to_wgsl(&fused)
+            .expect("lower canonical program")
+            .to_wgsl();
+        assert!(
+            src.contains("stage_out[idx * 3u + 1u] = stage_out[idx * 3u]"),
+            "algebraically identical prior write was routed to stale input:\n{src}"
+        );
     }
 }

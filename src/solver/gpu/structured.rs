@@ -58,8 +58,14 @@ pub struct StructuredGrid {
 impl StructuredGrid {
     /// A grid spanning `[0, length] x [0, height]` with `nx * ny` cells.
     pub fn new(nx: usize, ny: usize, length: f64, height: f64) -> Self {
-        assert!(nx > 0 && ny > 0, "grid must have at least one cell per axis");
-        assert!(length > 0.0 && height > 0.0, "grid extents must be positive");
+        assert!(
+            nx > 0 && ny > 0,
+            "grid must have at least one cell per axis"
+        );
+        assert!(
+            length > 0.0 && height > 0.0,
+            "grid extents must be positive"
+        );
         Self {
             nx,
             ny,
@@ -126,6 +132,7 @@ struct BindInfo {
 }
 
 struct CompiledKernel {
+    label: String,
     pipeline: wgpu::ComputePipeline,
     bindings: Vec<BindInfo>,
     /// Explicit per-group bind-group layouts (ascending group). Explicit (rather
@@ -140,6 +147,10 @@ struct CompiledKernel {
     /// shared buffer would misalign its `eos_*` reads. Per-kernel packing fixes it.
     constants_buf: wgpu::Buffer,
     eos_fields: Vec<String>,
+    /// Buffer topology is immutable for the lifetime of a structured solver.
+    /// Cache reflected bind groups once instead of rebuilding 1-3 groups for
+    /// every kernel dispatch of every RK stage.
+    bind_groups: std::sync::OnceLock<Vec<(u32, wgpu::BindGroup)>>,
 }
 
 /// Pack the `constants` uniform for a kernel whose `Constants` struct is the canonical
@@ -172,7 +183,11 @@ fn pack_kernel_constants(c: &GpuConstants, eos_fields: &[String]) -> Vec<u8> {
 
 impl CompiledKernel {
     fn write_constants(&self, queue: &wgpu::Queue, c: &GpuConstants) {
-        queue.write_buffer(&self.constants_buf, 0, &pack_kernel_constants(c, &self.eos_fields));
+        queue.write_buffer(
+            &self.constants_buf,
+            0,
+            &pack_kernel_constants(c, &self.eos_fields),
+        );
     }
 
     fn build(
@@ -264,17 +279,81 @@ impl CompiledKernel {
             mapped_at_creation: false,
         });
         Self {
+            label: id.to_string(),
             pipeline,
             bindings,
             layouts,
             constants_buf,
             eos_fields,
+            bind_groups: std::sync::OnceLock::new(),
         }
     }
 
-    /// Record a dispatch of this kernel over `n_threads` (1D, workgroup 64),
-    /// binding each declared name via `resolve`.
-    fn dispatch<'a>(
+    fn cached_bind_groups<'kernel, 'buffer>(
+        &'kernel self,
+        device: &wgpu::Device,
+        resolve: &impl Fn(&str) -> &'buffer wgpu::Buffer,
+    ) -> &'kernel [(u32, wgpu::BindGroup)] {
+        self.bind_groups
+            .get_or_init(|| {
+                self.layouts
+                    .iter()
+                    .map(|(g, layout)| {
+                        let entries: Vec<wgpu::BindGroupEntry> = self
+                            .bindings
+                            .iter()
+                            .filter(|b| b.group == *g)
+                            .map(|b| wgpu::BindGroupEntry {
+                                binding: b.binding,
+                                resource: if b.name == "constants" {
+                                    self.constants_buf.as_entire_binding()
+                                } else {
+                                    resolve(&b.name).as_entire_binding()
+                                },
+                            })
+                            .collect();
+                        (
+                            *g,
+                            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("structured:bg"),
+                                layout,
+                                entries: &entries,
+                            }),
+                        )
+                    })
+                    .collect()
+            })
+            .as_slice()
+    }
+
+    fn dispatch_in_pass<'pass, 'buffer>(
+        &'pass self,
+        device: &wgpu::Device,
+        pass: &mut wgpu::ComputePass<'pass>,
+        n_threads: u32,
+        resolve: &impl Fn(&str) -> &'buffer wgpu::Buffer,
+    ) {
+        let bind_groups = self.cached_bind_groups(device, resolve);
+        pass.set_pipeline(&self.pipeline);
+        for (g, bg) in bind_groups {
+            pass.set_bind_group(*g, bg, &[]);
+        }
+        let groups = n_threads.div_ceil(WG).max(1);
+        let max_x = device.limits().max_compute_workgroups_per_dimension;
+        let groups_x = groups.min(max_x);
+        let groups_y = groups.div_ceil(max_x);
+        assert!(
+            groups_y <= max_x,
+            "structured dispatch requires more than a 2D workgroup grid: groups={groups}, max={max_x}"
+        );
+        pass.dispatch_workgroups(groups_x, groups_y, 1);
+        crate::count_dispatch!("Structured Kernel", &self.label);
+    }
+
+    /// Exact pre-batching dispatch path retained as a benchmark ablation.  It
+    /// deliberately rebuilds the reflected bind groups for every invocation,
+    /// matching the old structured router rather than sharing the cache above.
+    fn dispatch_uncached<'a>(
         &self,
         device: &wgpu::Device,
         encoder: &mut wgpu::CommandEncoder,
@@ -289,8 +368,6 @@ impl CompiledKernel {
                 .filter(|b| b.group == *g)
                 .map(|b| wgpu::BindGroupEntry {
                     binding: b.binding,
-                    // `constants` binds THIS kernel's per-layout uniform (correct
-                    // eos field offsets); everything else resolves by name.
                     resource: if b.name == "constants" {
                         self.constants_buf.as_entire_binding()
                     } else {
@@ -301,21 +378,47 @@ impl CompiledKernel {
             bind_groups.push((
                 *g,
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("structured:bg"),
+                    label: Some("structured:bg:legacy"),
                     layout,
                     entries: &entries,
                 }),
             ));
         }
+
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: Some("structured:pass"),
+            label: Some("structured:pass:legacy"),
             timestamp_writes: None,
         });
         pass.set_pipeline(&self.pipeline);
         for (g, bg) in &bind_groups {
             pass.set_bind_group(*g, bg, &[]);
         }
-        pass.dispatch_workgroups(n_threads.div_ceil(WG).max(1), 1, 1);
+        let groups = n_threads.div_ceil(WG).max(1);
+        let max_x = device.limits().max_compute_workgroups_per_dimension;
+        let groups_x = groups.min(max_x);
+        let groups_y = groups.div_ceil(max_x);
+        assert!(
+            groups_y <= max_x,
+            "structured dispatch requires more than a 2D workgroup grid: groups={groups}, max={max_x}"
+        );
+        pass.dispatch_workgroups(groups_x, groups_y, 1);
+        crate::count_dispatch!("Structured Kernel", &self.label);
+    }
+
+    /// Record a dispatch of this kernel over `n_threads` (1D, workgroup 64),
+    /// binding each declared name via `resolve`.
+    fn dispatch<'a>(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        n_threads: u32,
+        resolve: &impl Fn(&str) -> &'a wgpu::Buffer,
+    ) {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("structured:pass"),
+            timestamp_writes: None,
+        });
+        self.dispatch_in_pass(device, &mut pass, n_threads, resolve);
     }
 }
 
@@ -384,8 +487,7 @@ fn parse_constants_eos_fields(wgsl: &str) -> Vec<String> {
             }
         }
     }
-    let base_len =
-        cfd2_codegen::solver::codegen::constants::base_constant_field_names().len();
+    let base_len = cfd2_codegen::solver::codegen::constants::base_constant_field_names().len();
     if fields.len() > base_len {
         fields.split_off(base_len)
     } else {
@@ -595,7 +697,10 @@ impl StructuredGpuSolver {
         let mut buffers = HashMap::new();
         let dev = &ctx.device;
         for name in ["state", "state_old", "state_old_old", "state_iter"] {
-            buffers.insert(name.to_string(), storage_buffer(dev, name, n * state_stride));
+            buffers.insert(
+                name.to_string(),
+                storage_buffer(dev, name, n * state_stride),
+            );
         }
         buffers.insert("rhs".to_string(), storage_buffer(dev, "rhs", n * s));
         if stepping == SteppingMode::Explicit {
@@ -620,8 +725,14 @@ impl StructuredGpuSolver {
             "grad_state".to_string(),
             storage_buffer(dev, "grad_state", n * state_stride * 2),
         );
-        buffers.insert("bc_kind".to_string(), storage_buffer(dev, "bc_kind", n * 4 * s));
-        buffers.insert("bc_value".to_string(), storage_buffer(dev, "bc_value", n * 4 * s));
+        buffers.insert(
+            "bc_kind".to_string(),
+            storage_buffer(dev, "bc_kind", n * 4 * s),
+        );
+        buffers.insert(
+            "bc_value".to_string(),
+            storage_buffer(dev, "bc_value", n * 4 * s),
+        );
         buffers.insert(
             "face_boundary".to_string(),
             storage_buffer(dev, "face_boundary", n * 4),
@@ -634,7 +745,15 @@ impl StructuredGpuSolver {
         constants.dt = dt as f32;
         constants.dt_old = dt as f32;
         constants.dtau = 0.0;
-        constants.stride_x = grid.nx as u32;
+        // Generated kernels flatten a potentially two-dimensional dispatch as
+        // `global_id.y * stride_x + global_id.x`.  Use the same launch-row
+        // stride as the generic GPU runtime so grids above WebGPU's 65,535
+        // workgroups-per-dimension limit remain addressable.
+        constants.stride_x = dev
+            .limits()
+            .max_compute_workgroups_per_dimension
+            .checked_mul(WG)
+            .expect("structured dispatch-row stride overflow");
         // Pressure under-relaxation for the coupled Schur-layout models (mirrors the
         // CPU `StructuredModelSolver` + the driver's alpha_p=0.3): the update kernel
         // applies `phi = phi_old + alpha*(x-phi_old)`, damping the saddle outer loop.
@@ -780,6 +899,25 @@ impl StructuredGpuSolver {
         self.upload_f32("state_old_old", &state);
     }
 
+    /// Seed the complete packed state in one upload and initialize every
+    /// history buffer to the same values. This is the bulk, math-layout-driven
+    /// counterpart of [`set_named_field`](Self::set_named_field): callers build
+    /// the row from the model's [`StateLayout`] offsets instead of paying one
+    /// read/modify/write round trip per field.
+    pub fn set_packed_state_f32(&mut self, state: &[f32]) -> Result<(), String> {
+        let expected = self.n * self.state_stride;
+        if state.len() != expected {
+            return Err(format!(
+                "structured packed state length mismatch: got {}, expected {} cells * {} stride = {expected}",
+                state.len(), self.n, self.state_stride
+            ));
+        }
+        for name in ["state", "state_old", "state_old_old", "state_iter"] {
+            self.upload_f32(name, state);
+        }
+        Ok(())
+    }
+
     /// Coupled unknowns per cell (banded block stride).
     pub fn unknowns(&self) -> usize {
         self.s
@@ -852,12 +990,24 @@ impl StructuredGpuSolver {
 
     /// Copy `src -> dst` in its own submission.
     fn copy_submit(&self, src: &str, dst: &str, len: usize) {
+        self.copy_many_submit(&[(src, dst, len)]);
+    }
+
+    /// Record dependency-ordered buffer copies in one command buffer. Copy
+    /// commands are ordered, so history rotation (`old -> old_old`, then
+    /// `state -> old`) is identical to separate queue submissions.
+    fn copy_many_submit(&self, copies: &[(&str, &str, usize)]) {
         let mut enc = self
             .ctx
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("copy") });
-        enc.copy_buffer_to_buffer(self.buf(src), 0, self.buf(dst), 0, (len * 4) as u64);
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("copy"),
+            });
+        for &(src, dst, len) in copies {
+            enc.copy_buffer_to_buffer(self.buf(src), 0, self.buf(dst), 0, (len * 4) as u64);
+        }
         self.ctx.queue.submit(Some(enc.finish()));
+        crate::count_submission!("Structured", "copy_many");
     }
 
     /// Dispatch each kernel in its own submission. Separate command buffers are
@@ -867,13 +1017,62 @@ impl StructuredGpuSolver {
     fn dispatch_ids(&self, ids: &[String]) {
         let resolve = |name: &str| self.buf(name);
         for id in ids {
-            let mut enc = self.ctx.device.create_command_encoder(
-                &wgpu::CommandEncoderDescriptor { label: Some(id) },
-            );
+            let mut enc = self
+                .ctx
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(id) });
             let k = &self.kernels[id];
             k.dispatch(&self.ctx.device, &mut enc, self.n as u32, &resolve);
             self.ctx.queue.submit(Some(enc.finish()));
+            crate::count_submission!("Structured", "kernel");
         }
+    }
+
+    fn dispatch_ids_uncached(&self, ids: &[String]) {
+        let resolve = |name: &str| self.buf(name);
+        for id in ids {
+            let mut enc = self
+                .ctx
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some(id) });
+            self.kernels[id].dispatch_uncached(&self.ctx.device, &mut enc, self.n as u32, &resolve);
+            self.ctx.queue.submit(Some(enc.finish()));
+            crate::count_submission!("Structured", "kernel_legacy");
+        }
+    }
+
+    /// Encode a dependency-ordered generated schedule into one compute pass and
+    /// one queue submission. WebGPU gives each dispatch its own usage scope, so
+    /// storage writes from gradients/flux/residual are visible to the next
+    /// dispatch while avoiding per-kernel pass transitions, submissions, and
+    /// bind-group construction.
+    fn dispatch_ids_batched(&self, ids: &[String]) {
+        if ids.is_empty() {
+            return;
+        }
+        let resolve = |name: &str| self.buf(name);
+        let mut enc = self
+            .ctx
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("structured:batched"),
+            });
+        {
+            let mut pass = enc.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("structured:batched-pass"),
+                timestamp_writes: None,
+            });
+            for id in ids {
+                self.kernels[id].dispatch_in_pass(
+                    &self.ctx.device,
+                    &mut pass,
+                    self.n as u32,
+                    &resolve,
+                );
+            }
+        }
+        self.ctx.queue.submit(Some(enc.finish()));
+        crate::count_submission!("Structured", "batched_schedule");
     }
 
     /// Assemble the banded operator once (advancing history, running prep +
@@ -889,7 +1088,12 @@ impl StructuredGpuSolver {
         self.write_kernel_constants();
         self.copy_submit("state", "state_old", n * sstride);
         self.copy_submit("state", "state_iter", n * sstride);
-        let ids: Vec<String> = self.prep.iter().chain(self.per_iter.iter()).cloned().collect();
+        let ids: Vec<String> = self
+            .prep
+            .iter()
+            .chain(self.per_iter.iter())
+            .cloned()
+            .collect();
         self.dispatch_ids(&ids);
     }
 
@@ -912,10 +1116,22 @@ impl StructuredGpuSolver {
     fn step_explicit_rk4(&mut self) {
         let state_len = self.n * self.state_stride;
 
+        // Benchmark-only ablations.  The default remains the production path;
+        // neither environment variable is consulted by generated mathematics.
+        let legacy_router = std::env::var_os("CFD2_STRUCTGPU_LEGACY_EXPLICIT_ROUTER").is_some();
+        let separate_cached = std::env::var_os("CFD2_STRUCTGPU_NO_EXPLICIT_BATCH").is_some();
+
         // Rotate history once for the complete RK step. RK4 itself is one-step,
         // but the public history contract remains identical to Euler/BDF2.
-        self.copy_submit("state_old", "state_old_old", state_len);
-        self.copy_submit("state", "state_old", state_len);
+        if legacy_router {
+            self.copy_submit("state_old", "state_old_old", state_len);
+            self.copy_submit("state", "state_old", state_len);
+        } else {
+            self.copy_many_submit(&[
+                ("state_old", "state_old_old", state_len),
+                ("state", "state_old", state_len),
+            ]);
+        }
 
         self.constants.dt = self.dt as f32;
         self.constants.dt_old = self.dt_old as f32;
@@ -944,9 +1160,21 @@ impl StructuredGpuSolver {
         for (&stage_id, &c) in stage_ids.iter().zip(stage_times.iter()) {
             self.constants.time = (base_time + c * self.dt) as f32;
             self.write_kernel_constants();
-            self.dispatch_ids(&prep);
-            self.dispatch_ids(&residual);
-            self.dispatch_ids(&[stage_id.to_string()]);
+            if legacy_router {
+                self.dispatch_ids_uncached(&prep);
+                self.dispatch_ids_uncached(&residual);
+                self.dispatch_ids_uncached(&[stage_id.to_string()]);
+            } else if separate_cached {
+                self.dispatch_ids(&prep);
+                self.dispatch_ids(&residual);
+                self.dispatch_ids(&[stage_id.to_string()]);
+            } else {
+                let mut stage_schedule = Vec::with_capacity(prep.len() + residual.len() + 1);
+                stage_schedule.extend(prep.iter().cloned());
+                stage_schedule.extend(residual.iter().cloned());
+                stage_schedule.push(stage_id.to_string());
+                self.dispatch_ids_batched(&stage_schedule);
+            }
         }
 
         self.dt_old = self.dt;
@@ -1133,7 +1361,9 @@ impl StructuredGpuSolver {
         let mut enc = self
             .ctx
             .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("structgpu:viz") });
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("structgpu:viz"),
+            });
         enc.copy_buffer_to_buffer(self.buf("state"), 0, dst, 0, self.state_size_bytes());
         self.ctx.queue.submit(Some(enc.finish()));
     }
@@ -1189,10 +1419,7 @@ impl StructuredGpuSolver {
 
     /// Change the time scheme without changing solver-program families.
     /// Euler↔BDF2 is live; transitions to/from RK4 require reconstruction.
-    pub fn try_set_time_scheme(
-        &mut self,
-        scheme: crate::solver::TimeScheme,
-    ) -> Result<(), String> {
+    pub fn try_set_time_scheme(&mut self, scheme: crate::solver::TimeScheme) -> Result<(), String> {
         let built_explicit = self.buffers.contains_key("rk_base");
         if (scheme == crate::solver::TimeScheme::RK4) != built_explicit {
             return Err(
@@ -1544,15 +1771,16 @@ impl BandedGpuLinAlg {
             device,
             queue,
             &self.p_dot,
-            &[
-                (0, &self.dims_buf),
-                (1, a),
-                (2, b),
-                (3, &w.partials),
-            ],
+            &[(0, &self.dims_buf), (1, a), (2, b), (3, &w.partials)],
             self.ndof,
         );
-        let parts = read_buffer_f32_via(device, queue, &w.partials, &w.partials_staging, w.n_partials as usize);
+        let parts = read_buffer_f32_via(
+            device,
+            queue,
+            &w.partials,
+            &w.partials_staging,
+            w.n_partials as usize,
+        );
         parts.iter().map(|&v| v as f64).sum()
     }
 
@@ -1652,12 +1880,21 @@ impl BandedGpuLinAlg {
         // the SPD-assuming AMG V-cycle amplifies on it.
         use crate::solver::banded_schur::BandedPrecond;
         use std::sync::atomic::Ordering;
-        let amg_requested =
-            matches!(&self.precond, BandedPrecond::Schur { pressure_amg: true, .. });
+        let amg_requested = matches!(
+            &self.precond,
+            BandedPrecond::Schur {
+                pressure_amg: true,
+                ..
+            }
+        );
         let effective = match &self.precond {
-            BandedPrecond::Schur { u_idx, p, omega, sweeps_cap, pressure_amg: true }
-                if !self.amg_active.load(Ordering::Relaxed) =>
-            {
+            BandedPrecond::Schur {
+                u_idx,
+                p,
+                omega,
+                sweeps_cap,
+                pressure_amg: true,
+            } if !self.amg_active.load(Ordering::Relaxed) => {
                 BandedPrecond::Schur {
                     u_idx: u_idx.clone(),
                     p: *p,
@@ -1737,7 +1974,13 @@ impl BandedGpuLinAlg {
         // Initial guess x <- 0, so the initial residual r <- rhs. Then
         // z <- M^{-1} r and the search direction p <- z.
         self.zero(queue, x);
-        self.run(device, queue, &self.p_copy, &[(0, &self.dims_buf), (1, rhs), (2, &w.r)], self.ndof); // r <- rhs
+        self.run(
+            device,
+            queue,
+            &self.p_copy,
+            &[(0, &self.dims_buf), (1, rhs), (2, &w.r)],
+            self.ndof,
+        ); // r <- rhs
         self.run(
             device,
             queue,
@@ -1745,7 +1988,13 @@ impl BandedGpuLinAlg {
             &[(0, &self.dims_buf), (1, &w.dinv), (2, &w.r), (3, &w.z)],
             self.n,
         ); // z <- Minv r
-        self.run(device, queue, &self.p_copy, &[(0, &self.dims_buf), (1, &w.z), (2, &w.p)], self.ndof); // p <- z
+        self.run(
+            device,
+            queue,
+            &self.p_copy,
+            &[(0, &self.dims_buf), (1, &w.z), (2, &w.p)],
+            self.ndof,
+        ); // p <- z
 
         let bnorm = self.dot(device, queue, w, rhs, rhs).sqrt().max(1e-30);
         let mut rz = self.dot(device, queue, w, &w.r, &w.z);
@@ -1758,7 +2007,13 @@ impl BandedGpuLinAlg {
                 device,
                 queue,
                 &self.p_spmv,
-                &[(0, grid), (1, &self.dims_buf), (2, mat), (3, &w.p), (4, &w.ap)],
+                &[
+                    (0, grid),
+                    (1, &self.dims_buf),
+                    (2, mat),
+                    (3, &w.p),
+                    (4, &w.ap),
+                ],
                 self.n,
             );
             let pap = self.dot(device, queue, w, &w.p, &w.ap);
@@ -1768,20 +2023,59 @@ impl BandedGpuLinAlg {
             let alpha = rz / pap;
             // x <- x + alpha p ; r <- r - alpha Ap
             self.set_scalar(queue, alpha as f32, 0.0);
-            self.run(device, queue, &self.p_axpy, &[(0, &self.dims_buf), (1, &self.scalar_buf), (2, &w.p), (3, x)], self.ndof);
+            self.run(
+                device,
+                queue,
+                &self.p_axpy,
+                &[
+                    (0, &self.dims_buf),
+                    (1, &self.scalar_buf),
+                    (2, &w.p),
+                    (3, x),
+                ],
+                self.ndof,
+            );
             self.set_scalar(queue, -(alpha as f32), 0.0);
-            self.run(device, queue, &self.p_axpy, &[(0, &self.dims_buf), (1, &self.scalar_buf), (2, &w.ap), (3, &w.r)], self.ndof);
+            self.run(
+                device,
+                queue,
+                &self.p_axpy,
+                &[
+                    (0, &self.dims_buf),
+                    (1, &self.scalar_buf),
+                    (2, &w.ap),
+                    (3, &w.r),
+                ],
+                self.ndof,
+            );
 
             let rr = self.dot(device, queue, w, &w.r, &w.r);
             if rr.sqrt() / bnorm <= tol {
                 break;
             }
             // z <- Minv r ; rz_new ; beta ; p <- z + beta p
-            self.run(device, queue, &self.p_papply, &[(0, &self.dims_buf), (1, &w.dinv), (2, &w.r), (3, &w.z)], self.n);
+            self.run(
+                device,
+                queue,
+                &self.p_papply,
+                &[(0, &self.dims_buf), (1, &w.dinv), (2, &w.r), (3, &w.z)],
+                self.n,
+            );
             let rz_new = self.dot(device, queue, w, &w.r, &w.z);
             let beta = rz_new / rz;
             self.set_scalar(queue, 0.0, beta as f32);
-            self.run(device, queue, &self.p_xpby, &[(0, &self.dims_buf), (1, &self.scalar_buf), (2, &w.z), (3, &w.p)], self.ndof);
+            self.run(
+                device,
+                queue,
+                &self.p_xpby,
+                &[
+                    (0, &self.dims_buf),
+                    (1, &self.scalar_buf),
+                    (2, &w.z),
+                    (3, &w.p),
+                ],
+                self.ndof,
+            );
             rz = rz_new;
         }
     }
@@ -1803,20 +2097,66 @@ impl BandedGpuLinAlg {
     ) {
         let axpy = |src: &wgpu::Buffer, dst: &wgpu::Buffer, a: f64| {
             self.set_scalar(queue, a as f32, 0.0);
-            self.run(device, queue, &self.p_axpy, &[(0, &self.dims_buf), (1, &self.scalar_buf), (2, src), (3, dst)], self.ndof);
+            self.run(
+                device,
+                queue,
+                &self.p_axpy,
+                &[
+                    (0, &self.dims_buf),
+                    (1, &self.scalar_buf),
+                    (2, src),
+                    (3, dst),
+                ],
+                self.ndof,
+            );
         };
         let scale = |src: &wgpu::Buffer, dst: &wgpu::Buffer, a: f64| {
             self.set_scalar(queue, a as f32, 0.0);
-            self.run(device, queue, &self.p_vscale, &[(0, &self.dims_buf), (1, &self.scalar_buf), (2, src), (3, dst)], self.ndof);
+            self.run(
+                device,
+                queue,
+                &self.p_vscale,
+                &[
+                    (0, &self.dims_buf),
+                    (1, &self.scalar_buf),
+                    (2, src),
+                    (3, dst),
+                ],
+                self.ndof,
+            );
         };
         let copy = |src: &wgpu::Buffer, dst: &wgpu::Buffer| {
-            self.run(device, queue, &self.p_copy, &[(0, &self.dims_buf), (1, src), (2, dst)], self.ndof);
+            self.run(
+                device,
+                queue,
+                &self.p_copy,
+                &[(0, &self.dims_buf), (1, src), (2, dst)],
+                self.ndof,
+            );
         };
         let precond = |rin: &wgpu::Buffer, zout: &wgpu::Buffer| {
-            self.run(device, queue, &self.p_papply, &[(0, &self.dims_buf), (1, &w.dinv), (2, rin), (3, zout)], self.n);
+            self.run(
+                device,
+                queue,
+                &self.p_papply,
+                &[(0, &self.dims_buf), (1, &w.dinv), (2, rin), (3, zout)],
+                self.n,
+            );
         };
         let spmv = |xin: &wgpu::Buffer, yout: &wgpu::Buffer| {
-            self.run(device, queue, &self.p_spmv, &[(0, grid), (1, &self.dims_buf), (2, mat), (3, xin), (4, yout)], self.n);
+            self.run(
+                device,
+                queue,
+                &self.p_spmv,
+                &[
+                    (0, grid),
+                    (1, &self.dims_buf),
+                    (2, mat),
+                    (3, xin),
+                    (4, yout),
+                ],
+                self.n,
+            );
         };
         let dot = |a: &wgpu::Buffer, b: &wgpu::Buffer| self.dot(device, queue, w, a, b);
         let norm = |a: &wgpu::Buffer| dot(a, a).sqrt();
@@ -1896,7 +2236,11 @@ impl BandedGpuLinAlg {
                 for j in (i + 1)..kk {
                     sum -= h[i][j] * y[j];
                 }
-                y[i] = if h[i][i].abs() > 1e-300 { sum / h[i][i] } else { 0.0 };
+                y[i] = if h[i][i].abs() > 1e-300 {
+                    sum / h[i][i]
+                } else {
+                    0.0
+                };
             }
             for i in 0..kk {
                 axpy(&w.basis[i], x, y[i]);
@@ -1939,8 +2283,9 @@ fn read_buffer_f32_via(
     staging: &wgpu::Buffer,
     len: usize,
 ) -> Vec<f32> {
-    let mut enc =
-        device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("readback") });
+    let mut enc = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("readback"),
+    });
     enc.copy_buffer_to_buffer(buf, 0, staging, 0, (len * 4) as u64);
     let idx = queue.submit(Some(enc.finish()));
     let slice = staging.slice(..(len * 4) as u64);

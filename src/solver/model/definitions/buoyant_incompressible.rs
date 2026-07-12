@@ -82,16 +82,13 @@ fn build_buoyant_system(with_mms_sources: bool) -> EquationSystem {
     // named-constants table (coeff_named_expr_dyn).
     let beta_g_param =
         TypedCoeff::from_field(TypedFieldRef::<BetaG, Scalar>::new("buoyant_beta_g"));
-    let t0_param =
-        TypedCoeff::from_field(TypedFieldRef::<Temperature, Scalar>::new("buoyant_t0"));
+    let t0_param = TypedCoeff::from_field(TypedFieldRef::<Temperature, Scalar>::new("buoyant_t0"));
     let minus_one: TypedCoeff<cfd2_ir::dimensions::Dimensionless> = TypedCoeff::constant(-1.0);
     let buoy_t_coeff = minus_one
         .multiply(beta_g_param.clone())
         .multiply(rho_coeff.clone())
         .multiply(TypedCoeff::from_field(t_typed));
-    let buoy_const_coeff = beta_g_param
-        .multiply(t0_param)
-        .multiply(rho_coeff.clone());
+    let buoy_const_coeff = beta_g_param.multiply(t0_param).multiply(rho_coeff.clone());
 
     let gravity_dir = [0.0, -1.0];
     let buoy_t_term = typed_fvc::source_directional(buoy_t_coeff, gravity_dir, u_typed);
@@ -113,9 +110,8 @@ fn build_buoyant_system(with_mms_sources: bool) -> EquationSystem {
             + typed_fvc::div_dev2_grad_transpose(mu_coeff2, u_typed).cast_to::<Force>();
     }
     if with_mms_sources {
-        let mms_u = TypedFieldRef::<DivDim<Force, Volume>, Vector2>::new(
-            BUOYANT_MMS_SOURCE_U_FIELD,
-        );
+        let mms_u =
+            TypedFieldRef::<DivDim<Force, Volume>, Vector2>::new(BUOYANT_MMS_SOURCE_U_FIELD);
         momentum_sum = momentum_sum + typed_fvc::source_vector(mms_u, u_typed).cast_to::<Force>();
     }
     let momentum_eqn = momentum_sum.eqn(u_typed);
@@ -202,7 +198,11 @@ fn buoyant_incompressible_model_impl(with_mms_sources: bool) -> Result<ModelSpec
         GpuBoundaryType::SlipWall,
         GpuBoundaryType::MovingWall,
     ] {
-        u_spec = u_spec.set_uniform(boundary, 2, BoundaryCondition::dirichlet_dim::<Velocity>(0.0));
+        u_spec = u_spec.set_uniform(
+            boundary,
+            2,
+            BoundaryCondition::dirichlet_dim::<Velocity>(0.0),
+        );
     }
     boundaries.set_field("U", u_spec);
 
@@ -343,5 +343,8 @@ fn buoyant_incompressible_model_impl(with_mms_sources: bool) -> Result<ModelSpec
         }),
         primitives,
         explicit_primitives: None,
+        explicit_mass_closure_proof: super::ExplicitMassClosureProof::RuntimePivoted {
+            justification: "the buoyant momentum mass is the positive runtime density parameter; generated row-scaled pivot guards enforce its per-stage domain",
+        },
     })
 }

@@ -115,8 +115,7 @@ pub fn compressible_wave_speed_sq() -> TypedAlgExpr<MulDim<Velocity, Velocity>, 
 /// The `dp_drho` term covers barotropic closures (linear compressibility);
 /// it is zero for an ideal gas. The flux derivation evaluates this over
 /// reconstructed face states for low-Mach dissipation scaling.
-pub fn compressible_generalized_wave_speed_sq(
-) -> TypedAlgExpr<DivDim<Pressure, Density>, Scalar> {
+pub fn compressible_generalized_wave_speed_sq() -> TypedAlgExpr<DivDim<Pressure, Density>, Scalar> {
     let p_typed = TypedFieldRef::<Pressure, Scalar>::new("p");
     let rho_typed = TypedFieldRef::<Density, Scalar>::new("rho");
     ((typed_alg::param(EOS_GAMMA) * typed_alg::field(p_typed)) / typed_alg::field(rho_typed))
@@ -129,8 +128,7 @@ pub fn compressible_generalized_wave_speed_sq(
 /// pressure relation `rho * R * T` is the same algebra as the temperature
 /// recovery row (`rho * R * T = p`), declared here in the direction the flux
 /// needs it.
-pub fn compressible_central_upwind_decl() -> crate::solver::model::flux_schemes::CentralUpwindDecl
-{
+pub fn compressible_central_upwind_decl() -> crate::solver::model::flux_schemes::CentralUpwindDecl {
     let rho_typed = TypedFieldRef::<Density, Scalar>::new("rho");
     let t_typed = TypedFieldRef::<Temperature, Scalar>::new("T");
     crate::solver::model::flux_schemes::CentralUpwindDecl {
@@ -140,7 +138,8 @@ pub fn compressible_central_upwind_decl() -> crate::solver::model::flux_schemes:
         temperature: "T",
         velocity: "u",
         pressure_field: "p",
-        pressure: (typed_alg::field(rho_typed) * typed_alg::param(EOS_R)
+        pressure: (typed_alg::field(rho_typed)
+            * typed_alg::param(EOS_R)
             * typed_alg::field(t_typed))
         .cast_to::<Pressure>()
         .to_untyped(),
@@ -216,11 +215,9 @@ fn build_compressible_system_impl(
         + rho_u_div.cast_to::<Force>()
         + viscous_term.cast_to::<Force>();
     if with_mms_sources {
-        let mms_rho_u = TypedFieldRef::<RhoUSourceUnit, Vector2>::new(
-            COMPRESSIBLE_MMS_SOURCE_RHO_U_FIELD,
-        );
-        rho_u_sum =
-            rho_u_sum + typed_fvc::source_vector(mms_rho_u, rho_u_typed).cast_to::<Force>();
+        let mms_rho_u =
+            TypedFieldRef::<RhoUSourceUnit, Vector2>::new(COMPRESSIBLE_MMS_SOURCE_RHO_U_FIELD);
+        rho_u_sum = rho_u_sum + typed_fvc::source_vector(mms_rho_u, rho_u_typed).cast_to::<Force>();
     }
     if biharmonic {
         rho_u_sum = rho_u_sum
@@ -236,8 +233,7 @@ fn build_compressible_system_impl(
         // the mass/energy KT fluxes (phi_rho, phi_rho_e) still cross solid faces,
         // so the obstacle is porous to mass/energy — a true no-penetration wall
         // additionally needs those fluxes masked (documented limitation).
-        let penalty_typed =
-            TypedFieldRef::<InvTime, Scalar>::new(IBM_MOMENTUM_PENALTY_FIELD);
+        let penalty_typed = TypedFieldRef::<InvTime, Scalar>::new(IBM_MOMENTUM_PENALTY_FIELD);
         let penalty_coeff = TypedCoeff::from_field(penalty_typed);
         rho_u_sum =
             rho_u_sum + typed_fvm::source_coeff(penalty_coeff, rho_u_typed).cast_to::<Force>();
@@ -255,19 +251,17 @@ fn build_compressible_system_impl(
     let rho_e_div = typed_fvm::div_flux(phi_rho_e_typed, rho_e_typed);
     let heat_flux = typed_fvm::laplacian(kappa_typed, t_typed);
 
-    let mut rho_e_sum = rho_e_ddt.cast_to::<Power>()
-        + rho_e_div.cast_to::<Power>()
-        + heat_flux.cast_to::<Power>();
+    let mut rho_e_sum =
+        rho_e_ddt.cast_to::<Power>() + rho_e_div.cast_to::<Power>() + heat_flux.cast_to::<Power>();
     if with_mms_sources {
         let mms_rho_e = TypedCoeff::from_field(TypedFieldRef::<RhoESourceUnit, Scalar>::new(
             COMPRESSIBLE_MMS_SOURCE_RHO_E_FIELD,
         ));
-        rho_e_sum =
-            rho_e_sum + typed_fvc::source_coeff(mms_rho_e, rho_e_typed).cast_to::<Power>();
+        rho_e_sum = rho_e_sum + typed_fvc::source_coeff(mms_rho_e, rho_e_typed).cast_to::<Power>();
     }
     if biharmonic {
-        rho_e_sum = rho_e_sum
-            + typed_fvm::laplacian(neg_bih_eps4, lap_rho_e_typed).cast_to::<Power>();
+        rho_e_sum =
+            rho_e_sum + typed_fvm::laplacian(neg_bih_eps4, lap_rho_e_typed).cast_to::<Power>();
     }
     let rho_e_eqn = rho_e_sum.eqn(rho_e_typed);
 
@@ -328,8 +322,7 @@ fn build_compressible_system_impl(
         // is a Vector2, so `lap_rho_u` is per-component.
         let one = TypedCoeff::<Dimensionless>::constant(1.0);
         let minus_one = TypedCoeff::<Dimensionless>::constant(-1.0);
-        let lap_rho_eqn = (typed_fvm::sp(minus_one.clone(), lap_rho_typed)
-            .cast_to::<LapDensity>()
+        let lap_rho_eqn = (typed_fvm::sp(minus_one.clone(), lap_rho_typed).cast_to::<LapDensity>()
             + typed_fvm::laplacian(one.clone(), rho_typed).cast_to::<LapDensity>())
         .eqn(lap_rho_typed);
         let lap_rho_u_eqn = (typed_fvm::sp(minus_one.clone(), lap_rho_u_typed)
@@ -366,7 +359,9 @@ pub fn compressible_model() -> Result<ModelSpec, String> {
     })
 }
 
-pub fn compressible_model_with_eos(eos: crate::solver::model::eos::EosSpec) -> Result<ModelSpec, String> {
+pub fn compressible_model_with_eos(
+    eos: crate::solver::model::eos::EosSpec,
+) -> Result<ModelSpec, String> {
     compressible_model_impl(eos, false, false)
 }
 
@@ -533,11 +528,7 @@ fn compressible_model_impl_topo(
     };
     let inlet_p = p_owner();
     let inlet_t = p_owner() / (B::bc(fields.rho).max(B::lit(1.0e-6)) * r_safe());
-    let inlet_rho_e = gm1().select_gt(
-        B::lit(0.0),
-        p_owner() / gm1_safe() + inlet_ke(),
-        inlet_ke(),
-    );
+    let inlet_rho_e = gm1().select_gt(B::lit(0.0), p_owner() / gm1_safe() + inlet_ke(), inlet_ke());
     let inlet_rho_u = |component: u32| B::bc(fields.rho) * B::bc_comp(fields.u, component);
 
     // Outlet: extrapolate the non-pressure state from the interior.
@@ -718,10 +709,7 @@ fn compressible_model_impl_topo(
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 1,
-                BoundaryCondition::with_expr_value_dim::<Pressure>(
-                    GpuBcKind::Dirichlet,
-                    inlet_p,
-                )?,
+                BoundaryCondition::with_expr_value_dim::<Pressure>(GpuBcKind::Dirichlet, inlet_p)?,
             )
             .set_uniform(
                 GpuBoundaryType::Outlet,
@@ -878,11 +866,10 @@ fn compressible_model_impl_topo(
                 // Use full updates by default for compressible dual-time stepping.
                 // Runtime fallback damping can still be applied when pseudo-time convergence
                 // is explicitly classified as nonconverged.
-                m.relaxation_defaults =
-                    Some(crate::solver::model::module::RelaxationDefaults {
-                        alpha_u: 1.0,
-                        alpha_p: 1.0,
-                    });
+                m.relaxation_defaults = Some(crate::solver::model::module::RelaxationDefaults {
+                    alpha_u: 1.0,
+                    alpha_p: 1.0,
+                });
                 m
             },
         ],
@@ -908,6 +895,7 @@ fn compressible_model_impl_topo(
         },
         primitives,
         explicit_primitives: (!biharmonic).then_some(explicit_primitives),
+        explicit_mass_closure_proof: super::ExplicitMassClosureProof::ExactSymbolic,
     })
 }
 

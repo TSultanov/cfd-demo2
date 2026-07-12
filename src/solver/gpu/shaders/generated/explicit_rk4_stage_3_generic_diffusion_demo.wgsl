@@ -38,10 +38,15 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     if (idx >= arrayLength(&cell_vols)) { return; }
     let vol = cell_vols[idx];
     var mass_0_0: f32 = 0.0;
-    var rate_0: f32 = rhs[idx * 1u + 0u] / max(vol, 0.000000000000000000000000000001);
+    let raw_rhs_0 = rhs[idx * 1u + 0u];
+    let initial_rate_0 = raw_rhs_0 / max(vol, 0.000000000000000000000000000001);
+    let volume_precision_risk_0 = raw_rhs_0 != 0.0 && abs(initial_rate_0) < bitcast<f32>(8388608u);
+    var rate_0: f32 = initial_rate_0;
     mass_0_0 += 1.0;
-    let pivot_0 = select(mass_0_0, select(-0.00000000000000000001, 0.00000000000000000001, mass_0_0 >= 0.0), abs(mass_0_0) < 0.00000000000000000001);
-    rate_0 = rate_0 / select(mass_0_0, select(-0.00000000000000000001, 0.00000000000000000001, mass_0_0 >= 0.0), abs(mass_0_0) < 0.00000000000000000001);
+    rate_0 = select(rate_0, bitcast<f32>(2143289344u), rate_0 != 0.0 && abs(rate_0) < bitcast<f32>(8388608u) && abs(rate_0) / max(abs(mass_0_0), bitcast<f32>(1u)) >= bitcast<f32>(8388608u) || volume_precision_risk_0 && abs(mass_0_0) < 0.00000023841858);
+    let pivot_0 = select(mass_0_0, bitcast<f32>(2143289344u), abs(mass_0_0) < bitcast<f32>(1u) || abs(mass_0_0) > bitcast<f32>(2139095039u) || abs(mass_0_0) != abs(mass_0_0));
+    var backsolve_rate_0: f32 = rate_0;
+    rate_0 = backsolve_rate_0 / select(mass_0_0, bitcast<f32>(2143289344u), abs(mass_0_0) < bitcast<f32>(1u) || abs(mass_0_0) > bitcast<f32>(2139095039u) || abs(mass_0_0) != abs(mass_0_0));
     rk_accum[idx * 1u + 0u] += rate_0 / 3.0;
     state[idx * 1u + 0u] = rk_base[idx * 1u + 0u] + constants.dt * rate_0;
 }

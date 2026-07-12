@@ -1,6 +1,8 @@
 use crate::solver::gpu::enums::GpuBoundaryType;
 use crate::solver::model::backend::ast::{vol_scalar_dim, EquationSystem, TopologyMode};
-use crate::solver::model::backend::typed_ast::{typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef};
+use crate::solver::model::backend::typed_ast::{
+    typed_fvc, typed_fvm, Scalar, TypedCoeff, TypedFieldRef,
+};
 use crate::solver::model::ports::PortRegistry;
 use cfd2_ir::dimensions::{Area, Dimensionless, DivDim, InvTime, Length, Time, Volume};
 type DimensionlessGradient = DivDim<Dimensionless, Length>;
@@ -130,6 +132,7 @@ fn build_diffusion_model_topo(
         linear_solver: None,
         primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
         explicit_primitives: None,
+        explicit_mass_closure_proof: super::ExplicitMassClosureProof::ExactSymbolic,
     })
 }
 
@@ -263,5 +266,6 @@ pub fn generic_diffusion_demo_structured_ibm_model() -> Result<ModelSpec, String
         linear_solver: None,
         primitives: crate::solver::model::primitives::PrimitiveDerivations::default(),
         explicit_primitives: None,
+        explicit_mass_closure_proof: super::ExplicitMassClosureProof::ExactSymbolic,
     })
 }

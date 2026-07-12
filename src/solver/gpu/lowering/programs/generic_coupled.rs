@@ -397,46 +397,46 @@ impl GenericCoupledProgramResources {
 
         let linear_solver = recipe.linear_solver.clone();
         let (schur, krylov, outer_convergence, outer_gate) = if recipe.is_implicit() {
-        let scalar_row_offsets = &runtime.common.mesh.b_scalar_row_offsets;
-        let scalar_col_indices = &runtime.common.mesh.b_scalar_col_indices;
-        let schur = build_generic_schur(
-            model,
-            recipe,
-            &runtime,
-            scalar_row_offsets,
-            scalar_col_indices,
-        )?;
-        let krylov = if schur.is_some() {
-            None
-        } else {
-            build_generic_krylov(recipe, &runtime)?
-        };
-        let unknown_mapping = resolve_unknown_mapping_runtime(model, &recipe.port_registry)?;
-        let outer_convergence = OuterConvergenceMonitor::new(
-            &runtime.common.context.device,
-            &runtime.common.context.queue,
-            &runtime.common.context.pipeline_cache,
-            model,
-            runtime.common.num_cells,
-            runtime.linear_port_space.buffer(runtime.linear_ports.x),
-            &unknown_mapping,
-        )?;
-        let outer_gate = outer_convergence.as_ref().map(|oc| {
-            OuterAdaptiveGate::new(
+            let scalar_row_offsets = &runtime.common.mesh.b_scalar_row_offsets;
+            let scalar_col_indices = &runtime.common.mesh.b_scalar_col_indices;
+            let schur = build_generic_schur(
+                model,
+                recipe,
+                &runtime,
+                scalar_row_offsets,
+                scalar_col_indices,
+            )?;
+            let krylov = if schur.is_some() {
+                None
+            } else {
+                build_generic_krylov(recipe, &runtime)?
+            };
+            let unknown_mapping = resolve_unknown_mapping_runtime(model, &recipe.port_registry)?;
+            let outer_convergence = OuterConvergenceMonitor::new(
                 &runtime.common.context.device,
                 &runtime.common.context.queue,
                 &runtime.common.context.pipeline_cache,
+                model,
                 runtime.common.num_cells,
-                runtime.common.num_faces,
-                runtime
-                    .common
-                    .context
-                    .device
-                    .limits()
-                    .max_compute_workgroups_per_dimension,
-                &oc.b_break_status,
-            )
-        });
+                runtime.linear_port_space.buffer(runtime.linear_ports.x),
+                &unknown_mapping,
+            )?;
+            let outer_gate = outer_convergence.as_ref().map(|oc| {
+                OuterAdaptiveGate::new(
+                    &runtime.common.context.device,
+                    &runtime.common.context.queue,
+                    &runtime.common.context.pipeline_cache,
+                    runtime.common.num_cells,
+                    runtime.common.num_faces,
+                    runtime
+                        .common
+                        .context
+                        .device
+                        .limits()
+                        .max_compute_workgroups_per_dimension,
+                    &oc.b_break_status,
+                )
+            });
             (schur, krylov, outer_convergence, outer_gate)
         } else {
             (None, None, None, None)
@@ -578,8 +578,8 @@ impl GenericCoupledProgramResources {
         let rebuild_linear = self.recipe.is_implicit();
         let old_x = rebuild_linear.then(|| {
             self.runtime
-            .linear_port_space
-            .buffer(self.runtime.linear_ports.x)
+                .linear_port_space
+                .buffer(self.runtime.linear_ports.x)
                 .clone()
         });
         let x_carry_bytes = (self.runtime.num_dofs as u64) * 4;
@@ -630,53 +630,53 @@ impl GenericCoupledProgramResources {
         tick!(_t, "3.scatter_bc_tables");
 
         if rebuild_linear {
-        // 4a. Preconditioner (Schur or plain FGMRES/krylov) over the new system.
-        let schur = build_generic_schur(
-            &self.model,
-            &self.recipe,
-            &self.runtime,
-            &self.runtime.common.mesh.b_scalar_row_offsets,
-            &self.runtime.common.mesh.b_scalar_col_indices,
-        )?;
-        let krylov = if schur.is_some() {
-            None
-        } else {
-            build_generic_krylov(&self.recipe, &self.runtime)?
-        };
-        self.schur = schur;
-        self.krylov = krylov;
-        tick!(_t, "4a.build_schur/krylov(fgmres+amg)");
+            // 4a. Preconditioner (Schur or plain FGMRES/krylov) over the new system.
+            let schur = build_generic_schur(
+                &self.model,
+                &self.recipe,
+                &self.runtime,
+                &self.runtime.common.mesh.b_scalar_row_offsets,
+                &self.runtime.common.mesh.b_scalar_col_indices,
+            )?;
+            let krylov = if schur.is_some() {
+                None
+            } else {
+                build_generic_krylov(&self.recipe, &self.runtime)?
+            };
+            self.schur = schur;
+            self.krylov = krylov;
+            tick!(_t, "4a.build_schur/krylov(fgmres+amg)");
 
-        // 4b. Outer-convergence monitor + adaptive gate (the monitor captures
-        //     the warm-start `x` buffer, which the linear-system rebuild
-        //     reallocated; the gate is sized by num_faces).
+            // 4b. Outer-convergence monitor + adaptive gate (the monitor captures
+            //     the warm-start `x` buffer, which the linear-system rebuild
+            //     reallocated; the gate is sized by num_faces).
             let unknown_mapping =
                 resolve_unknown_mapping_runtime(&self.model, &self.recipe.port_registry)?;
-        let outer_convergence = OuterConvergenceMonitor::new(
-            &device,
-            &queue,
-            &self.runtime.common.context.pipeline_cache,
-            &self.model,
-            num_cells,
-                self.runtime
-                    .linear_port_space
-                    .buffer(self.runtime.linear_ports.x),
-            &unknown_mapping,
-        )?;
-        let outer_gate = outer_convergence.as_ref().map(|oc| {
-            OuterAdaptiveGate::new(
+            let outer_convergence = OuterConvergenceMonitor::new(
                 &device,
                 &queue,
                 &self.runtime.common.context.pipeline_cache,
+                &self.model,
                 num_cells,
-                num_faces,
-                device.limits().max_compute_workgroups_per_dimension,
-                &oc.b_break_status,
-            )
-        });
-        self.outer_convergence = outer_convergence;
-        self.outer_gate = outer_gate;
-        tick!(_t, "4b.outer_convergence+gate");
+                self.runtime
+                    .linear_port_space
+                    .buffer(self.runtime.linear_ports.x),
+                &unknown_mapping,
+            )?;
+            let outer_gate = outer_convergence.as_ref().map(|oc| {
+                OuterAdaptiveGate::new(
+                    &device,
+                    &queue,
+                    &self.runtime.common.context.pipeline_cache,
+                    num_cells,
+                    num_faces,
+                    device.limits().max_compute_workgroups_per_dimension,
+                    &oc.b_break_status,
+                )
+            });
+            self.outer_convergence = outer_convergence;
+            self.outer_gate = outer_gate;
+            tick!(_t, "4b.outer_convergence+gate");
         }
 
         // 5. Generated-kernel bind groups: in-place rebuild over the refreshed
@@ -1430,11 +1430,11 @@ pub(crate) fn spec_permute_cells(plan: &GpuProgramPlan, perm: &[u32]) -> Result<
     permute_buf(&mesh.b_cell_vols_old, 1);
     permute_buf(&mesh.b_cell_vols_old_old, 1);
     if r.has_linear_system() {
-    let s = (r.recipe.unknowns_per_cell as usize).max(1);
-    permute_buf(
-        r.runtime.linear_port_space.buffer(r.runtime.linear_ports.x),
-        s,
-    );
+        let s = (r.recipe.unknowns_per_cell as usize).max(1);
+        permute_buf(
+            r.runtime.linear_port_space.buffer(r.runtime.linear_ports.x),
+            s,
+        );
     }
     Ok(())
 }
@@ -1854,21 +1854,21 @@ pub(crate) fn host_finalize_explicit_step(plan: &mut GpuProgramPlan) {
 pub(crate) fn host_finalize_step(plan: &mut GpuProgramPlan) {
     let positivity_action =
         evaluate_step_positivity(plan).map_or(PositivityFallbackAction::None, |report| {
-        plan.positivity_min_rho = Some(report.min_rho);
-        plan.positivity_min_p = Some(report.min_p);
-        plan.positivity_rho_undershoot_count = report.rho_undershoot_count;
-        plan.positivity_pressure_undershoot_count = report.pressure_undershoot_count;
+            plan.positivity_min_rho = Some(report.min_rho);
+            plan.positivity_min_p = Some(report.min_p);
+            plan.positivity_rho_undershoot_count = report.rho_undershoot_count;
+            plan.positivity_pressure_undershoot_count = report.pressure_undershoot_count;
 
-        if !report.has_violation() {
-            PositivityFallbackAction::None
-        } else if should_retry_nonconverged_step(plan, false) {
-            plan.outer_step_status = Some(OuterStepStatus::RejectedRetry);
-            PositivityFallbackAction::RetryReject
-        } else {
-            plan.outer_step_status = Some(OuterStepStatus::AcceptedNonconverged);
-            PositivityFallbackAction::RollbackAccept
-        }
-    });
+            if !report.has_violation() {
+                PositivityFallbackAction::None
+            } else if should_retry_nonconverged_step(plan, false) {
+                plan.outer_step_status = Some(OuterStepStatus::RejectedRetry);
+                PositivityFallbackAction::RetryReject
+            } else {
+                plan.outer_step_status = Some(OuterStepStatus::AcceptedNonconverged);
+                PositivityFallbackAction::RollbackAccept
+            }
+        });
 
     let model_id = plan.model.id;
     let outer_step_status = plan.outer_step_status;
@@ -2765,7 +2765,7 @@ fn scaled_outer_targets_converged(plan: &GpuProgramPlan) -> Option<bool> {
     let conserved_targets = ["rho", "rho_u", "rho_e"];
     let use_conserved_targets = conserved_targets.iter().all(|target| {
         plan.outer_field_residuals
-        .iter()
+            .iter()
             .any(|(name, _)| name == target)
     });
 
@@ -4316,6 +4316,8 @@ mod tests {
             }),
             primitives: primitives::PrimitiveDerivations::default(),
             explicit_primitives: None,
+            explicit_mass_closure_proof:
+                crate::solver::model::ExplicitMassClosureProof::ExactSymbolic,
         };
 
         // Test runtime path: create PortRegistry with all fields registered
@@ -4346,6 +4348,8 @@ mod tests {
             linear_solver: None,
             primitives: primitives::PrimitiveDerivations::default(),
             explicit_primitives: None,
+            explicit_mass_closure_proof:
+                crate::solver::model::ExplicitMassClosureProof::ExactSymbolic,
         };
 
         // Create a PortRegistry WITHOUT registering the fields
@@ -4380,6 +4384,8 @@ mod tests {
             linear_solver: None,
             primitives: primitives::PrimitiveDerivations::default(),
             explicit_primitives: None,
+            explicit_mass_closure_proof:
+                crate::solver::model::ExplicitMassClosureProof::ExactSymbolic,
         };
 
         // Create a PortRegistry and register all fields

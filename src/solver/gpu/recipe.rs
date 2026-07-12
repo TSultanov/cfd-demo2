@@ -348,12 +348,15 @@ impl SolverRecipe {
         let mut binds_solution_x = false;
         for kernel in &kernels {
             let binding_names: Vec<String> = match kernel_registry::kernel_source_by_id(
-                model.id,
-                kernel.id,
+                model.id, kernel.id,
             )
             .or_else(|_| kernel_registry::kernel_source_by_id("", kernel.id))
             {
-                Ok(src) => src.bindings.iter().map(|binding| binding.name.to_string()).collect(),
+                Ok(src) => src
+                    .bindings
+                    .iter()
+                    .map(|binding| binding.name.to_string())
+                    .collect(),
                 Err(registry_error) if matches!(stepping, SteppingMode::Explicit) => {
                     match crate::solver::model::kernel::generate_kernel_artifact_for_model_by_id(
                         model,
@@ -361,7 +364,11 @@ impl SolverRecipe {
                         kernel.id,
                     )? {
                         crate::solver::model::kernel::ModelKernelArtifact::DslProgram(program) => {
-                            program.bindings.into_iter().map(|binding| binding.name).collect()
+                            program
+                                .bindings
+                                .into_iter()
+                                .map(|binding| binding.name)
+                                .collect()
                         }
                         crate::solver::model::kernel::ModelKernelArtifact::Wgsl(_) => {
                             return Err(registry_error);
@@ -428,13 +435,19 @@ impl SolverRecipe {
             }
         }
 
-        // Classical RK4 keeps one packed copy of the step-start unknowns and
-        // one packed weighted slope accumulator.  These are cell-local
-        // matrix-free workspaces (not full-state history buffers): each stores
-        // exactly the differential/algebraic unknown row used by the explicit
-        // residual and stage kernels.
+        // Classical RK4 keeps one packed copy of the step-start differential
+        // state and one packed weighted slope accumulator. Recoverable local
+        // algebraic rows remain in the full state buffer but are refreshed by
+        // the ordered primitive closure; their explicit rate is identically
+        // zero, so allocating RK history for them only burns bandwidth.
         if matches!(stepping, SteppingMode::Explicit) {
-            let size_per_cell = model.system.unknowns_per_cell() as usize;
+            let size_per_cell =
+                cfd2_codegen::solver::codegen::explicit_liveness::differential_component_count(
+                    &model.system,
+                ) as usize;
+            if size_per_cell == 0 {
+                return Err("explicit RK4 requires at least one differential component".into());
+            }
             aux_buffers.extend([
                 BufferSpec {
                     name: "rk_base",
@@ -775,6 +788,33 @@ mod tests {
     use crate::solver::model::{compressible_model, incompressible_momentum_model};
 
     #[test]
+    fn explicit_recipe_packs_only_differential_rk_history() {
+        let model = compressible_model().expect("compressible model");
+        assert_eq!(model.system.unknowns_per_cell(), 8);
+
+        let recipe = SolverRecipe::from_model(
+            &model,
+            Scheme::Upwind,
+            TimeScheme::RK4,
+            PreconditionerType::Jacobi,
+            SteppingMode::Explicit,
+        )
+        .expect("explicit recipe");
+
+        for name in ["rk_base", "rk_accum"] {
+            let workspace = recipe
+                .aux_buffers
+                .iter()
+                .find(|buffer| buffer.name == name)
+                .unwrap_or_else(|| panic!("missing {name} workspace"));
+            assert_eq!(
+                workspace.size_per_cell, 4,
+                "compressible RK history contains only rho, rho_u.x, rho_u.y, rho_e"
+            );
+        }
+    }
+
+    #[test]
     fn recipe_derives_linear_solver_defaults_from_model_and_config() {
         use crate::solver::model::kernel::KernelFusionPolicy;
         use crate::solver::model::linear_solver::{
@@ -905,7 +945,7 @@ mod tests {
     }
 
     #[test]
-    fn recipe_selects_packed_gradients_and_assembly_variant_from_scheme() {
+    fn recipe_does_not_duplicate_flux_module_reconstruction_gradients() {
         let model = compressible_model().expect("model");
 
         let upwind = SolverRecipe::from_model(
@@ -944,29 +984,26 @@ mod tests {
         )
         .expect("recipe build");
 
-        assert!(high_order.needs_gradients());
-        assert_eq!(high_order.gradient_fields, vec!["state".to_string()]);
-        assert!(high_order.kernels.iter().any(|k| {
+        assert!(
+            !high_order.needs_gradients(),
+            "compressible DivFlux reconstruction is owned by flux_module_gradients"
+        );
+        assert!(high_order.gradient_fields.is_empty());
+        assert!(!high_order.kernels.iter().any(|k| {
             k.id.as_str() == "packed_state_gradients" && k.phase == KernelPhase::Gradients
         }));
-        assert!(!high_order
-            .kernels
-            .iter()
-            .any(|k| k.id == KernelId::GENERIC_COUPLED_ASSEMBLY));
         assert!(high_order
             .kernels
             .iter()
+            .any(|k| k.id == KernelId::GENERIC_COUPLED_ASSEMBLY));
+        assert!(!high_order
+            .kernels
+            .iter()
             .any(|k| k.id == KernelId::GENERIC_COUPLED_ASSEMBLY_GRAD_STATE));
-
-        let grad_state = high_order
+        assert!(!high_order
             .aux_buffers
             .iter()
-            .find(|b| b.purpose == BufferPurpose::Gradient && b.name == "grad_state")
-            .expect("recipe must allocate grad_state buffer");
-        assert_eq!(
-            grad_state.size_per_cell,
-            model.state_layout.stride() as usize * 2
-        );
+            .any(|b| b.purpose == BufferPurpose::Gradient && b.name == "grad_state"));
     }
 
     #[test]

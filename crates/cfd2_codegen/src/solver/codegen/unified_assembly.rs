@@ -30,9 +30,11 @@ fn unified_assembly_needs_fluxes(system: &DiscreteSystem) -> bool {
     })
 }
 
-fn validate_unified_assembly_inputs(needs_fluxes: bool, flux_stride: u32) {
-    if needs_fluxes && flux_stride == 0 {
-        panic!("unified_assembly requires flux_stride > 0 when convection ops are present");
+fn validate_unified_assembly_inputs(needs_fluxes: bool, flux_stride: u32, coupled_stride: u32) {
+    if needs_fluxes && flux_stride != coupled_stride {
+        panic!(
+            "unified_assembly requires flux_stride ({flux_stride}) == coupled_stride ({coupled_stride}) when convection ops are present"
+        );
     }
 }
 
@@ -151,8 +153,7 @@ fn interior_diffusion_coefficient(
     let sealed = match rest {
         Some(rest) => {
             let rest_own = coefficient_value_expr(slots, Some(&rest), "idx", 1.0.into());
-            let rest_other =
-                coefficient_value_expr(slots, Some(&rest), "other_idx", 1.0.into());
+            let rest_other = coefficient_value_expr(slots, Some(&rest), "other_idx", 1.0.into());
             (rest_own * Expr::ident("lambda_f")
                 + rest_other * (Expr::from(1.0) - Expr::ident("lambda_f")))
                 * dp_min
@@ -381,11 +382,7 @@ fn ale_thermal_upwind_face_density_stmts(
         // `mesh_fluxes` is owner-signed; re-sign outward from `idx` like `normal`.
         dsl::let_expr(
             "ale_mesh_flux_out",
-            dsl::select(
-                -mf.clone(),
-                mf,
-                Expr::ident("owner").eq(Expr::ident("idx")),
-            ),
+            dsl::select(-mf.clone(), mf, Expr::ident("owner").eq(Expr::ident("idx"))),
         ),
         // Distance-weighted face velocity (the flux module's `U` Lerp, idx-oriented).
         dsl::let_expr(
@@ -407,16 +404,14 @@ fn ale_thermal_upwind_face_density_stmts(
         // as the flux module (finite for u_n_rel == 0, so `sgn * 0.0` stays 0.0).
         dsl::let_expr(
             "ale_upwind_sgn",
-            Expr::ident("ale_u_n_rel")
-                / dsl::max(dsl::abs(Expr::ident("ale_u_n_rel")), 1.0e-12),
+            Expr::ident("ale_u_n_rel") / dsl::max(dsl::abs(Expr::ident("ale_u_n_rel")), 1.0e-12),
         ),
         // rho_f = 0.5*(rho_o+rho_n) + sgn*0.5*(rho_o-rho_n): upwind cell's rho.
         dsl::let_expr(
             "ale_rho_f",
             Expr::from(0.5) * (s("idx", rho_slot, 0) + s("other_idx", rho_slot, 0))
                 + Expr::ident("ale_upwind_sgn")
-                    * (Expr::from(0.5)
-                        * (s("idx", rho_slot, 0) - s("other_idx", rho_slot, 0))),
+                    * (Expr::from(0.5) * (s("idx", rho_slot, 0) - s("other_idx", rho_slot, 0))),
         ),
     ]
 }
@@ -440,7 +435,7 @@ pub fn generate_unified_assembly_wgsl(
     impl typed::DispatchByStride<KernelWgsl> for Dispatch<'_> {
         fn call<Ax: typed::CoupledAxis>(&self) -> KernelWgsl {
             let needs_fluxes = unified_assembly_needs_fluxes(self.system);
-            validate_unified_assembly_inputs(needs_fluxes, self.flux_stride);
+            validate_unified_assembly_inputs(needs_fluxes, self.flux_stride, Ax::STRIDE);
 
             let mut module = Module::new();
             module.push(Item::Comment(
@@ -474,6 +469,7 @@ pub fn generate_unified_assembly_wgsl(
                 self.flux_stride,
                 self.needs_gradients,
                 false,
+                None,
             )));
             KernelWgsl::from(module)
         }
@@ -512,7 +508,7 @@ pub fn generate_unified_assembly_kernel_program(
     impl typed::DispatchByStride<Result<KernelProgram, String>> for Dispatch<'_> {
         fn call<Ax: typed::CoupledAxis>(&self) -> Result<KernelProgram, String> {
             let needs_fluxes = unified_assembly_needs_fluxes(self.system);
-            validate_unified_assembly_inputs(needs_fluxes, self.flux_stride);
+            validate_unified_assembly_inputs(needs_fluxes, self.flux_stride, Ax::STRIDE);
 
             let mut items = if self.system.topology() == TopologyMode::Structured2D {
                 base_assembly_items_structured(self.needs_gradients, needs_fluxes, self.eos_params)
@@ -534,6 +530,7 @@ pub fn generate_unified_assembly_kernel_program(
                 self.flux_stride,
                 self.needs_gradients,
                 false,
+                None,
             );
             let (launch, consumed_stmts) = launch_from_main_statements(&main.body.stmts)?;
             let kernel_stmts = &main.body.stmts[consumed_stmts..];
@@ -570,6 +567,12 @@ pub fn generate_matrix_free_residual_kernel_program(
     needs_gradients: bool,
     eos_params: &[ParamSpec],
 ) -> Result<KernelProgram, String> {
+    let explicit_layout = super::explicit_liveness::ExplicitRkLayout::from_discrete_system(system);
+    let rhs_projection: Vec<u32> = explicit_layout
+        .differential_components()
+        .iter()
+        .map(|component| component.coupled_rank)
+        .collect();
     let residual_system = system.matrix_free_spatial_residual();
     let coupled_stride = coupled_unknown_components(&residual_system).len() as u32;
 
@@ -580,11 +583,12 @@ pub fn generate_matrix_free_residual_kernel_program(
         flux_stride: u32,
         needs_gradients: bool,
         eos_params: &'a [ParamSpec],
+        rhs_projection: &'a [u32],
     }
     impl typed::DispatchByStride<Result<KernelProgram, String>> for Dispatch<'_> {
         fn call<Ax: typed::CoupledAxis>(&self) -> Result<KernelProgram, String> {
             let needs_fluxes = unified_assembly_needs_fluxes(self.system);
-            validate_unified_assembly_inputs(needs_fluxes, self.flux_stride);
+            validate_unified_assembly_inputs(needs_fluxes, self.flux_stride, Ax::STRIDE);
             let mut items = super::coupled_common::base_matrix_free_residual_items(
                 self.system.topology(),
                 self.needs_gradients,
@@ -601,6 +605,7 @@ pub fn generate_matrix_free_residual_kernel_program(
                 self.flux_stride,
                 self.needs_gradients,
                 true,
+                Some(self.rhs_projection),
             );
             let (launch, consumed_stmts) = launch_from_main_statements(&main.body.stmts)?;
             let mut program = KernelProgram::new(self.id, DispatchDomain::Cells, launch, bindings);
@@ -619,6 +624,7 @@ pub fn generate_matrix_free_residual_kernel_program(
             flux_stride,
             needs_gradients,
             eos_params,
+            rhs_projection: &rhs_projection,
         },
     )?
 }
@@ -769,6 +775,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
     flux_stride: u32,
     needs_gradients: bool,
     matrix_free: bool,
+    matrix_free_rhs_projection: Option<&[u32]>,
 ) -> Function {
     let _stride = slots.stride;
     let unknowns = coupled_unknown_components(system);
@@ -1380,8 +1387,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             dsl::abs(
                 (Expr::ident("f_center").field("x") - Expr::ident("center_frame").field("x"))
                     * Expr::ident("normal").field("x")
-                    + (Expr::ident("f_center").field("y")
-                        - Expr::ident("center_frame").field("y"))
+                    + (Expr::ident("f_center").field("y") - Expr::ident("center_frame").field("y"))
                         * Expr::ident("normal").field("y"),
             ),
         ));
@@ -1390,8 +1396,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
             dsl::abs(
                 (Expr::ident("other_center").field("x") - Expr::ident("f_center").field("x"))
                     * Expr::ident("normal").field("x")
-                    + (Expr::ident("other_center").field("y")
-                        - Expr::ident("f_center").field("y"))
+                    + (Expr::ident("other_center").field("y") - Expr::ident("f_center").field("y"))
                         * Expr::ident("normal").field("y"),
             ),
         ));
@@ -2257,8 +2262,7 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
                             // The implicit matrix side remains first-order
                             // upwind and is unchanged.
                             let dc_raw = acc.phi(u_idx) * (rec.phi_ho - rec.phi_upwind);
-                            let dc_term = if let Some(pen_slot) =
-                                find_slot(slots, IBM_PENALTY_SLOT)
+                            let dc_term = if let Some(pen_slot) = find_slot(slots, IBM_PENALTY_SLOT)
                             {
                                 let sp_own = dsl::abs(state_component_slot(
                                     slots.stride,
@@ -2534,7 +2538,11 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
     }
 
     if matrix_free {
-        stmts.extend(acc.write_rhs("rhs", Expr::ident("idx")));
+        if let Some(projection) = matrix_free_rhs_projection {
+            stmts.extend(acc.write_rhs_projection("rhs", Expr::ident("idx"), projection));
+        } else {
+            stmts.extend(acc.write_rhs("rhs", Expr::ident("idx")));
+        }
     } else {
         // Write diagonal block and RHS.
         let diag_entry = block_matrix.row_entry(&Expr::ident("diag_rank"));
@@ -2559,4 +2567,21 @@ fn main_assembly_fn<Ax: typed::CoupledAxis>(
         ],
         Block::new(stmts),
     )
+}
+
+#[cfg(test)]
+mod input_validation_tests {
+    use super::validate_unified_assembly_inputs;
+
+    #[test]
+    #[should_panic(expected = "flux_stride (2) == coupled_stride (3)")]
+    fn rejects_nonzero_but_undersized_flux_stride() {
+        validate_unified_assembly_inputs(true, 2, 3);
+    }
+
+    #[test]
+    fn accepts_exact_or_unused_flux_stride() {
+        validate_unified_assembly_inputs(true, 3, 3);
+        validate_unified_assembly_inputs(false, 0, 3);
+    }
 }

@@ -192,12 +192,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         }
         rhs_3 -= phi_3;
     }
-    rhs[idx * 8u + 0u] = rhs_0;
-    rhs[idx * 8u + 1u] = rhs_1;
-    rhs[idx * 8u + 2u] = rhs_2;
-    rhs[idx * 8u + 3u] = rhs_3;
-    rhs[idx * 8u + 4u] = rhs_4;
-    rhs[idx * 8u + 5u] = rhs_5;
-    rhs[idx * 8u + 6u] = rhs_6;
-    rhs[idx * 8u + 7u] = rhs_7;
+    rhs[idx * 4u + 0u] = rhs_0;
+    rhs[idx * 4u + 1u] = rhs_1;
+    rhs[idx * 4u + 2u] = rhs_2;
+    rhs[idx * 4u + 3u] = rhs_3;
 }

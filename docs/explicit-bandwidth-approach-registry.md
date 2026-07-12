@@ -38,7 +38,7 @@ scope.
 | F3c | Generated stage-dataflow fusion | Privatize RHS and ping-pong generated stage state | 2 | **blocked pending live-complement proof** | root + adversary | A mechanically checked construction that preserves every next-stage-live packed slot without erasing the RHS traffic win |
 | F3d | Logical-state physicalization | Generate the ordered graph over differential, algebraic, producer, and immutable state; ping-pong only the written partition | 3 | new viable mechanism; implementation pending | root + fusion adversary | — |
 | F3e | Differential residual + sparse equilibrated mass graph | Project full local residuals to differential storage; prune impossible elimination/fill edges; solve coupled blocks in row/column-equilibrated coordinates with capped matching-quality and representability gates | 6 | **accepted; adversarial audit passed** | root | — |
-| F3f | Semantic face-channel liveness | Preserve the full coupled face layout for equations/BCs while routing producers and every consumer through a generated compact storage-rank projection | 7 | implemented candidate; integration and timing audit pending | `rk4_bandwidth_adversary` + root | — |
+| F3f | Semantic face-channel liveness | Preserve the full coupled face layout for equations/BCs while routing producers and every consumer through a generated compact storage-rank projection | 7 | **accepted; adversarial timing/parity audit passed** | `rk4_bandwidth_adversary` + root | — |
 | F4 | Roofline/adversarial measurement | Establish whether bandwidth is limiting and reject false saturation claims | 3 | active; prior timestamp ceiling retracted | root + measurement adversary | New hardware-counter access or a falsifiable bandwidth proxy |
 | F5a | Structured state physical layout | Generated AoSoA-32 hot-state layout selected from semantic D/A/P/I liveness | 3 | viable isolated mechanism | `explicit_liveness_compaction_r2` | — |
 | F5b | Unstructured state physical layout | Compact/reordered AoS hot state selected from semantic D/A/P/I liveness | 3 | viable isolated mechanism | `explicit_liveness_compaction_r2` | — |
@@ -429,6 +429,45 @@ The exact removed traffic is sixteen bytes per face per stage, or sixty-four
 bytes per face per RK4 step. At 1024² this removes about 256 MiB of structured
 face stores and 64 MiB of face-buffer capacity per step; a regular CSR mesh
 removes about 128 MiB of stores and 32 MiB of capacity. These are logical-byte
-results, not a physical-DRAM saturation claim. F3f remains a candidate until
-the full MMS/ALE/generated-shader gates and a stable, completion-fenced
-end-to-end timing comparison are green.
+results, not a physical-DRAM saturation claim.
+
+The independent same-tree A/B forced every coupled channel live in the control,
+changing only `ExplicitFaceChannelLiveness::from_discrete_system` before code
+generation. Each adjacent pair used five warm-up steps, thirty timed 1024²
+steps, queue-to-completion fencing, alternating execution order, and a
+fifteen-second cooling gap. F3f won all 32/32 pairs:
+
+| Scheme/topology | Identity median (ms/step) | F3f median (ms/step) | Median paired gain | Pair range |
+|---|---:|---:|---:|---:|
+| QUICK structured | 19.0435 | 18.0230 | 5.399% | 5.075–12.284% |
+| QUICK regular CSR | 18.6370 | 17.4100 | 5.692% | 4.559–9.295% |
+| Upwind structured | 20.3525 | 18.8575 | 6.792% | 5.987–9.102% |
+| Upwind regular CSR | 18.7765 | 17.7315 | 5.698% | 4.735–7.389% |
+
+A second, necessarily confounded comparison against the historical `f0986784`
+router won 24/24 pairs, with median gains of 2.816–5.544% across the same four
+workloads. The decision rests on the isolated same-tree ablation, not that
+historical comparison. A prior continuous 8×60-step run was rejected because
+thermal drift produced reversals; none remained in the cooled balanced run.
+
+The optimized and identity executables then ran 128² QUICK trajectories for
+ten measured steps after five warm-ups. Their complete packed states compared
+byte-for-byte equal on both routes: structured SHA-256
+`527f14f36a00bad2bcd639aba9f54fdaca169a5656ffa1db0f47d6efd7706283`
+and regular-CSR SHA-256
+`bd5454be1d358263af4c9769a374012658ee2158c86f124a0b391ac87627e059`.
+Every timing run also passed the full packed-state finiteness audit, and the
+unstructured dispatch count remained 24 per step. F3f is therefore accepted as
+a strictly storage-routing algorithm with exact observed mathematical parity.
+The remaining validation obligation is the repository-wide MMS/ALE/generated
+shader gate; acceptance still does not claim literal physical-DRAM saturation
+because Metal exposes no supported external-memory counter on the test host.
+
+Integration stopped at the requested consolidation point. The final source
+check with `dev-tests,cpu,meshgen,ui`, all five explicit-RK codegen unit tests,
+all thirteen final-mass adversarial probes, and the generated-WGSL consistency
+check are green. Earlier integration runs also made the seven-case GUI RK4
+matrix and the focused cold-Direct structured/unstructured GPU snapshot tests
+green. A post-consolidation rerun of the complete GUI matrix was interrupted at
+the stop request; the mandatory full MMS and ALE sweeps were not started after
+the final integration. They remain release gates rather than inferred passes.

@@ -4249,6 +4249,20 @@ impl CFDApp {
             values = None;
         } else if (max_val - min_val).abs() < 1e-12 {
             max_val = min_val + 1.0;
+        } else {
+            // Representable-precision floor, matching the Direct route (see
+            // `sanitize_range` in cfd_renderer.rs): the plotted values come
+            // from an f32 state, so never normalize the colormap to a span
+            // below ~64 f32 quanta of the field magnitude — that renders
+            // representation noise as full-scale speckle.
+            let floor_span = f64::from(cfd_renderer::PRECISION_FLOOR_ULPS)
+                * f64::from(f32::EPSILON)
+                * min_val.abs().max(max_val.abs());
+            if max_val - min_val < floor_span {
+                let mid = 0.5 * (min_val + max_val);
+                min_val = mid - 0.5 * floor_span;
+                max_val = mid + 0.5 * floor_span;
+            }
         }
 
         self.plot_cache = Some(PlotCache {
@@ -7580,10 +7594,20 @@ fn seed_structured_freestream(
     params: &RuntimeParams,
 ) {
     if model_id == "compressible_structured" {
+        // Explicit (RK4) stepping develops naturally FROM REST like the
+        // pressure-based models (mirrors the unstructured driver's compressible
+        // IC): the inlet BC keeps driving with `u_in`, only the initial state
+        // is quiescent. The uniform-freestream IC remains the implicit
+        // pseudo-transient path's low-Mach stabilizer.
+        let ic_velocity = if params.time_scheme == GpuTimeScheme::RK4 {
+            0.0
+        } else {
+            u_in
+        };
         let reference = structured_compressible_reference_state(
             params.eos,
             params.density as f64,
-            u_in,
+            ic_velocity,
         );
         if s.sc_field_offset("rho_u").is_some() {
             s.sc_set_named("rho_u", move |_, _| reference.momentum_x);
@@ -7598,7 +7622,7 @@ fn seed_structured_freestream(
             s.sc_set_named("T", move |_, _| reference.temperature);
         }
         if s.sc_field_offset("u").is_some() {
-            s.sc_set_named("u", move |_, _| u_in);
+            s.sc_set_named("u", move |_, _| ic_velocity);
         }
     }
     if model_id == "allmach_thermal_structured" {

@@ -101,6 +101,21 @@ impl Default for CfdFieldRanges {
     }
 }
 
+/// Minimum displayed span, in f32 quanta (ULPs) of the field's own magnitude.
+///
+/// The solver state is f32, so a field whose global span is only a handful of
+/// quanta of its absolute value (e.g. sub-Pa acoustics riding on a 105 kPa
+/// absolute pressure, one quantum ~= 0.0078 Pa) carries representation noise
+/// of about one quantum per cell. Normalizing the colormap to such a span
+/// renders that noise as full-scale speckle. Flooring the displayed span at
+/// this many quanta keeps one quantum a small (~1.6%) fraction of the color
+/// range. Fields stored near zero (gauge pressure, velocities) have tiny
+/// magnitudes, so the floor never binds for them.
+///
+/// Keep in sync with the final guard in `cfd_range_reduce.wgsl` (the Direct
+/// route's mesh shader reads the GPU-reduced buffer without host involvement).
+pub const PRECISION_FLOOR_ULPS: f32 = 64.0;
+
 fn sanitize_range(minimum: f32, maximum: f32) -> [f32; 2] {
     if !minimum.is_finite() || !maximum.is_finite() || minimum > maximum {
         return [0.0, 1.0];
@@ -111,6 +126,11 @@ fn sanitize_range(minimum: f32, maximum: f32) -> [f32; 2] {
             return [minimum, expanded];
         }
         return [0.0, 1.0];
+    }
+    let floor_span = PRECISION_FLOOR_ULPS * f32::EPSILON * minimum.abs().max(maximum.abs());
+    if maximum - minimum < floor_span {
+        let mid = 0.5 * (minimum + maximum);
+        return [mid - 0.5 * floor_span, mid + 0.5 * floor_span];
     }
     [minimum, maximum]
 }
@@ -1095,6 +1115,27 @@ mod tests {
         assert_eq!(sanitize_range(f32::NAN, 2.0), [0.0, 1.0]);
         assert_eq!(sanitize_range(-1.0, f32::INFINITY), [0.0, 1.0]);
         assert_eq!(sanitize_range(3.0, 2.0), [0.0, 1.0]);
+    }
+
+    #[test]
+    fn range_sanitization_floors_sub_ulp_spans_at_the_representable_precision() {
+        // A 0.3 Pa acoustic span on a 105 kPa absolute f32 pressure is ~38
+        // quanta; stretching it over the whole colormap displays f32
+        // representation noise as full-scale speckle. The floor widens the
+        // span to PRECISION_FLOOR_ULPS quanta around the same midpoint.
+        let lo = 105472.35_f32;
+        let hi = 105472.65_f32;
+        let [flo, fhi] = sanitize_range(lo, hi);
+        let floor_span = PRECISION_FLOOR_ULPS * f32::EPSILON * hi.abs();
+        assert!(fhi - flo >= floor_span * 0.99);
+        let mid = 0.5 * (lo + hi);
+        assert!((0.5 * (flo + fhi) - mid).abs() <= floor_span * 0.01);
+
+        // A healthy span (signal well above the representation quantum) is
+        // returned untouched, as are gauge/zero-centered fields.
+        assert_eq!(sanitize_range(105000.0, 106000.0), [105000.0, 106000.0]);
+        assert_eq!(sanitize_range(-0.5, 0.5), [-0.5, 0.5]);
+        assert_eq!(sanitize_range(-1.0e-6, 1.0e-6), [-1.0e-6, 1.0e-6]);
     }
 
     #[test]

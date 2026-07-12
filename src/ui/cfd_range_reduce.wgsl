@@ -128,6 +128,22 @@ fn reduce_ranges(@builtin(local_invocation_index) lane: u32) {
                     reduced_minimum[field] = 0.0;
                     reduced_maximum[field] = 1.0;
                 }
+            } else {
+                // Representable-precision floor (keep in sync with
+                // `sanitize_range` in cfd_renderer.rs): the state is f32, so a
+                // field spanning fewer than ~PRECISION_FLOOR_ULPS quanta of its
+                // own magnitude (e.g. sub-Pa acoustics on a 105 kPa absolute
+                // pressure) is dominated by representation noise. Never stretch
+                // such a span across the full colormap — expand the displayed
+                // range so one quantum stays a small fraction of it.
+                let magnitude = max(abs(lo), abs(hi));
+                let floor_span = 64.0 * 1.1920929e-7 * magnitude;
+                let span = hi - lo;
+                if (span < floor_span) {
+                    let mid = 0.5 * (lo + hi);
+                    reduced_minimum[field] = mid - 0.5 * floor_span;
+                    reduced_maximum[field] = mid + 0.5 * floor_span;
+                }
             }
         }
         output.minimum = reduced_minimum;

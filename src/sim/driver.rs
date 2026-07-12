@@ -1281,10 +1281,22 @@ impl SolverDriver {
                 params.inlet_velocity,
                 &params.eos,
             );
-            // Uniform-freestream IC (matching the inlet), not rest: from rest the
-            // inlet-injected momentum has no convective transport on the collocated
-            // cut-cell mesh and seeds the low-Mach inlet instability.
-            let u0 = params.inlet_velocity;
+            // Implicit stepping: uniform-freestream IC (matching the inlet), not
+            // rest — from rest the inlet-injected momentum has no convective
+            // transport on the collocated cut-cell mesh and seeds the low-Mach
+            // inlet instability of the pseudo-transient path.
+            //
+            // Explicit (RK4) stepping: develop naturally FROM REST like the
+            // pressure-based models. Time-accurate stepping runs the full
+            // acoustic KT dissipation (no dtau-gated preconditioning), which has
+            // no such inlet pile-up mode; the inlet then drives the flow like a
+            // piston and the startup transient is the physical one instead of
+            // the impulsive-start dipole slammed off the obstacle walls.
+            let u0 = if params.time_scheme == crate::solver::TimeScheme::RK4 {
+                0.0
+            } else {
+                params.inlet_velocity
+            };
             solver.set_uniform_state(params.density, [u0, 0.0], p_ref as f32);
             (vec![(u0 as f64, 0.0); n_cells], vec![p_ref; n_cells])
         } else {

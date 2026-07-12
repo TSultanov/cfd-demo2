@@ -640,6 +640,19 @@ fn activate_direct_viz(mailbox: &VizFrameMailbox) -> bool {
     true
 }
 
+fn apply_worker_running_event(
+    requested_generation: u64,
+    is_running: &mut bool,
+    event_generation: u64,
+    worker_running: bool,
+) -> bool {
+    if event_generation != requested_generation {
+        return false;
+    }
+    *is_running = worker_running;
+    true
+}
+
 struct SolverInitResponse {
     generation: u64,
     result: Result<SolverInitOutcome, String>,
@@ -1609,7 +1622,10 @@ enum SolverWorkerCommand {
         viz_field: Option<VizFieldBuffers>,
     },
     ClearSolver,
-    SetRunning(bool),
+    SetRunning {
+        running: bool,
+        generation: u64,
+    },
     UpdateParams(RuntimeParams),
     StartTrace {
         path: String,
@@ -1642,7 +1658,10 @@ enum SolverWorkerEvent {
     },
     Message(String),
     Error(String),
-    Running(bool),
+    Running {
+        running: bool,
+        generation: u64,
+    },
 }
 
 struct SolverTraceSession {
@@ -1732,7 +1751,8 @@ fn moving_stats_finite(s: &MovingMeshStats) -> bool {
 }
 
 /// Headless test hook (no window): drive the *real* private solver worker through
-/// the moving-mesh message path — `SetSolver { MovingMesh }`, `SetRunning(true)`,
+/// the moving-mesh message path — `SetSolver { MovingMesh }`,
+/// `SetRunning { running: true, .. }`,
 /// collect `MeshRefreshed` events, then shut it down. Returns per-run
 /// observations so `tests/moving_mesh_gui_test.rs` can assert the actual channel
 /// plumbing without a display. `pub` only because the worker + command / event
@@ -1766,7 +1786,10 @@ pub fn moving_mesh_worker_smoke(
         mode: SolverMode::MovingMesh(moving),
         viz_field: None,
     });
-    handle.send(SolverWorkerCommand::SetRunning(true));
+    handle.send(SolverWorkerCommand::SetRunning {
+        running: true,
+        generation: 1,
+    });
 
     let mut smoke = MovingWorkerSmoke::default();
     let deadline = Instant::now() + Duration::from_millis(run_ms);
@@ -1954,6 +1977,10 @@ pub struct CFDApp {
     structured_solid_mask: Vec<bool>,
     plot_field: PlotField,
     is_running: bool,
+    /// Monotonic ownership token for Run/Pause requests. Worker acknowledgments
+    /// from an older initialization or pause must not overwrite a newer Run
+    /// click and suppress Direct-frame requests.
+    run_request_generation: u64,
     selected_scheme: Scheme,
     current_fluid: Fluid,
     show_mesh_lines: bool,
@@ -2157,6 +2184,7 @@ impl CFDApp {
             structured_solid_mask: Vec::new(),
             plot_field: PlotField::VelocityMag,
             is_running: false,
+            run_request_generation: 0,
             selected_scheme: Scheme::Upwind,
             current_fluid: default_fluid,
             show_mesh_lines: true,
@@ -2245,6 +2273,14 @@ impl CFDApp {
         self.solver_worker.send(SolverWorkerCommand::UpdateParams(
             self.current_runtime_params(),
         ));
+    }
+
+    fn set_worker_running(&mut self, running: bool) {
+        self.run_request_generation = self.run_request_generation.wrapping_add(1);
+        self.solver_worker.send(SolverWorkerCommand::SetRunning {
+            running,
+            generation: self.run_request_generation,
+        });
     }
 
     /// Apply the per-model GUI default solver parameters (single source of truth
@@ -2621,8 +2657,7 @@ impl CFDApp {
     fn init_solver(&mut self) {
         self.apply_backend_env();
         self.is_running = false;
-        self.solver_worker
-            .send(SolverWorkerCommand::SetRunning(false));
+        self.set_worker_running(false);
         self.solver_worker.send(SolverWorkerCommand::StopTrace);
         self.trace_pending_start = self.trace_enabled;
         self.solver_worker.send(SolverWorkerCommand::ClearSolver);
@@ -3245,8 +3280,18 @@ impl CFDApp {
                     self.cached_message = None;
                     self.is_running = false;
                 }
-                SolverWorkerEvent::Running(running) => {
-                    self.is_running = running;
+                SolverWorkerEvent::Running {
+                    running,
+                    generation,
+                } => {
+                    if !apply_worker_running_event(
+                        self.run_request_generation,
+                        &mut self.is_running,
+                        generation,
+                        running,
+                    ) {
+                        continue;
+                    }
                     if running {
                         // A resumed worker needs a fresh completion-to-completion
                         // sample. Do not leave the pre-pause rate visible while
@@ -3342,8 +3387,7 @@ impl CFDApp {
         } = outcome;
 
         self.is_running = false;
-        self.solver_worker
-            .send(SolverWorkerCommand::SetRunning(false));
+        self.set_worker_running(false);
 
         self.model_caps = model_caps;
         self.cached_cells = cached_cells;
@@ -3395,9 +3439,13 @@ impl CFDApp {
         // enable checkbox happens to be ticked.
         self.solver_is_moving = matches!(mode, SolverMode::MovingMesh(_));
 
+        // SetSolver phase-2 applies the worker's current parameter snapshot.
+        // Queue the new model's parameters first; otherwise a slow structured
+        // all-Mach install briefly rewrites the freshly built solver with the
+        // previous model's inlet/EOS settings before UpdateParams repairs it.
+        self.sync_worker_params();
         self.solver_worker
             .send(SolverWorkerCommand::SetSolver { mode, viz_field });
-        self.sync_worker_params();
 
         if self.trace_enabled {
             self.start_trace();
@@ -6078,10 +6126,20 @@ impl eframe::App for CFDApp {
                         if self.is_running {
                             self.cached_error = None;
                             self.cached_message = None;
+                            if matches!(self.render_mode, RenderMode::GpuDirect) {
+                                if let Some(viz) = &self.viz_field {
+                                    // Keep the UI repaint loop alive while the
+                                    // worker drains initialization commands. A
+                                    // second request is posted worker-side once
+                                    // Run is actually accepted, so an idle
+                                    // snapshot cannot consume the only demand.
+                                    viz.mailbox.request_frame();
+                                }
+                            }
                             self.sync_worker_params();
-                            self.solver_worker.send(SolverWorkerCommand::SetRunning(true));
+                            self.set_worker_running(true);
                         } else {
-                            self.solver_worker.send(SolverWorkerCommand::SetRunning(false));
+                            self.set_worker_running(false);
                         }
                     }
 
@@ -7002,9 +7060,7 @@ fn structured_step(
     }
 
     if model_id == "allmach_thermal_structured" {
-        let ramp_time =
-            crate::sim::explicit_allmach_inlet_ramp_time(params, s.st_inlet_ramp_cell_size(), true);
-        s.st_set_inlet_ramp(params.inlet_velocity, ramp_time);
+        apply_structured_allmach_inlet_ramp(s, params);
     }
 
     let t0 = std::time::Instant::now();
@@ -7333,12 +7389,26 @@ fn structured_compressible_reference_state(
     }
 }
 
+/// Install the stage-time inlet target used by both ordinary and autonomous
+/// structured RK4. The cell-area metric matches the generic solver driver.
+fn apply_structured_allmach_inlet_ramp(
+    s: &mut impl StructuredSteppable,
+    params: &RuntimeParams,
+) {
+    let ramp_time = crate::sim::explicit_allmach_inlet_ramp_time(
+        params,
+        s.st_inlet_ramp_cell_size(),
+        true,
+    );
+    s.st_set_inlet_ramp(params.inlet_velocity, ramp_time);
+}
+
 /// Refresh configuration fields that are algebraic inputs to the structured
 /// all-Mach closure without resetting solved p/T/U. This is safe for live GUI
 /// edits and makes the next pre-step spectral sample use the new fluid,
 /// compressibility, inlet, and preconditioner settings.
 fn refresh_structured_allmach_runtime_fields(
-    s: &mut impl StructuredSeed,
+    s: &mut (impl StructuredSeed + StructuredSteppable),
     params: &RuntimeParams,
     dx: f64,
     dy: f64,
@@ -7377,10 +7447,14 @@ fn refresh_structured_allmach_runtime_fields(
     s.sc_set_named("psi_precond", move |_, _| psi_precond);
     s.sc_set_named("dt_local", move |_, _| stabilization_time);
     s.sc_set_named("d_p", move |_, _| d_p);
+    // Autonomous Direct RK4 bypasses `structured_step`, so these stage-time
+    // boundary constants must be live at construction and after every runtime
+    // parameter update rather than being lazily primed by the Plot route.
+    apply_structured_allmach_inlet_ramp(s, params);
 }
 
 fn seed_structured_state(
-    s: &mut impl StructuredSeed,
+    s: &mut (impl StructuredSeed + StructuredSteppable),
     model_id: &str,
     params: &RuntimeParams,
     dx: f64,
@@ -7434,6 +7508,7 @@ fn seed_structured_state(
             };
             let d_p = rc_scale * stabilization_time / rho.abs().max(1.0e-12);
             s.sc_set_named("d_p", move |_, _| d_p);
+            apply_structured_allmach_inlet_ramp(s, params);
         }
         "compressible_structured" => {
             let reference = structured_compressible_reference_state(
@@ -7732,6 +7807,51 @@ mod structured_boundary_tests {
                 "allmach_thermal_structured",
                 "compressible_structured",
             ]
+        );
+    }
+
+    #[test]
+    fn structured_allmach_runtime_primes_inlet_before_first_cpu_step() {
+        let params = autonomous_allmach_params();
+        let model = crate::solver::model::allmach_thermal_structured_model()
+            .expect("structured all-Mach model");
+        let grid = StructuredGrid::new(8, 4, 1.0, 0.5);
+        let mut solver = StructuredModelSolver::with_config(
+            grid,
+            &model,
+            f64::from(params.requested_dt),
+            1,
+            Scheme::Upwind,
+            GpuTimeScheme::RK4,
+        )
+        .expect("structured CPU explicit solver");
+        solver.set_fluid(f64::from(params.density), f64::from(params.viscosity));
+        seed_structured_state(
+            &mut solver,
+            "allmach_thermal_structured",
+            &params,
+            grid.dx,
+            grid.dy,
+        );
+        refresh_structured_allmach_runtime_fields(&mut solver, &params, grid.dx, grid.dy);
+
+        let expected_ramp = crate::sim::explicit_allmach_inlet_ramp_time(
+            &params,
+            (grid.dx * grid.dy).sqrt(),
+            true,
+        );
+        assert_eq!(
+            solver.inlet_velocity_for_test().to_bits(),
+            params.inlet_velocity.to_bits()
+        );
+        assert_eq!(
+            solver.inlet_ramp_time_for_test().to_bits(),
+            expected_ramp.to_bits()
+        );
+        assert_eq!(
+            solver.time().to_bits(),
+            0.0_f64.to_bits(),
+            "test must not prime via Plot"
         );
     }
 
@@ -8219,6 +8339,7 @@ mod structured_boundary_tests {
     #[derive(Debug)]
     struct DirectVizProbe {
         pressure_values: Vec<f32>,
+        velocity_magnitude_values: Vec<f32>,
         pressure_range: [f32; 2],
         velocity_magnitude_range: [f32; 2],
     }
@@ -8259,6 +8380,20 @@ mod structured_boundary_tests {
         drop(view);
         staging.unmap();
         values
+    }
+
+    fn expected_direct_range(minimum: f32, maximum: f32) -> [f32; 2] {
+        if !minimum.is_finite() || !maximum.is_finite() || minimum > maximum {
+            return [0.0, 1.0];
+        }
+        if (maximum - minimum).abs() < 1.0e-12 {
+            let expanded = minimum + 1.0;
+            if expanded.is_finite() && expanded > minimum {
+                return [minimum, expanded];
+            }
+            return [0.0, 1.0];
+        }
+        [minimum, maximum]
     }
 
     fn probe_paused_plot_to_direct(
@@ -8351,28 +8486,25 @@ mod structured_boundary_tests {
             .take_readback_for_sequence(display.sequence)
             .expect("paused Direct sequence-matched range");
         let pressure_range = ranges.range(cfd_renderer::CfdRangeField::Pressure);
-        let expected_pressure_range = if expected_max > expected_min {
-            [expected_min, expected_max]
-        } else {
-            [expected_min, expected_min + 1.0]
-        };
+        let expected_pressure_range = expected_direct_range(expected_min, expected_max);
         assert_eq!(pressure_range, expected_pressure_range);
 
-        let (expected_velocity_min, expected_velocity_max) = packed
+        let velocity_magnitude_values: Vec<f32> = packed
             .chunks_exact(ports.stride as usize)
             .map(|cell| {
                 let ux = cell[velocity_offset as usize];
                 let uy = cell[velocity_offset as usize + 1];
                 ux.hypot(uy)
             })
+            .collect();
+        let (expected_velocity_min, expected_velocity_max) = velocity_magnitude_values
+            .iter()
+            .copied()
             .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), value| {
                 (lo.min(value), hi.max(value))
             });
-        let expected_velocity_range = if expected_velocity_max > expected_velocity_min {
-            [expected_velocity_min, expected_velocity_max]
-        } else {
-            [expected_velocity_min, expected_velocity_min + 1.0]
-        };
+        let expected_velocity_range =
+            expected_direct_range(expected_velocity_min, expected_velocity_max);
         let velocity_magnitude_range =
             ranges.range(cfd_renderer::CfdRangeField::VelocityMagnitude);
         for (actual, expected) in velocity_magnitude_range
@@ -8386,6 +8518,7 @@ mod structured_boundary_tests {
         }
         DirectVizProbe {
             pressure_values,
+            velocity_magnitude_values,
             pressure_range,
             velocity_magnitude_range,
         }
@@ -8670,35 +8803,26 @@ mod structured_boundary_tests {
             .take_readback_for_sequence(display.sequence)
             .expect("Direct range must match displayed sequence");
         let pressure_range = ranges.range(cfd_renderer::CfdRangeField::Pressure);
-        let expected_range = if expected_min.is_finite()
-            && expected_max.is_finite()
-            && expected_max > expected_min
-        {
-            [expected_min, expected_max]
-        } else if expected_min.is_finite() && expected_max == expected_min {
-            [expected_min, expected_min + 1.0]
-        } else {
-            [0.0, 1.0]
-        };
+        let expected_range = expected_direct_range(expected_min, expected_max);
         assert_eq!(
             pressure_range, expected_range,
             "Direct range reducer must consume the same packed snapshot the renderer binds"
         );
-        let (velocity_min, velocity_max) = packed
+        let velocity_magnitude_values: Vec<f32> = packed
             .chunks_exact(ports.stride as usize)
             .map(|cell| {
                 let ux = cell[velocity_offset as usize];
                 let uy = cell[velocity_offset as usize + 1];
                 ux.hypot(uy)
             })
+            .collect();
+        let (velocity_min, velocity_max) = velocity_magnitude_values
+            .iter()
+            .copied()
             .fold((f32::INFINITY, f32::NEG_INFINITY), |(lo, hi), value| {
                 (lo.min(value), hi.max(value))
             });
-        let expected_velocity_range = if velocity_max > velocity_min {
-            [velocity_min, velocity_max]
-        } else {
-            [velocity_min, velocity_min + 1.0]
-        };
+        let expected_velocity_range = expected_direct_range(velocity_min, velocity_max);
         let velocity_magnitude_range =
             ranges.range(cfd_renderer::CfdRangeField::VelocityMagnitude);
         for (actual, expected) in velocity_magnitude_range
@@ -8712,6 +8836,7 @@ mod structured_boundary_tests {
         }
         DirectVizProbe {
             pressure_values,
+            velocity_magnitude_values,
             pressure_range,
             velocity_magnitude_range,
         }
@@ -8766,26 +8891,31 @@ mod structured_boundary_tests {
             &params,
         );
 
-        // Make the default GUI field (|U|) and pressure independently
-        // nonuniform. A stale bootstrap buffer, a wrong field offset, or a
-        // range from another generation would therefore be observable instead
-        // of accidentally producing the same all-blue image as a rest state.
-        let u_offset = solver
-            .state_layout()
-            .offset_for("U")
-            .expect("structured velocity state") as usize;
-        let p_offset = solver
-            .state_layout()
-            .offset_for("p")
-            .expect("structured pressure state") as usize;
-        solver.set_state_component(u_offset, |x, _| 0.05 + 0.1 * x);
-        solver.set_state_component(u_offset + 1, |_, y| 0.02 * y);
-        solver.set_state_component(p_offset, |x, y| 0.01 * x - 0.005 * y);
+        // Production starts this pressure-based model from rest. Direct must
+        // install the stage-time inlet target itself: no ordinary/Plot step is
+        // allowed to prime these constants before autonomous marching.
+        let expected_ramp = crate::sim::explicit_allmach_inlet_ramp_time(
+            &params,
+            (grid.dx * grid.dy).sqrt(),
+            true,
+        );
+        assert_eq!(
+            solver.inlet_velocity_for_test().to_bits(),
+            params.inlet_velocity.to_bits()
+        );
+        assert_eq!(
+            solver.inlet_ramp_time_for_test().to_bits(),
+            expected_ramp.to_bits()
+        );
 
         let mode = SolverMode::Structured(solver);
         let cold = probe_paused_plot_to_direct(&mode, &device, &queue);
-        assert!(cold.pressure_range[1] > cold.pressure_range[0]);
-        assert!(cold.velocity_magnitude_range[1] > cold.velocity_magnitude_range[0]);
+        assert!(
+            cold.velocity_magnitude_values
+                .iter()
+                .all(|value| value.to_bits() == 0.0_f32.to_bits()),
+            "cold structured all-Mach regression must begin from rest"
+        );
         let live = drive_real_gpu_autonomous_window(
             mode,
             &device,
@@ -8793,7 +8923,18 @@ mod structured_boundary_tests {
             params,
             AutonomousRefillPolicy::Continuous,
         );
-        assert!(live.velocity_magnitude_range[1] > live.velocity_magnitude_range[0]);
+        assert!(
+            live.velocity_magnitude_values
+                .iter()
+                .any(|value| value.is_finite() && *value > 0.0),
+            "cold autonomous Direct run never applied the configured inlet target"
+        );
+        assert!(
+            live.velocity_magnitude_values
+                .windows(2)
+                .any(|pair| pair[0].to_bits() != pair[1].to_bits()),
+            "cold autonomous Direct run remained uniformly blue"
+        );
     }
 
     #[test]
@@ -8949,6 +9090,16 @@ mod structured_boundary_tests {
             .expect("cold Direct snapshot must become displayable");
         assert_eq!(display.sequence, 1);
         assert!(!mailbox.presentation_refresh_pending());
+    }
+
+    #[test]
+    fn stale_initialization_pause_cannot_cancel_a_newer_run_request() {
+        let mut running = true;
+        assert!(!apply_worker_running_event(7, &mut running, 6, false));
+        assert!(running, "stale pause acknowledgment cancelled Run");
+
+        assert!(apply_worker_running_event(7, &mut running, 7, false));
+        assert!(!running, "current worker stop was not adopted");
     }
 
     #[test]
@@ -10720,6 +10871,7 @@ fn solver_worker_main(
     };
 
     let mut running = false;
+    let mut run_generation = 0_u64;
     let mut step_idx: u64 = 0;
     // Adaptive-dt velocity scale for the structured path (mirrors
     // `SolverDriver::prev_max_vel`). Updated from structured field readbacks.
@@ -10762,6 +10914,7 @@ fn solver_worker_main(
                 &mut viz_field,
                 &mut params,
                 &mut running,
+                &mut run_generation,
                 &mut step_idx,
                 &mut structured_prev_max_vel,
                 &mut structured_prev_explicit_rate,
@@ -11027,14 +11180,20 @@ fn solver_worker_main(
                 if let Some(error) = autonomous_error.take() {
                     let _ = evt_tx.send(SolverWorkerEvent::Error(error));
                 }
-                let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                let _ = evt_tx.send(SolverWorkerEvent::Running {
+                    running: false,
+                    generation: run_generation,
+                });
             }
         }
 
         if !autonomous_scheduler.is_active() && !running {
             if let Some(error) = autonomous_error.take() {
                 let _ = evt_tx.send(SolverWorkerEvent::Error(error));
-                let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                let _ = evt_tx.send(SolverWorkerEvent::Running {
+                    running: false,
+                    generation: run_generation,
+                });
             }
         }
         if !autonomous_scheduler.is_active() {
@@ -11174,6 +11333,7 @@ fn solver_worker_main(
                         &mut viz_field,
                         &mut params,
                         &mut running,
+                        &mut run_generation,
                         &mut step_idx,
                         &mut structured_prev_max_vel,
                         &mut structured_prev_explicit_rate,
@@ -11201,7 +11361,10 @@ fn solver_worker_main(
             let _ = evt_tx.send(SolverWorkerEvent::Error(
                 "solver worker entered running state without an initialized solver".to_string(),
             ));
-            let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+            let _ = evt_tx.send(SolverWorkerEvent::Running {
+                running: false,
+                generation: run_generation,
+            });
             continue;
         };
 
@@ -11294,7 +11457,10 @@ fn solver_worker_main(
                     let _ = evt_tx.send(SolverWorkerEvent::Error(format!(
                         "moving-mesh step failed: {err}"
                     )));
-                    let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                    let _ = evt_tx.send(SolverWorkerEvent::Running {
+                        running: false,
+                        generation: run_generation,
+                    });
                     continue;
                 }
             },
@@ -11304,7 +11470,10 @@ fn solver_worker_main(
             let _ = evt_tx.send(SolverWorkerEvent::Error(format!(
                 "solver step failed: {err}"
             )));
-            let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+            let _ = evt_tx.send(SolverWorkerEvent::Running {
+                running: false,
+                generation: run_generation,
+            });
             continue;
         }
         if let Some(DivergeReason::NonFinite { u, p }) = &outcome.diverged {
@@ -11312,7 +11481,10 @@ fn solver_worker_main(
             let _ = evt_tx.send(SolverWorkerEvent::Error(format!(
                 "divergence detected (nonfinite u={u}, p={p})"
             )));
-            let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+            let _ = evt_tx.send(SolverWorkerEvent::Running {
+                running: false,
+                generation: run_generation,
+            });
             continue;
         }
         // Publish the re-generated mesh (moving only). Emitted every moving step;
@@ -11338,7 +11510,10 @@ fn solver_worker_main(
             let _ = evt_tx.send(SolverWorkerEvent::Error(
                 "divergence detected (linear solver)".to_string(),
             ));
-            let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+            let _ = evt_tx.send(SolverWorkerEvent::Running {
+                running: false,
+                generation: run_generation,
+            });
             continue;
         }
 
@@ -11483,7 +11658,10 @@ fn solver_worker_main(
                     "divergence detected (nonfinite u={}, p={})",
                     fs.nonfinite_u, fs.nonfinite_p
                 )));
-                let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                let _ = evt_tx.send(SolverWorkerEvent::Running {
+                    running: false,
+                    generation: run_generation,
+                });
                 continue;
             }
 
@@ -11556,7 +11734,10 @@ fn solver_worker_main(
             // The converged step is accepted: publish its final t/dt/stats and
             // trace before telling the UI that automatic marching stopped.
             running = false;
-            let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+            let _ = evt_tx.send(SolverWorkerEvent::Running {
+                running: false,
+                generation: run_generation,
+            });
             continue;
         }
         // Keep command/UI threads schedulable without imposing a fixed 1 ms
@@ -11614,6 +11795,7 @@ fn solver_worker_handle_cmd(
     viz_field: &mut Option<VizFieldBuffers>,
     params: &mut RuntimeParams,
     running: &mut bool,
+    run_generation: &mut u64,
     step_idx: &mut u64,
     structured_prev_max_vel: &mut f64,
     structured_prev_explicit_rate: &mut Option<f64>,
@@ -11655,7 +11837,6 @@ fn solver_worker_handle_cmd(
             let now = std::time::Instant::now();
             *last_stats_publish = now;
             *last_snapshot_publish = now;
-            let _ = evt_tx.send(SolverWorkerEvent::Running(false));
 
             // Phase-2 parameter application: build sets phase 1, this sets phase 2.
             if let Some(m) = mode.as_mut() {
@@ -11672,6 +11853,12 @@ fn solver_worker_handle_cmd(
                 }
                 m.apply_params_any(params);
             }
+            // This is a readiness acknowledgment, so publish it only after the
+            // solver has accepted its phase-2 runtime configuration.
+            let _ = evt_tx.send(SolverWorkerEvent::Running {
+                running: false,
+                generation: *run_generation,
+            });
         }
         SolverWorkerCommand::ClearSolver => {
             autonomous_scheduler.replace_backend();
@@ -11695,15 +11882,25 @@ fn solver_worker_handle_cmd(
             let now = std::time::Instant::now();
             *last_stats_publish = now;
             *last_snapshot_publish = now;
-            let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+            let _ = evt_tx.send(SolverWorkerEvent::Running {
+                running: false,
+                generation: *run_generation,
+            });
         }
-        SolverWorkerCommand::SetRunning(next_running) => {
+        SolverWorkerCommand::SetRunning {
+            running: next_running,
+            generation,
+        } => {
+            *run_generation = generation;
             if next_running && *autonomous_backend_poisoned {
                 let _ = evt_tx.send(SolverWorkerEvent::Error(
                     "the previous autonomous GPU status could not be decoded; initialize/reset the solver before resuming"
                         .to_string(),
                 ));
-                let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                let _ = evt_tx.send(SolverWorkerEvent::Running {
+                    running: false,
+                    generation,
+                });
                 *running = false;
                 return true;
             }
@@ -11711,7 +11908,10 @@ fn solver_worker_handle_cmd(
                 let _ = evt_tx.send(SolverWorkerEvent::Error(
                     "cannot start solver: no solver is initialized".to_string(),
                 ));
-                let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+                let _ = evt_tx.send(SolverWorkerEvent::Running {
+                    running: false,
+                    generation,
+                });
                 *running = false;
                 return true;
             }
@@ -11725,8 +11925,21 @@ fn solver_worker_handle_cmd(
                 *last_snapshot_publish = now;
             }
             *running = next_running;
+            if next_running {
+                if let Some(viz) = viz_field.as_ref().filter(|viz| {
+                    viz.size_bytes > 0 && viz.mailbox.gpu_consumer_enabled()
+                }) {
+                    // Ordered after Run acceptance: unlike the cold activation
+                    // request, this demand cannot be consumed by the paused
+                    // service path before the first accepted solver boundary.
+                    viz.mailbox.request_frame();
+                }
+            }
             if next_running || autonomous_scheduler.request_pause() {
-                let _ = evt_tx.send(SolverWorkerEvent::Running(*running));
+                let _ = evt_tx.send(SolverWorkerEvent::Running {
+                    running: *running,
+                    generation,
+                });
             }
         }
         SolverWorkerCommand::UpdateParams(next_params) => {

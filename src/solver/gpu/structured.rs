@@ -3538,6 +3538,11 @@ impl StructuredGpuSolver {
         self.constants.inlet_velocity
     }
 
+    #[cfg(test)]
+    pub(crate) fn inlet_ramp_time_for_test(&self) -> f32 {
+        self.constants.inlet_ramp_time
+    }
+
     /// Accumulated simulation time (`sum of dt`).
     pub fn time(&self) -> f64 {
         self.time

@@ -1401,6 +1401,11 @@ impl StructuredModelSolver {
         self.constants.inlet_velocity
     }
 
+    #[cfg(test)]
+    pub(crate) fn inlet_ramp_time_for_test(&self) -> f32 {
+        self.constants.inlet_ramp_time
+    }
+
     /// Seed a named state field from a closure of the cell-centre coords (writes
     /// all history buffers — IC semantics). Panics if the field is absent.
     pub fn set_named_field<F: Fn(f64, f64) -> f64>(&mut self, name: &str, f: F) {

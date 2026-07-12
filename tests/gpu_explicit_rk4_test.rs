@@ -19,6 +19,17 @@ use cfd2::solver::model::{
 use cfd2::solver::scheme::Scheme;
 use cfd2::solver::{PreconditionerType, SolverConfig, SteppingMode, TimeScheme, UnifiedSolver};
 
+#[cfg(feature = "meshgen")]
+use cfd2::sim::{RuntimeParams, SolverDriver};
+#[cfg(feature = "meshgen")]
+use cfd2::solver::model::compressible_model_with_eos;
+#[cfg(feature = "meshgen")]
+use cfd2::solver::model::eos::EosSpec;
+#[cfg(feature = "meshgen")]
+use cfd2::solver::model::helpers::SolverFieldAliasesExt;
+#[cfg(feature = "meshgen")]
+use cfd2::solver::GpuLowMachPrecondModel;
+
 fn gpu_context(gate: &str) -> Option<GpuContext> {
     match pollster::block_on(GpuContext::new(None, None)) {
         Ok(ctx) => Some(ctx),
@@ -43,6 +54,177 @@ fn explicit_config() -> SolverConfig {
         preconditioner: PreconditionerType::Jacobi,
         stepping: SteppingMode::Explicit,
     }
+}
+
+#[cfg(feature = "meshgen")]
+fn explicit_driver_params() -> RuntimeParams {
+    RuntimeParams {
+        adaptive_dt: false,
+        target_cfl: 0.5,
+        requested_dt: 0.01,
+        dtau: 0.0,
+        log_convergence: false,
+        log_every_steps: 100,
+        advection_scheme: Scheme::Upwind,
+        time_scheme: TimeScheme::RK4,
+        preconditioner: PreconditionerType::Jacobi,
+        outer_iters: 1,
+        outer_auto_converge: false,
+        low_mach_model: GpuLowMachPrecondModel::Off,
+        low_mach_theta_floor: 1.0e-6,
+        low_mach_pressure_coupling_alpha: 1.0,
+        alpha_u: 1.0,
+        alpha_p: 1.0,
+        inlet_velocity: 0.0,
+        density: 1.0,
+        viscosity: 0.0,
+        eos: EosSpec::Constant,
+        compressibility_psi: (1.0 / (347.0_f64 * 347.0)) as f32,
+        outlet_back_pressure: 0.0,
+        allmach_precond_uref_min: 1.0,
+        pressure_inlet: false,
+        inlet_pressure: 0.0,
+    }
+}
+
+/// `SolverDriver` reuses the packed state captured by the explicit GPU finite
+/// audit. Scalar-only models have neither velocity nor pressure ports, so this
+/// pins the legacy alias-getter contract: both fields are still cell-sized zero
+/// vectors (and pressure extrema are zero), rather than empty vectors derived
+/// from the absent offsets.
+#[cfg(feature = "meshgen")]
+#[test]
+fn gpu_driver_packed_readback_preserves_missing_ui_port_fallbacks() {
+    let Some(ctx) = gpu_context("gpu-packed-readback-missing-ports") else {
+        return;
+    };
+    let mesh = generate_structured_rect_mesh(4, 3, 1.0, 0.75, BoundarySides::wall());
+    let n = mesh.num_cells();
+    let params = explicit_driver_params();
+    let build = pollster::block_on(SolverDriver::build(
+        &mesh,
+        generic_diffusion_demo_mms_model().expect("diffusion MMS model"),
+        &params,
+        &vec![(0.0, 0.0); n],
+        &vec![0.0; n],
+        Some(ctx.device.clone()),
+        Some(ctx.queue.clone()),
+    ))
+    .expect("GPU explicit scalar driver construction");
+    let mut driver = build.driver;
+    assert!(!driver.solver().is_cpu(), "test must exercise GPU reuse");
+    assert!(matches!(
+        driver.solver().config().stepping,
+        SteppingMode::Explicit
+    ));
+    let ports = driver.solver().ui_ports();
+    assert_eq!(ports.u_offset, None, "scalar model unexpectedly gained U/u");
+    assert_eq!(ports.p_offset, None, "scalar model unexpectedly gained p");
+    driver.apply_params(&params);
+    driver
+        .solver_mut()
+        .set_field_scalar("phi", &vec![1.0; n])
+        .expect("seed scalar field");
+    driver.solver().initialize_history();
+
+    let outcome = driver.step(true);
+    assert!(
+        outcome.diverged.is_none(),
+        "explicit scalar step diverged: {:?}",
+        outcome.diverged
+    );
+    let readback = outcome.readback.expect("requested packed readback");
+
+    // Compare directly with the legacy public aliases on the unchanged
+    // accepted state, in addition to pinning their exact fallback shape/stats.
+    let getter_u = pollster::block_on(driver.solver().get_u());
+    let getter_p = pollster::block_on(driver.solver().get_p());
+    assert_eq!(readback.u, getter_u);
+    assert_eq!(readback.p, getter_p);
+    assert_eq!(readback.u, vec![(0.0, 0.0); n]);
+    assert_eq!(readback.p, vec![0.0; n]);
+    assert_eq!(readback.stats.max_vel.to_bits(), 0.0_f64.to_bits());
+    assert_eq!(readback.stats.nonfinite_u, 0);
+    assert_eq!(readback.stats.p_min.to_bits(), 0.0_f64.to_bits());
+    assert_eq!(readback.stats.p_max.to_bits(), 0.0_f64.to_bits());
+    assert!(readback.stats.p_finite);
+    assert_eq!(readback.stats.nonfinite_p, 0);
+    assert_eq!(readback.stats.rho, None);
+}
+
+/// The driver's explicit-GPU finite audit already owns a packed state readback.
+/// When the GUI asks for fields on that same step, the reused packed snapshot
+/// must be byte-for-byte equivalent to the legacy per-field getter surface.
+#[cfg(feature = "meshgen")]
+#[test]
+fn gpu_driver_reused_packed_readback_matches_live_field_getters() {
+    let Some(ctx) = gpu_context("gpu-rk4-driver-packed-readback") else {
+        return;
+    };
+    let mesh = generate_structured_rect_mesh(2, 2, 1.0, 1.0, BoundarySides::wall());
+    let n = mesh.num_cells();
+    let eos = EosSpec::IdealGas {
+        gamma: 1.4,
+        gas_constant: 287.0,
+        temperature: 300.0,
+    };
+    let params = RuntimeParams {
+        requested_dt: 1.0e-7,
+        log_every_steps: 1,
+        density: 1.225,
+        eos,
+        compressibility_psi: 0.0,
+        allmach_precond_uref_min: 0.2,
+        ..explicit_driver_params()
+    };
+    let mut build = pollster::block_on(SolverDriver::build(
+        &mesh,
+        compressible_model_with_eos(eos).expect("compressible model"),
+        &params,
+        &vec![(0.0, 0.0); n],
+        &vec![0.0; n],
+        Some(ctx.device.clone()),
+        Some(ctx.queue.clone()),
+    ))
+    .expect("GPU explicit driver construction");
+    assert!(!build.driver.solver().is_cpu());
+    build.driver.apply_params(&params);
+
+    let outcome = build.driver.step(true);
+    assert!(
+        outcome.diverged.is_none(),
+        "one uniform RK4 step diverged: {:?}",
+        outcome.diverged
+    );
+    let readback = outcome.readback.expect("requested driver readback");
+    let getter_u = pollster::block_on(build.driver.solver().get_u());
+    let getter_p = pollster::block_on(build.driver.solver().get_p());
+    let getter_rho = pollster::block_on(build.driver.solver().get_rho());
+
+    assert_eq!(readback.u, getter_u, "packed U differs from getter U");
+    assert_eq!(readback.p, getter_p, "packed p differs from getter p");
+    let expected_max_u = getter_u
+        .iter()
+        .map(|&(ux, uy)| (ux * ux + uy * uy).sqrt())
+        .fold(0.0_f64, f64::max);
+    let expected_p = (
+        getter_p.iter().copied().fold(f64::INFINITY, f64::min),
+        getter_p.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+    );
+    assert_eq!(readback.stats.max_vel, expected_max_u);
+    assert_eq!((readback.stats.p_min, readback.stats.p_max), expected_p);
+    let expected_rho = (
+        getter_rho.iter().copied().fold(f64::INFINITY, f64::min),
+        getter_rho.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+    );
+    assert_eq!(
+        readback.stats.rho,
+        Some(expected_rho),
+        "packed rho telemetry differs from getter rho"
+    );
+    assert_eq!(readback.stats.nonfinite_u, 0);
+    assert_eq!(readback.stats.nonfinite_p, 0);
+    assert!(readback.stats.p_finite);
 }
 
 #[test]

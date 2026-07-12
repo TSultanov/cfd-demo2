@@ -147,6 +147,11 @@ pub struct GpuUnifiedSolver {
     /// rejected: it would double-rotate the volume history (the `V^n` slot
     /// silently becomes `V^{n+1}`), corrupting the moving-volume ddt.
     ale_step_armed: bool,
+    /// Accepted packed state captured by explicit `step_with_stats` for its
+    /// mandatory finite-value audit. The driver can take and reuse this exact
+    /// snapshot for CFL/all-Mach validation and GUI fields instead of issuing
+    /// duplicate GPU readbacks after the step.
+    last_explicit_state: Option<Vec<f32>>,
     #[cfg(feature = "cpu")]
     cpu_render: Option<CpuRender>,
 }
@@ -191,6 +196,7 @@ impl GpuUnifiedSolver {
             srd: None,
             srd_enabled: false,
             ale_step_armed: false,
+            last_explicit_state: None,
             #[cfg(feature = "cpu")]
             cpu_render: None,
         };
@@ -293,6 +299,7 @@ impl GpuUnifiedSolver {
             srd: None,
             srd_enabled: false,
             ale_step_armed: false,
+            last_explicit_state: None,
             cpu_render,
         };
         solver.sync_cpu_render();
@@ -808,6 +815,7 @@ impl GpuUnifiedSolver {
 
     pub fn step(&mut self) {
         self.ale_step_armed = false;
+        self.last_explicit_state = None;
         match &mut self.backend {
             SolverBackend::Gpu(p) => p.step(),
             #[cfg(feature = "cpu")]
@@ -824,6 +832,7 @@ impl GpuUnifiedSolver {
 
     pub fn step_with_stats(&mut self) -> Result<Vec<LinearSolverStats>, String> {
         self.ale_step_armed = false;
+        self.last_explicit_state = None;
         let mut stats = match &mut self.backend {
             SolverBackend::Gpu(p) => p.step_with_stats()?,
             #[cfg(feature = "cpu")]
@@ -848,6 +857,12 @@ impl GpuUnifiedSolver {
                 }
             }
         };
+        // Post-step cut-cell redistribution is part of the accepted state. Run
+        // it before the explicit audit snapshot so every downstream consumer
+        // sees the same completed state (SRD is normally disabled for these
+        // models, but ordering it here makes the cache contract exact).
+        self.apply_srd();
+
         // Explicit GPU steps do not run a linear solver, so an empty stats
         // vector is normally correct. Scan the state when the caller asks for
         // step statistics so a poisoned RK stage is still surfaced immediately
@@ -862,9 +877,17 @@ impl GpuUnifiedSolver {
                     std::time::Duration::ZERO,
                 ));
             }
+            self.last_explicit_state = Some(state);
         }
-        self.apply_srd();
         Ok(stats)
+    }
+
+    /// Take the completion-fenced state already read by the latest explicit
+    /// `step_with_stats`. Returns `None` for CPU/implicit steps or after it has
+    /// already been consumed.
+    #[allow(dead_code)] // consumed by the optional mesh/UI driver feature set
+    pub(crate) fn take_last_explicit_state(&mut self) -> Option<Vec<f32>> {
+        self.last_explicit_state.take()
     }
 
     pub fn initialize_history(&self) {

@@ -53,8 +53,11 @@ pub struct FieldStats {
 /// for `run_steps` callers, who cannot borrow the driver inside their callback).
 pub struct StepOutcome {
     pub dt: f32,
-    /// Wall time of `step_with_stats` only (excludes adaptive-dt and readback),
-    /// matching the GUI worker's `step_time_ms` stat.
+    /// Backend-local accepted-step latency. The generic driver times
+    /// `step_with_stats`; structured explicit stepping also includes its
+    /// mandatory completion/finite-state audit. Optional GUI snapshot packaging
+    /// remains excluded. The GUI does not present this directly: asynchronous
+    /// GPU/CPU comparison uses its completion-fenced worker throughput window.
     pub step_time_ms: f32,
     pub linear_stats: Vec<LinearSolverStats>,
     pub outer_iters: Option<u32>,

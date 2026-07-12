@@ -1483,6 +1483,12 @@ impl SolverDriver {
             }
         };
         let dt = self.solver.dt();
+        // Explicit GPU `step_with_stats` already performs one mandatory
+        // completion-fenced packed-state audit. Reuse that exact accepted state
+        // for all-Mach sampling and GUI snapshots instead of reading the device
+        // two or three more times after the displayed timer stops.
+        let mut completed_state = self.solver.take_last_explicit_state();
+        let completed_state_is_gpu_snapshot = completed_state.is_some();
         let should_stop = self.solver.incompressible_should_stop();
         let outer_iters = self.solver.step_stats().outer_iterations;
 
@@ -1496,9 +1502,17 @@ impl SolverDriver {
         };
 
         if self.params.time_scheme == crate::solver::TimeScheme::RK4 && self.allmach {
-            let state = pollster::block_on(self.solver.read_state_f32());
+            if completed_state.is_none() {
+                // CPU explicit steps do not need the GPU finite-audit transfer;
+                // take one compact host snapshot for the all-Mach stability
+                // sample. CPU GUI fields below retain their f64 getter path.
+                completed_state = Some(pollster::block_on(self.solver.read_state_f32()));
+            }
+            let state = completed_state
+                .as_deref()
+                .expect("explicit all-Mach completed state");
             let sample = sample_allmach_explicit_state(
-                &state,
+                state,
                 &self.solver.model().state_layout,
                 &self.explicit_cell_metrics,
                 &self.explicit_mesh,
@@ -1517,7 +1531,14 @@ impl SolverDriver {
         }
 
         let readback = if readback {
-            let rb = self.read_back();
+            let rb = if let Some(state) = completed_state
+                .as_deref()
+                .filter(|_| completed_state_is_gpu_snapshot && !(self.allmach && !self.thermal))
+            {
+                self.read_back_from_packed(state)
+            } else {
+                self.read_back()
+            };
             if diverged.is_none() && (rb.stats.nonfinite_u > 0 || rb.stats.nonfinite_p > 0) {
                 diverged = Some(DivergeReason::NonFinite {
                     u: rb.stats.nonfinite_u,
@@ -1540,6 +1561,102 @@ impl SolverDriver {
             diverged,
             should_stop,
             readback,
+        }
+    }
+
+    /// Build the GUI/readback view from the accepted packed state already
+    /// captured by explicit `step_with_stats`. This is numerically identical to
+    /// the field-by-field getters but performs no additional device transfer.
+    /// Barotropic all-Mach deliberately stays on `read_back`: that legacy path
+    /// also commits a host-recovered rho coefficient, whereas thermal all-Mach
+    /// and density-based compressible carry rho directly in packed state.
+    fn read_back_from_packed(&mut self, state: &[f32]) -> Readback {
+        let ports = self.solver.ui_ports();
+        let stride = ports.stride as usize;
+        let u_offset = ports.u_offset.map(|offset| offset as usize);
+        let p_offset = ports.p_offset.map(|offset| offset as usize);
+        let rho_offset = self
+            .solver
+            .model()
+            .state_layout
+            .offset_for("rho")
+            .map(|offset| offset as usize);
+        let rows = if stride > 0 {
+            state.chunks_exact(stride)
+        } else {
+            state[..0].chunks_exact(1)
+        };
+        let cells = rows.len();
+        let mut u = Vec::with_capacity(cells);
+        let mut p = Vec::with_capacity(cells);
+        let mut max_vel = 0.0_f64;
+        let mut nonfinite_u = 0usize;
+        let mut p_min = f64::INFINITY;
+        let mut p_max = f64::NEG_INFINITY;
+        let mut nonfinite_p = 0usize;
+        let mut rho_min = f64::INFINITY;
+        let mut rho_max = f64::NEG_INFINITY;
+
+        for row in rows {
+            if let Some(offset) = u_offset {
+                let velocity = (row[offset] as f64, row[offset + 1] as f64);
+                if velocity.0.is_finite() && velocity.1.is_finite() {
+                    let speed = (velocity.0 * velocity.0 + velocity.1 * velocity.1).sqrt();
+                    if speed > max_vel {
+                        max_vel = speed;
+                    }
+                } else {
+                    nonfinite_u += 1;
+                }
+                u.push(velocity);
+            }
+            if let Some(offset) = p_offset {
+                let pressure = row[offset] as f64;
+                if pressure.is_finite() {
+                    p_min = p_min.min(pressure);
+                    p_max = p_max.max(pressure);
+                } else {
+                    nonfinite_p += 1;
+                }
+                p.push(pressure);
+            }
+            if let Some(offset) = rho_offset {
+                let density = row[offset] as f64;
+                rho_min = rho_min.min(density);
+                rho_max = rho_max.max(density);
+            }
+        }
+        // Match SolverFieldAliasesExt: models without UI velocity/pressure
+        // ports expose zero-valued fields of cell length, not empty vectors.
+        if u_offset.is_none() {
+            u.resize(cells, (0.0, 0.0));
+        }
+        if p_offset.is_none() {
+            p.resize(cells, 0.0);
+            if cells > 0 {
+                p_min = 0.0;
+                p_max = 0.0;
+            }
+        }
+        self.prev_max_vel = max_vel;
+
+        let rho = if (self.allmach && self.thermal) || self.compressible {
+            rho_offset.map(|_| (rho_min, rho_max))
+        } else {
+            None
+        };
+        Readback {
+            u,
+            p,
+            stats: FieldStats {
+                max_vel,
+                nonfinite_u,
+                p_min,
+                p_max,
+                p_finite: nonfinite_p == 0,
+                nonfinite_p,
+                rho,
+            },
         }
     }
 

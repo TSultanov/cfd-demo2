@@ -328,7 +328,99 @@ struct CachedGpuStats {
     positivity_min_p: Option<f32>,
     positivity_rho_undershoots: u32,
     positivity_pressure_undershoots: u32,
+    /// Completion-fenced worker throughput, not GPU queue submission latency.
     step_time_ms: f32,
+    steps_per_second: f32,
+    sim_seconds_per_wall_second: f32,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct CompletedStepSample {
+    step_time_ms: f32,
+    steps_per_second: f32,
+    sim_seconds_per_wall_second: f32,
+}
+
+/// Zero-overhead completion timing for the GUI worker.
+///
+/// GPU submission is asynchronous, so timing the Rust `step()` call compares
+/// enqueue latency against synchronous CPU execution. The worker already asks
+/// for a blocking state snapshot initially and about every 100 ms. At those
+/// existing completion fences we divide the elapsed wall interval by every step
+/// completed in it; unsynchronised iterations retain the last honest sample.
+/// This neither adds a submission nor serialises the solver once per step.
+struct CompletedStepTiming {
+    window_start: std::time::Instant,
+    window_steps: u64,
+    window_sim_time: f64,
+    has_completion_anchor: bool,
+    last: CompletedStepSample,
+}
+
+impl CompletedStepTiming {
+    fn new() -> Self {
+        Self::new_at(std::time::Instant::now())
+    }
+
+    fn new_at(now: std::time::Instant) -> Self {
+        Self {
+            window_start: now,
+            window_steps: 0,
+            window_sim_time: 0.0,
+            has_completion_anchor: false,
+            last: CompletedStepSample::default(),
+        }
+    }
+
+    fn reset(&mut self) {
+        self.reset_at(std::time::Instant::now());
+    }
+
+    fn reset_at(&mut self, now: std::time::Instant) {
+        self.window_start = now;
+        self.window_steps = 0;
+        self.window_sim_time = 0.0;
+        self.has_completion_anchor = false;
+        self.last = CompletedStepSample::default();
+    }
+
+    fn record_step(&mut self, dt: f32, completion_fenced: bool) -> CompletedStepSample {
+        self.record_step_at(dt, completion_fenced, std::time::Instant::now())
+    }
+
+    fn record_step_at(
+        &mut self,
+        dt: f32,
+        completion_fenced: bool,
+        now: std::time::Instant,
+    ) -> CompletedStepSample {
+        self.window_steps = self.window_steps.saturating_add(1);
+        if dt.is_finite() && dt > 0.0 {
+            self.window_sim_time += dt as f64;
+        }
+        if completion_fenced {
+            if self.has_completion_anchor {
+                let elapsed = now.saturating_duration_since(self.window_start);
+                let seconds = elapsed.as_secs_f64();
+                if self.window_steps > 0 && seconds > 0.0 {
+                    let steps_per_second = self.window_steps as f64 / seconds;
+                    self.last.step_time_ms = (1.0e3 / steps_per_second) as f32;
+                    self.last.steps_per_second = steps_per_second as f32;
+                    self.last.sim_seconds_per_wall_second = (self.window_sim_time / seconds) as f32;
+                }
+            } else {
+                // The first fence establishes a completion-to-completion
+                // anchor. Measuring from worker reset/start would omit the
+                // previous loop's pacing and post-step work, making the first
+                // displayed sample systematically optimistic.
+                self.has_completion_anchor = true;
+            }
+            self.window_start = now;
+            self.window_steps = 0;
+            self.window_sim_time = 0.0;
+        }
+        self.last
+    }
 }
 
 /// What the solver worker is driving. `Static` wraps a [`SolverDriver`];
@@ -2198,6 +2290,14 @@ impl CFDApp {
                 }
                 SolverWorkerEvent::Running(running) => {
                     self.is_running = running;
+                    if running {
+                        // A resumed worker needs a fresh completion-to-completion
+                        // sample. Do not leave the pre-pause rate visible while
+                        // its first completion fence is still pending.
+                        self.cached_gpu_stats.step_time_ms = 0.0;
+                        self.cached_gpu_stats.steps_per_second = 0.0;
+                        self.cached_gpu_stats.sim_seconds_per_wall_second = 0.0;
+                    }
                 }
             }
         }
@@ -4946,7 +5046,11 @@ impl eframe::App for CFDApp {
 
                     if has_solver {
                         let stats = &self.cached_gpu_stats;
-                        ui.label(format!("dt: {:.2e}", stats.dt));
+                        if stats.dt.is_finite() && stats.dt > 0.0 {
+                            ui.label(format!("Last accepted dt: {:.2e} s", stats.dt));
+                        } else {
+                            ui.label("Last accepted dt: measuring…");
+                        }
                         if stats.linear_solves > 0 {
                             let status = if stats.linear_last.diverged
                                 || !stats.linear_last.residual.is_finite()
@@ -4987,7 +5091,26 @@ impl eframe::App for CFDApp {
                                 stats.positivity_pressure_undershoots,
                             ));
                         }
-                        ui.label(format!("Step time: {:.1} ms", stats.step_time_ms));
+                        let timing_response = if stats.steps_per_second > 0.0 {
+                            ui.label(format!(
+                                "Effective step wall time: {:.1} ms ({:.1} completed steps/s)",
+                                stats.step_time_ms, stats.steps_per_second
+                            ))
+                        } else {
+                            ui.label("Effective step wall time: measuring…")
+                        };
+                        timing_response.on_hover_text(
+                            "Average wall time over the latest completion-to-completion worker \
+                             window. GPU queue submission time is intentionally not shown; the \
+                             sample includes work that must finish before the solution can be \
+                             observed and adds no per-step synchronization.",
+                        );
+                        if stats.steps_per_second > 0.0 {
+                            ui.label(format!(
+                                "Simulation rate: {:.3e} simulated s / wall s",
+                                stats.sim_seconds_per_wall_second
+                            ));
+                        }
 
                         // Moving-mesh (ALE) per-step telemetry, when active.
                         if let Some(m) = &self.cached_moving_stats {
@@ -5236,13 +5359,21 @@ fn solver_worker_stop_trace(trace: &mut Option<SolverTraceSession>, mode: &mut O
     eprintln!("[cfd2][trace] closed {}", path);
 }
 
-/// One implicit step of the structured GPU solver, synthesising the same
-/// `StepOutcome`/`Readback`/`FieldStats` shape the worker consumes from the
-/// unstructured `SolverDriver::step` — the structured banded solve has no
-/// adaptive-dt / divergence machinery, so we build these here.
-/// The step + readback surface shared by the GPU and CPU structured solvers, so
-/// `structured_step` drives either. `st_`-prefixed to avoid colliding with the
-/// identically-named inherent methods the impls forward to.
+// One implicit step of the structured GPU solver synthesises the same
+// `StepOutcome`/`Readback`/`FieldStats` shape the worker consumes from the
+// unstructured `SolverDriver::step`. The step + readback surface is shared by
+// the GPU and CPU structured solvers; `st_` avoids inherent-method collisions.
+#[cfg(test)]
+thread_local! {
+    static STRUCTURED_PACKED_STATE_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[inline]
+fn note_structured_packed_state_read() {
+    #[cfg(test)]
+    STRUCTURED_PACKED_STATE_READS.with(|count| count.set(count.get() + 1));
+}
+
 trait StructuredSteppable {
     fn st_step(&mut self);
     fn st_dt(&self) -> f64;
@@ -5261,8 +5392,6 @@ trait StructuredSteppable {
     fn st_geometry_rates(&self) -> (f64, f64);
     fn st_layout(&self) -> &crate::solver::model::backend::state_layout::StateLayout;
     fn st_packed_state(&self) -> Vec<f32>;
-    fn st_get_u(&self, off: usize) -> Vec<(f64, f64)>;
-    fn st_get_scalar(&self, off: usize) -> Vec<f64>;
     /// Convergence telemetry from the most recent `st_step` — plumbed into the
     /// GUI's "Linear"/"Coupled" readout via `structured_step`.
     fn st_stats(&self) -> crate::solver::banded_schur::StructuredStepStats;
@@ -5308,13 +5437,8 @@ impl StructuredSteppable for StructuredGpuSolver {
     fn st_layout(&self) -> &crate::solver::model::backend::state_layout::StateLayout {
         self.state_layout()
     }
-    fn st_get_u(&self, off: usize) -> Vec<(f64, f64)> {
-        self.get_u(off)
-    }
-    fn st_get_scalar(&self, off: usize) -> Vec<f64> {
-        self.get_scalar(off)
-    }
     fn st_packed_state(&self) -> Vec<f32> {
+        note_structured_packed_state_read();
         self.packed_state_f32()
     }
     fn st_stats(&self) -> crate::solver::banded_schur::StructuredStepStats {
@@ -5362,13 +5486,8 @@ impl StructuredSteppable for StructuredModelSolver {
     fn st_layout(&self) -> &crate::solver::model::backend::state_layout::StateLayout {
         self.state_layout()
     }
-    fn st_get_u(&self, off: usize) -> Vec<(f64, f64)> {
-        self.get_u(off)
-    }
-    fn st_get_scalar(&self, off: usize) -> Vec<f64> {
-        self.get_scalar(off)
-    }
     fn st_packed_state(&self) -> Vec<f32> {
+        note_structured_packed_state_read();
         self.packed_state_f32()
     }
     fn st_stats(&self) -> crate::solver::banded_schur::StructuredStepStats {
@@ -5533,11 +5652,11 @@ fn structured_rhie_chow_turnover_rate(
         .fold(0.0, f64::max)
 }
 
-fn structured_allmach_explicit_sample(
+fn structured_allmach_explicit_sample_from_state(
     s: &impl StructuredSteppable,
     params: &RuntimeParams,
+    state: &[f32],
 ) -> StructuredExplicitSample {
-    let state = s.st_packed_state();
     let layout = s.st_layout();
     let stride = layout.stride() as usize;
     let off = |name: &str| layout.offset_for(name).map(|value| value as usize);
@@ -5642,26 +5761,49 @@ fn structured_allmach_explicit_sample(
     sample
 }
 
+fn structured_allmach_explicit_sample(
+    s: &impl StructuredSteppable,
+    params: &RuntimeParams,
+) -> StructuredExplicitSample {
+    let state = s.st_packed_state();
+    structured_allmach_explicit_sample_from_state(s, params, &state)
+}
+
 /// Pin `dt` for one structured step — the same CFL policy as
 /// [`crate::sim::SolverDriver::step`].
 fn structured_pin_dt(
     s: &mut impl StructuredSteppable,
     params: &RuntimeParams,
-    prev_max_vel: f64,
+    prev_max_vel: &mut f64,
+    prev_explicit_rate: &mut Option<f64>,
     supports_sound_speed: bool,
     model_id: &str,
 ) -> Result<(), String> {
     if params.adaptive_dt {
         if params.time_scheme == GpuTimeScheme::RK4 && model_id == "allmach_thermal_structured" {
-            let sample = structured_allmach_explicit_sample(s, params);
-            if sample.invalid > 0 || !sample.max_rate.is_finite() || !(sample.max_rate > 0.0) {
-                return Err(format!(
-                    "invalid structured all-Mach RK4 pre-step state ({} invalid cells)",
-                    sample.invalid
-                ));
-            }
-            let mut next_dt = STRUCTURED_EXPLICIT_RK_SAFETY * params.target_cfl.clamp(1.0e-6, 1.0)
-                / sample.max_rate;
+            let rate = match prev_explicit_rate.filter(|rate| rate.is_finite() && *rate > 0.0) {
+                Some(rate) => rate,
+                None => {
+                    // Bootstrap once after construction/a live parameter edit. Every
+                    // accepted RK4 step caches its post-step sample below, so the normal
+                    // path does not perform a second pre-step GPU readback.
+                    let sample = structured_allmach_explicit_sample(s, params);
+                    if sample.invalid > 0
+                        || !sample.max_rate.is_finite()
+                        || !(sample.max_rate > 0.0)
+                    {
+                        return Err(format!(
+                            "invalid structured all-Mach RK4 pre-step state ({} invalid cells)",
+                            sample.invalid
+                        ));
+                    }
+                    *prev_max_vel = sample.max_vel;
+                    *prev_explicit_rate = Some(sample.max_rate);
+                    sample.max_rate
+                }
+            };
+            let mut next_dt =
+                STRUCTURED_EXPLICIT_RK_SAFETY * params.target_cfl.clamp(1.0e-6, 1.0) / rate;
             let current_dt = s.st_dt();
             if next_dt > current_dt * 1.2 {
                 next_dt = current_dt * 1.2;
@@ -5676,7 +5818,7 @@ fn structured_pin_dt(
         } else {
             0.0
         };
-        let adv_speed = prev_max_vel.max(params.inlet_velocity.abs() as f64);
+        let adv_speed = (*prev_max_vel).max(params.inlet_velocity.abs() as f64);
         let effective_sound_speed = match params.low_mach_model {
             GpuLowMachPrecondModel::Off => sound_speed,
             GpuLowMachPrecondModel::Legacy => sound_speed.min(adv_speed),
@@ -5755,13 +5897,15 @@ fn structured_step(
     s: &mut (impl StructuredSteppable + StructuredSeed),
     params: &RuntimeParams,
     prev_max_vel: &mut f64,
+    prev_explicit_rate: &mut Option<f64>,
     model_id: &str,
     readback: bool,
 ) -> StepOutcome {
     if let Err(error) = structured_pin_dt(
         s,
         params,
-        *prev_max_vel,
+        prev_max_vel,
+        prev_explicit_rate,
         structured_supports_sound_speed(model_id),
         model_id,
     ) {
@@ -5786,102 +5930,123 @@ fn structured_step(
 
     let t0 = std::time::Instant::now();
     s.st_step();
-    let step_time_ms = t0.elapsed().as_secs_f32() * 1000.0;
+    let solver_step_time_ms = t0.elapsed().as_secs_f32() * 1000.0;
     let dt = s.st_dt() as f32;
     let cstats = s.st_stats();
-    let explicit_allmach_sample = (params.time_scheme == GpuTimeScheme::RK4
-        && model_id == "allmach_thermal_structured")
-        .then(|| structured_allmach_explicit_sample(s, params));
-    if let Some(sample) = explicit_allmach_sample {
-        if sample.invalid == 0 {
-            *prev_max_vel = sample.max_vel;
-        }
-    }
-
     let ports = UiPortSet::from_layout(s.st_layout());
+    let stride = ports.stride as usize;
+    let explicit_rk4 = params.time_scheme == GpuTimeScheme::RK4;
     // When adaptive CFL is on, refresh `prev_max_vel` EVERY step (not only the
     // throttled GUI snapshot cadence). A stale velocity scale lets dt lag a
     // developing jet/wake and overshoot the true Courant number for several
-    // steps — the driver has the same pattern, but structured steps are cheap
-    // enough on the CPU path (default) that a local U scan is fine.
-    // Explicit RK4 has no linear solve whose residual can carry a divergence
-    // bit. Scan U every explicit step (and p below) so a poisoned stage is
-    // surfaced immediately instead of waiting for the throttled GUI snapshot.
-    let explicit_rk4 = params.time_scheme == GpuTimeScheme::RK4;
+    // steps. Explicit RK4 also has no linear solve whose residual can carry a
+    // divergence bit, so its accepted state is inspected every step.
+    //
+    // Read the packed state ONCE and derive every U/p/sample view from it. The
+    // GPU read is already a completion fence for all four RK stages; the old
+    // path independently read the same full buffer for the all-Mach sample, U,
+    // and p (and once more before adaptive steps), making the displayed enqueue
+    // time look fast while three/four blocking transfers controlled cadence.
     let need_u = readback || params.adaptive_dt || explicit_rk4;
-    let u_for_cfl = if need_u {
-        ports
-            .u_offset
-            .map(|off| s.st_get_u(off as usize))
-            .unwrap_or_default()
+    let need_p = readback || explicit_rk4;
+    let packed_state = (need_u || need_p).then(|| s.st_packed_state());
+
+    let explicit_allmach_sample = if explicit_rk4 && model_id == "allmach_thermal_structured" {
+        packed_state
+            .as_deref()
+            .map(|state| structured_allmach_explicit_sample_from_state(s, params, state))
+    } else {
+        None
+    };
+    if let Some(sample) = explicit_allmach_sample {
+        if sample.invalid == 0 && sample.max_rate.is_finite() && sample.max_rate > 0.0 {
+            *prev_max_vel = sample.max_vel;
+            *prev_explicit_rate = Some(sample.max_rate);
+        } else {
+            *prev_explicit_rate = None;
+        }
+    }
+
+    let rows = packed_state
+        .as_deref()
+        .filter(|_| stride > 0)
+        .map(|state| state.chunks_exact(stride));
+    let cell_count = rows.as_ref().map_or(0, |rows| rows.len());
+    let mut u = if readback {
+        Vec::with_capacity(cell_count)
     } else {
         Vec::new()
     };
+    let mut p = if readback {
+        Vec::with_capacity(cell_count)
+    } else {
+        Vec::new()
+    };
+    let mut max_vel = 0.0f64;
     let mut step_nonfinite_u = 0usize;
-    if !u_for_cfl.is_empty() {
-        let mut max_vel = 0.0f64;
-        for &(ux, uy) in &u_for_cfl {
-            if ux.is_finite() && uy.is_finite() {
-                max_vel = max_vel.max(ux.hypot(uy));
-            } else {
-                step_nonfinite_u += 1;
+    let mut step_nonfinite_p = 0usize;
+    let mut p_min = f64::INFINITY;
+    let mut p_max = f64::NEG_INFINITY;
+    if let Some(rows) = rows {
+        for row in rows {
+            if need_u {
+                if let Some(off) = ports.u_offset.map(|off| off as usize) {
+                    let ux = row[off] as f64;
+                    let uy = row[off + 1] as f64;
+                    if readback {
+                        u.push((ux, uy));
+                    }
+                    if ux.is_finite() && uy.is_finite() {
+                        max_vel = max_vel.max(ux.hypot(uy));
+                    } else {
+                        step_nonfinite_u += 1;
+                    }
+                }
+            }
+            if need_p {
+                if let Some(off) = ports.p_offset.map(|off| off as usize) {
+                    let value = row[off] as f64;
+                    if readback {
+                        p.push(value);
+                    }
+                    if value.is_finite() {
+                        p_min = p_min.min(value);
+                        p_max = p_max.max(value);
+                    } else {
+                        step_nonfinite_p += 1;
+                    }
+                }
             }
         }
-        if params.adaptive_dt {
+    }
+    if need_u {
+        if params.adaptive_dt || readback {
             *prev_max_vel = max_vel;
         }
     }
 
-    let step_nonfinite_p = if explicit_rk4 && !readback {
-        ports
-            .p_offset
-            .map(|off| {
-                s.st_get_scalar(off as usize)
-                    .into_iter()
-                    .filter(|value| !value.is_finite())
-                    .count()
-            })
-            .unwrap_or(0)
+    // At this point the accepted GPU step and all mandatory safety/CFL work are
+    // complete. This is the meaningful per-step latency; optional UI event
+    // construction below performs no further device transfer.
+    let step_time_ms = if explicit_rk4 || params.adaptive_dt {
+        // The packed-state audit/CFL scan is mandatory accepted-step work and
+        // provides the explicit GPU completion fence.
+        t0.elapsed().as_secs_f32() * 1000.0
     } else {
-        0
+        // A fixed implicit snapshot is optional GUI observation. Keep it out of
+        // the step-local trace even though it reuses the same packed transfer.
+        solver_step_time_ms
     };
 
     let readback = if readback {
-        let u = u_for_cfl;
-        let p = ports
-            .p_offset
-            .map(|off| s.st_get_scalar(off as usize))
-            .unwrap_or_default();
-        let mut max_vel = 0.0f64;
-        let mut nonfinite_u = 0usize;
-        for &(ux, uy) in &u {
-            let m = ux.hypot(uy);
-            if m.is_finite() {
-                max_vel = max_vel.max(m);
-            } else {
-                nonfinite_u += 1;
-            }
-        }
-        *prev_max_vel = max_vel;
-        let mut p_min = f64::INFINITY;
-        let mut p_max = f64::NEG_INFINITY;
-        let mut nonfinite_p = 0usize;
-        for &pv in &p {
-            if pv.is_finite() {
-                p_min = p_min.min(pv);
-                p_max = p_max.max(pv);
-            } else {
-                nonfinite_p += 1;
-            }
-        }
-        let p_finite = nonfinite_p == 0 && !p.is_empty();
+        let p_finite = step_nonfinite_p == 0 && !p.is_empty();
         let stats = FieldStats {
             max_vel,
-            nonfinite_u,
+            nonfinite_u: step_nonfinite_u,
             p_min: if p_finite { p_min } else { 0.0 },
             p_max: if p_finite { p_max } else { 0.0 },
             p_finite,
-            nonfinite_p,
+            nonfinite_p: step_nonfinite_p,
             rho: explicit_allmach_sample.map(|sample| (sample.rho_min, sample.rho_max)),
         };
         Some(Readback { u, p, stats })
@@ -6352,6 +6517,58 @@ mod structured_boundary_tests {
     use super::*;
     use crate::solver::model::eos::EosSpec;
     use crate::ui::model_defaults::gui_defaults_for;
+
+    #[test]
+    fn completed_step_timing_ignores_unfenced_submission_latency() {
+        let start = std::time::Instant::now();
+        let mut timing = CompletedStepTiming::new_at(start);
+
+        let first = timing.record_step_at(0.02, false, start + std::time::Duration::from_millis(1));
+        assert_eq!(first.step_time_ms, 0.0);
+
+        // The first completion only anchors the next honest window. Time from
+        // worker creation/reset is not representative steady-state throughput.
+        let anchored =
+            timing.record_step_at(0.02, true, start + std::time::Duration::from_millis(40));
+        assert_eq!(anchored.step_time_ms, 0.0);
+
+        // An asynchronous enqueue cannot manufacture a throughput sample from
+        // its tiny host return time.
+        let retained =
+            timing.record_step_at(0.01, false, start + std::time::Duration::from_millis(41));
+        assert_eq!(retained.step_time_ms, 0.0);
+
+        let completed =
+            timing.record_step_at(0.01, true, start + std::time::Duration::from_millis(80));
+        assert!((completed.step_time_ms - 20.0).abs() < 1.0e-5);
+        assert!((completed.steps_per_second - 50.0).abs() < 1.0e-5);
+        assert!((completed.sim_seconds_per_wall_second - 0.5).abs() < 1.0e-5);
+
+        let retained =
+            timing.record_step_at(0.01, false, start + std::time::Duration::from_millis(81));
+        assert_eq!(retained.step_time_ms, completed.step_time_ms);
+        assert_eq!(retained.steps_per_second, completed.steps_per_second);
+    }
+
+    #[test]
+    fn structured_adaptive_rk4_uses_one_packed_read_per_accepted_step_after_bootstrap() {
+        STRUCTURED_PACKED_STATE_READS.with(|count| count.set(0));
+        let air = EosSpec::IdealGas {
+            gamma: 1.4,
+            gas_constant: 287.0,
+            temperature: 300.0,
+        };
+        let params =
+            gui_defaults_for("allmach_thermal_structured").to_runtime_params(1.225, 1.81e-5, air);
+        let smoke = structured_allmach_rk4_smoke("backstep", false, 12, 4, 3, params)
+            .expect("structured adaptive RK4 smoke");
+        assert_eq!(smoke.steps, 3);
+        let reads = STRUCTURED_PACKED_STATE_READS.with(std::cell::Cell::get);
+        assert_eq!(
+            reads, 4,
+            "one initial stability bootstrap plus one accepted-state read per step"
+        );
+    }
 
     #[test]
     fn allmach_structured_outlet_uses_live_back_pressure() {
@@ -6935,6 +7152,7 @@ fn structured_allmach_rk4_smoke_impl(
 
         let mut active_params = *params;
         let mut prev_max_vel = 0.0;
+        let mut prev_explicit_rate = None;
         let mut smoke = StructuredAllmachRk4Smoke {
             steps: 0,
             min_dt: f64::INFINITY,
@@ -6947,6 +7165,7 @@ fn structured_allmach_rk4_smoke_impl(
             if step == steps / 2 {
                 if let Some(updated) = live_update {
                     active_params = *updated;
+                    prev_explicit_rate = None;
                     solver
                         .st_set_fluid(active_params.density as f64, active_params.viscosity as f64);
                     solver.st_set_alpha_u(active_params.alpha_u);
@@ -6970,6 +7189,7 @@ fn structured_allmach_rk4_smoke_impl(
                 solver,
                 &active_params,
                 &mut prev_max_vel,
+                &mut prev_explicit_rate,
                 "allmach_thermal_structured",
                 true,
             );
@@ -7087,8 +7307,12 @@ fn solver_worker_main(
     // Adaptive-dt velocity scale for the structured path (mirrors
     // `SolverDriver::prev_max_vel`). Updated from structured field readbacks.
     let mut structured_prev_max_vel: f64 = 0.0;
+    // Post-step all-Mach spectral rate used to size the NEXT adaptive RK4 step.
+    // Caching it avoids a second full-state GPU read before every accepted step.
+    let mut structured_prev_explicit_rate: Option<f64> = None;
     let mut last_stats_publish = std::time::Instant::now();
     let mut last_snapshot_publish = std::time::Instant::now();
+    let mut completed_step_timing = CompletedStepTiming::new();
     let stats_publish_interval = std::time::Duration::from_millis(33);
     let snapshot_publish_interval = std::time::Duration::from_millis(100);
 
@@ -7104,6 +7328,8 @@ fn solver_worker_main(
                 &mut running,
                 &mut step_idx,
                 &mut structured_prev_max_vel,
+                &mut structured_prev_explicit_rate,
+                &mut completed_step_timing,
                 &mut last_stats_publish,
                 &mut last_snapshot_publish,
                 &evt_tx,
@@ -7125,6 +7351,8 @@ fn solver_worker_main(
                         &mut running,
                         &mut step_idx,
                         &mut structured_prev_max_vel,
+                        &mut structured_prev_explicit_rate,
+                        &mut completed_step_timing,
                         &mut last_stats_publish,
                         &mut last_snapshot_publish,
                         &evt_tx,
@@ -7178,6 +7406,7 @@ fn solver_worker_main(
                     s,
                     &params,
                     &mut structured_prev_max_vel,
+                    &mut structured_prev_explicit_rate,
                     model_id,
                     should_readback,
                 ),
@@ -7188,6 +7417,7 @@ fn solver_worker_main(
                     &mut s.solver,
                     &params,
                     &mut structured_prev_max_vel,
+                    &mut structured_prev_explicit_rate,
                     model_id,
                     should_readback,
                 ),
@@ -7263,7 +7493,13 @@ fn solver_worker_main(
                 stats: mstats,
             });
         }
-        let step_time_ms = outcome.step_time_ms;
+        // `outcome.readback` is an existing GPU completion fence. Use it to
+        // close a multi-step wall-time window; on intervening async iterations
+        // retain the last completed sample instead of publishing enqueue time.
+        let trace_step_time_ms = outcome.step_time_ms;
+        let completed_sample =
+            completed_step_timing.record_step(outcome.dt, outcome.readback.is_some());
+        let step_time_ms = completed_sample.step_time_ms;
 
         if let Some(viz_field) = viz_field.as_ref() {
             if viz_field.size_bytes > 0 {
@@ -7287,12 +7523,6 @@ fn solver_worker_main(
             }
         }
 
-        if outcome.should_stop {
-            running = false;
-            let _ = evt_tx.send(SolverWorkerEvent::Running(false));
-            continue;
-        }
-
         let linear_solves = outcome.linear_stats.len() as u32;
         let linear_last = outcome.linear_stats.last().copied().unwrap_or_default();
         if matches!(outcome.diverged, Some(DivergeReason::LinearSolver)) {
@@ -7307,6 +7537,8 @@ fn solver_worker_main(
         let mut stats = CachedGpuStats {
             dt: mode.sim_dt(),
             step_time_ms,
+            steps_per_second: completed_sample.steps_per_second,
+            sim_seconds_per_wall_second: completed_sample.sim_seconds_per_wall_second,
             linear_solves,
             linear_last,
             ..Default::default()
@@ -7437,7 +7669,10 @@ fn solver_worker_main(
                 p: rb.p,
                 stats,
             });
-        } else if step_idx == 0 || last_stats_publish.elapsed() >= stats_publish_interval {
+        } else if outcome.should_stop
+            || step_idx == 0
+            || last_stats_publish.elapsed() >= stats_publish_interval
+        {
             last_stats_publish = std::time::Instant::now();
             let _ = evt_tx.send(SolverWorkerEvent::Stats { stats });
         }
@@ -7480,7 +7715,10 @@ fn solver_worker_main(
                 step: step_idx,
                 sim_time: solver.time(),
                 dt: solver.dt(),
-                wall_time_ms: step_time_ms,
+                // Traces retain their step-local backend timing. The UI-only
+                // completion window must not be repeated across per-step trace
+                // events, whose consumers sum and correlate this field.
+                wall_time_ms: trace_step_time_ms,
                 linear_solves,
                 graph,
                 max_u: trace_max_u,
@@ -7491,7 +7729,17 @@ fn solver_worker_main(
         }
 
         step_idx = step_idx.wrapping_add(1);
-        thread::sleep(std::time::Duration::from_millis(1));
+        if outcome.should_stop {
+            // The converged step is accepted: publish its final t/dt/stats and
+            // trace before telling the UI that automatic marching stopped.
+            running = false;
+            let _ = evt_tx.send(SolverWorkerEvent::Running(false));
+            continue;
+        }
+        // Keep command/UI threads schedulable without imposing a fixed 1 ms
+        // latency floor on every accepted step. A sleep materially throttles
+        // small explicit GPU cases whose completed solve is already sub-ms.
+        thread::yield_now();
     }
 }
 
@@ -7505,6 +7753,8 @@ fn solver_worker_handle_cmd(
     running: &mut bool,
     step_idx: &mut u64,
     structured_prev_max_vel: &mut f64,
+    structured_prev_explicit_rate: &mut Option<f64>,
+    completed_step_timing: &mut CompletedStepTiming,
     last_stats_publish: &mut std::time::Instant,
     last_snapshot_publish: &mut std::time::Instant,
     evt_tx: &mpsc::Sender<SolverWorkerEvent>,
@@ -7523,6 +7773,8 @@ fn solver_worker_handle_cmd(
             *running = false;
             *step_idx = 0;
             *structured_prev_max_vel = 0.0;
+            *structured_prev_explicit_rate = None;
+            completed_step_timing.reset();
             let now = std::time::Instant::now();
             *last_stats_publish = now;
             *last_snapshot_publish = now;
@@ -7551,6 +7803,8 @@ fn solver_worker_handle_cmd(
             *running = false;
             *step_idx = 0;
             *structured_prev_max_vel = 0.0;
+            *structured_prev_explicit_rate = None;
+            completed_step_timing.reset();
             *viz_field = None;
             let now = std::time::Instant::now();
             *last_stats_publish = now;
@@ -7568,6 +7822,7 @@ fn solver_worker_handle_cmd(
             }
             if next_running {
                 *step_idx = 0;
+                completed_step_timing.reset();
                 let now = std::time::Instant::now();
                 *last_stats_publish = now;
                 *last_snapshot_publish = now;
@@ -7577,6 +7832,9 @@ fn solver_worker_handle_cmd(
         }
         SolverWorkerCommand::UpdateParams(next_params) => {
             *params = next_params;
+            // The all-Mach stability rate is parameter-dependent. Force one
+            // fresh packed-state sample before accepting the next adaptive dt.
+            *structured_prev_explicit_rate = None;
             if let Some(m) = mode.as_mut() {
                 // The moving path never runs the SOLVER-side adaptive dt (a
                 // post-closure re-scale breaks the GCL) — the user's choice

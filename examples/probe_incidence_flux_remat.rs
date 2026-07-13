@@ -425,8 +425,8 @@ fn make_pipelines(ctx: &GpuContext) -> (Pipelines, wgpu::BindGroupLayout) {
         .device
         .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("incidence flux rematerialization pipeline layout"),
-            bind_group_layouts: &[&bind_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bind_layout)],
+            immediate_size: 0,
         });
     (
         Pipelines {

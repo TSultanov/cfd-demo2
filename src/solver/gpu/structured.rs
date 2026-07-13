@@ -535,19 +535,21 @@ impl CompiledKernel {
             label: Some("structured:empty"),
             entries: &[],
         });
-        let ordered: Vec<&wgpu::BindGroupLayout> = (0..=max_g)
+        let ordered: Vec<Option<&wgpu::BindGroupLayout>> = (0..=max_g)
             .map(|g| {
-                layouts
-                    .iter()
-                    .find(|(lg, _)| *lg == g)
-                    .map(|(_, l)| l)
-                    .unwrap_or(&empty)
+                Some(
+                    layouts
+                        .iter()
+                        .find(|(lg, _)| *lg == g)
+                        .map(|(_, l)| l)
+                        .unwrap_or(&empty),
+                )
             })
             .collect();
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(id),
             bind_group_layouts: &ordered,
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some(id),
@@ -1575,8 +1577,8 @@ impl StructuredAutonomousControl {
         let common_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("structured:autonomous-common-pipeline-layout"),
-                bind_group_layouts: &[&common_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&common_layout)],
+                immediate_size: 0,
             });
         let (common_wgsl, adaptive_policy) = structured_autonomous_wgsl(model_id, layout, unknowns);
         let common_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -1724,8 +1726,8 @@ impl StructuredAutonomousControl {
         let patch_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("structured:autonomous-patch-pipeline-layout"),
-                bind_group_layouts: &[&patch_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&patch_layout)],
+                immediate_size: 0,
             });
         let patch_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("structured:autonomous-patch-constants"),

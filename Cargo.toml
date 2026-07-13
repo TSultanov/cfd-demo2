@@ -13,17 +13,17 @@ inherits = "release"
 cfd2_ir = { path = "crates/cfd2_ir" }
 cfd2_codegen = { path = "crates/cfd2_codegen" }
 cfd2_macros = { path = "crates/cfd2_macros" }
-egui = { version = "0.33", optional = true }
-eframe = { version = "0.33", features = ["wgpu", "default_fonts"], optional = true }
-egui_plot = { version = "0.34", optional = true }
+egui = { version = "0.35", optional = true }
+eframe = { version = "0.35", features = ["wgpu", "default_fonts"], optional = true }
+egui_plot = { version = "0.36", optional = true }
 nalgebra = "0.32"
 rand = { version = "0.8", optional = true }
 log = "0.4"
 env_logger = { version = "0.10", optional = true }
 wide = { version = "0.8.3", optional = true }
 rayon = { version = "1.8", optional = true }
-wgpu = "27.0"
-naga = { version = "27.0.3", default-features = false, features = ["termcolor"] }
+wgpu = "29.0"
+naga = { version = "29.0", default-features = false, features = ["termcolor"] }
 bytemuck = { version = "1.14", features = ["derive"] }
 pollster = "0.3"
 ahash = { version = "0.8.12", optional = true }
@@ -56,7 +56,7 @@ cfd2_ir = { path = "crates/cfd2_ir" }
 cfd2_codegen = { path = "crates/cfd2_codegen" }
 cfd2_macros = { path = "crates/cfd2_macros" }
 dashmap = "6.1"
-wgsl_bindgen = "0.21.2"
+wgsl_bindgen = "0.22.2"
 glob = "0.3"
 num-bigint = "0.4"
 num-rational = "0.4"

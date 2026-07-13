@@ -73,7 +73,8 @@ pub fn create_buffer_with_capacity(
     });
     buffer
         .slice(..)
-        .get_mapped_range_mut()[..contents.len()]
+        .get_mapped_range_mut()
+        .slice(..contents.len())
         .copy_from_slice(contents);
     buffer.unmap();
     buffer

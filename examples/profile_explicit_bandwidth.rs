@@ -165,13 +165,16 @@ fn streaming_ceiling(
     {
         let mut mapped = a.slice(..).get_mapped_range_mut();
         let mut hash = 0x9e37_79b9u32;
-        for (index, word) in mapped.chunks_exact_mut(4).enumerate() {
+        let words = mapped.len() / 4;
+        let mut fill = vec![0u8; words * 4];
+        for (index, word) in fill.chunks_exact_mut(4).enumerate() {
             hash ^= (index as u32).wrapping_mul(0x85eb_ca6b);
             hash ^= hash >> 16;
             hash = hash.wrapping_mul(0x7feb_352d);
             hash ^= hash >> 15;
             word.copy_from_slice(&hash.to_le_bytes());
         }
+        mapped.slice(..fill.len()).copy_from_slice(&fill);
     }
     a.unmap();
     let shader = ctx

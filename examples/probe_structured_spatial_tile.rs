@@ -261,8 +261,8 @@ fn main() {
         ctx.device
             .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("global pipeline layout"),
-                bind_group_layouts: &[&global_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&global_layout)],
+                immediate_size: 0,
             });
     let make_global = |label, entry| {
         ctx.device

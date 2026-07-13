@@ -324,8 +324,8 @@ impl CfdRangeReducer {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("CFD Field Range Reduction Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
         });
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("CFD Field Range Reduction Pipeline"),
@@ -652,8 +652,8 @@ impl CfdRenderResources {
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("CFD Pipeline Layout"),
-            bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bind_group_layout)],
+            immediate_size: 0,
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -701,7 +701,7 @@ impl CfdRenderResources {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -750,7 +750,7 @@ impl CfdRenderResources {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -1140,7 +1140,7 @@ mod tests {
 
     #[test]
     fn gpu_reduction_handles_arbitrary_packed_offsets_and_all_four_fields() {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let Ok(adapter) =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
         else {
@@ -1247,7 +1247,7 @@ mod tests {
 
     #[test]
     fn direct_renderer_rasterizes_velocity_magnitude_as_blue_green_red() {
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
         let Ok(adapter) =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
         else {
@@ -1350,6 +1350,7 @@ mod tests {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
             renderer.paint(&mut pass, false);
         }

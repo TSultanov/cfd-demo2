@@ -138,6 +138,12 @@ pub(crate) struct CompressibleExplicitControl {
     b_params: wgpu::Buffer,
     b_history_backup: wgpu::Buffer,
     pub(crate) b_indirect_args: Arc<wgpu::Buffer>,
+    /// INDIRECT-usage mirror of `b_indirect_args`. wgpu (>=28, per WebGPU
+    /// usage-scope rules) rejects a dispatch whose bound bind groups include
+    /// the indirect-args buffer as read-write storage. Control kernels keep
+    /// writing `b_indirect_args`; each indirect dispatch snapshots it into
+    /// this mirror with a 36-byte copy just before its pass.
+    b_indirect_dispatch: wgpu::Buffer,
     control_bg: wgpu::BindGroup,
     phase_bgs: [wgpu::BindGroup; 3],
     stage_pipelines: [wgpu::ComputePipeline; 4],
@@ -325,9 +331,17 @@ impl CompressibleExplicitControl {
         let b_indirect_args = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("compressible_explicit_control:indirect_args"),
             size: 9 * 4,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::INDIRECT,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::INDIRECT
+                | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         }));
+        let b_indirect_dispatch = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("compressible_explicit_control:indirect_dispatch"),
+            size: 9 * 4,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::INDIRECT,
+            mapped_at_creation: false,
+        });
 
         let storage = |binding, read_only| wgpu::BindGroupLayoutEntry {
             binding,
@@ -381,8 +395,8 @@ impl CompressibleExplicitControl {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("compressible_explicit_control:pipeline_layout"),
-            bind_group_layouts: &[&control_bgl, &phase_bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&control_bgl), Some(&phase_bgl)],
+            immediate_size: 0,
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("compressible_explicit_control:shader"),
@@ -418,8 +432,8 @@ impl CompressibleExplicitControl {
         let frame_copy_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("compressible_explicit_control:frame_copy_pipeline_layout"),
-                bind_group_layouts: &[&frame_copy_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&frame_copy_layout)],
+                immediate_size: 0,
             });
         let frame_copy_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("compressible_explicit_control:frame_copy_shader"),
@@ -506,6 +520,7 @@ impl CompressibleExplicitControl {
             b_params,
             b_history_backup,
             b_indirect_args,
+            b_indirect_dispatch,
             control_bg,
             phase_bgs,
             stage_pipelines,
@@ -716,6 +731,7 @@ impl CompressibleExplicitControl {
     }
 
     pub(crate) fn encode_history_prepare(&self, encoder: &mut wgpu::CommandEncoder, phase: usize) {
+        encoder.copy_buffer_to_buffer(&self.b_indirect_args, 0, &self.b_indirect_dispatch, 0, 9 * 4);
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("compressible_explicit_control:history_prepare"),
             timestamp_writes: None,
@@ -723,7 +739,7 @@ impl CompressibleExplicitControl {
         pass.set_pipeline(&self.history_pipeline);
         pass.set_bind_group(0, &self.control_bg, &[]);
         pass.set_bind_group(1, &self.phase_bgs[phase % 3], &[]);
-        pass.dispatch_workgroups_indirect(&self.b_indirect_args, CELLS_INDIRECT_OFFSET);
+        pass.dispatch_workgroups_indirect(&self.b_indirect_dispatch, CELLS_INDIRECT_OFFSET);
     }
 
     pub(crate) fn encode_health(&self, encoder: &mut wgpu::CommandEncoder, phase: usize) {
@@ -746,6 +762,7 @@ impl CompressibleExplicitControl {
         );
         run(&self.finalize_pipeline, 1, 1);
 
+        encoder.copy_buffer_to_buffer(&self.b_indirect_args, 0, &self.b_indirect_dispatch, 0, 9 * 4);
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("compressible_explicit_control:rollback"),
             timestamp_writes: None,
@@ -753,7 +770,7 @@ impl CompressibleExplicitControl {
         pass.set_pipeline(&self.rollback_pipeline);
         pass.set_bind_group(0, &self.control_bg, &[]);
         pass.set_bind_group(1, bg, &[]);
-        pass.dispatch_workgroups_indirect(&self.b_indirect_args, ROLLBACK_INDIRECT_OFFSET);
+        pass.dispatch_workgroups_indirect(&self.b_indirect_dispatch, ROLLBACK_INDIRECT_OFFSET);
     }
 
     pub(crate) fn status_buffer(&self) -> &wgpu::Buffer {
@@ -1658,8 +1675,8 @@ mod tests {
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("compressible controller test layout"),
-            bind_group_layouts: &[&control_bgl, &phase_bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&control_bgl), Some(&phase_bgl)],
+            immediate_size: 0,
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("compressible controller test shader"),
@@ -1702,8 +1719,8 @@ mod tests {
         });
         let frame_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("compressible controller frame test layout"),
-            bind_group_layouts: &[&frame_bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&frame_bgl)],
+            immediate_size: 0,
         });
         let frame_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("compressible controller frame test shader"),

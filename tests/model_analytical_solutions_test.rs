@@ -173,6 +173,7 @@ where
                 panic!("coefficient mag_sqr not supported: {}", field.name())
             }
             Coefficient::Product(lhs, rhs) => eval_coeff_scalar(lhs) * eval_coeff_scalar(rhs),
+            Coefficient::Sum(lhs, rhs) => eval_coeff_scalar(lhs) + eval_coeff_scalar(rhs),
         }
     }
 

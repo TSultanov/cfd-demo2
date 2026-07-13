@@ -124,8 +124,8 @@ impl GpuCsr {
         let mk = |bgl: &wgpu::BindGroupLayout, src: String, entry: &str, label: &str| {
             let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some(label),
-                bind_group_layouts: &[bgl],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(bgl)],
+                immediate_size: 0,
             });
             let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some(label),

@@ -703,8 +703,8 @@ fn make_pipelines(ctx: &GpuContext, buffers: &Buffers) -> Pipelines {
         .device
         .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("face-once pipeline layout"),
-            bind_group_layouts: &[&bind_layout],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bind_layout)],
+            immediate_size: 0,
         });
     let module = ctx
         .device

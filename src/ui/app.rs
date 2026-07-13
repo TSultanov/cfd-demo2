@@ -2043,6 +2043,8 @@ pub struct CFDApp {
     /// steps may land between frames; only the latest matters, so this is a
     /// coalescing flag consumed once per frame at the render-frame boundary.
     pending_mesh_upload: bool,
+    /// CFD2_AUTOSTART: start the run as soon as the pending init completes.
+    autostart_run_pending: bool,
 }
 
 struct CfdRenderCallback {
@@ -2228,10 +2230,46 @@ impl CFDApp {
                 sequence: 0,
             },
             pending_mesh_upload: false,
+            autostart_run_pending: false,
         };
         app.apply_model_defaults();
         app.refresh_model_caps();
         app.sync_worker_params();
+        // Headed perf harness: CFD2_AUTOSTART=structured-rk4|unstructured-rk4
+        // configures the GUI obstacle case (matched ~4.8k cells), initializes,
+        // and starts running as soon as the solver is ready — so a scripted
+        // headed run can A/B the two explicit compressible GPU paths under
+        // the real renderer. Pair with CFD2_PERF_LOG=1 for stderr stats.
+        if let Ok(autostart) = std::env::var("CFD2_AUTOSTART") {
+            app.selected_geometry = GeometryType::ChannelObstacle;
+            app.min_cell_size = 0.025;
+            app.max_cell_size = 0.025;
+            match autostart.as_str() {
+                "structured-rk4" => {
+                    app.mesh_mode = MeshMode::Structured2D;
+                    app.model_id = "compressible_structured";
+                }
+                "unstructured-rk4" => {
+                    app.mesh_mode = MeshMode::Unstructured;
+                    app.mesh_type = MeshType::CutCell;
+                    app.model_id = "compressible";
+                }
+                other => panic!("unknown CFD2_AUTOSTART '{other}'"),
+            }
+            app.apply_model_defaults();
+            app.time_scheme = GpuTimeScheme::RK4;
+            app.adaptive_dt = true;
+            app.dual_time = false;
+            if app.mesh_mode == MeshMode::Structured2D {
+                app.backend = app.structured_backend_default();
+            } else {
+                app.backend = BackendChoice::Gpu;
+            }
+            app.refresh_model_caps();
+            app.sync_worker_params();
+            app.init_solver();
+            app.autostart_run_pending = true;
+        }
         app
     }
 
@@ -3243,6 +3281,16 @@ impl CFDApp {
         while let Ok(evt) = self.solver_worker.rx.try_recv() {
             match evt {
                 SolverWorkerEvent::Stats { stats } => {
+                    if std::env::var_os("CFD2_PERF_LOG").is_some() {
+                        eprintln!(
+                            "[perf] t={:.4e} dt={:.3e} step={:.3} ms ({:.0} steps/s, {:.3e} sim s/s)",
+                            stats.sim_time,
+                            stats.dt,
+                            stats.step_time_ms,
+                            stats.steps_per_second,
+                            stats.sim_seconds_per_wall_second
+                        );
+                    }
                     self.cached_gpu_stats = stats;
                     self.cached_error = None;
                 }
@@ -4382,12 +4430,12 @@ impl CFDApp {
     /// Render the right panel showing mesh stats and color legend.
     fn render_right_panel(
         &self,
-        ctx: &egui::Context,
+        root_ui: &mut egui::Ui,
         has_solver: bool,
         min_val: f32,
         max_val: f32,
     ) {
-        egui::SidePanel::right("legend").show(ctx, |ui| {
+        egui::Panel::right("legend").show(root_ui, |ui| {
             if let Some(mesh) = &self.mesh {
                 ui.heading("Mesh Stats");
                 // A moving (ALE) run regenerates the mesh every step — and
@@ -4459,8 +4507,8 @@ impl CFDApp {
     }
 
     /// Render the bottom panel with plot field selection and render mode.
-    fn render_bottom_panel(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("plot_controls").show(ctx, |ui| {
+    fn render_bottom_panel(&mut self, root_ui: &mut egui::Ui) {
+        egui::Panel::bottom("plot_controls").show(root_ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Plot Field:");
                 let old_field = self.plot_field;
@@ -4491,13 +4539,14 @@ impl CFDApp {
     /// Render the central panel with the CFD visualization.
     fn render_central_panel(
         &self,
-        ctx: &egui::Context,
+        root_ui: &mut egui::Ui,
         is_initializing: bool,
         has_solver: bool,
         min_val: f32,
         max_val: f32,
     ) {
-        egui::CentralPanel::default().show(ctx, |ui| {
+        let ctx = &root_ui.ctx().clone();
+        egui::CentralPanel::default().show(root_ui, |ui| {
             if self.is_running {
                 // GPU solver runs in background thread
             }
@@ -4665,15 +4714,22 @@ impl CFDApp {
 }
 
 impl eframe::App for CFDApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, root_ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = &root_ui.ctx().clone();
         self.poll_init();
         self.spawn_pending_init();
         self.poll_solver_worker();
         let init_in_progress = self.init_rx.is_some();
         let init_pending = self.pending_init_request.is_some();
         let is_initializing = init_in_progress || init_pending;
+        // Headed perf harness (CFD2_AUTOSTART): press Run once init completes.
+        if self.autostart_run_pending && !is_initializing {
+            self.autostart_run_pending = false;
+            self.is_running = true;
+            self.set_worker_running(true);
+        }
 
-        egui::SidePanel::left("controls").show(ctx, |ui| {
+        egui::Panel::left("controls").show(root_ui, |ui| {
             egui::ScrollArea::vertical()
                 .auto_shrink([false; 2])
                 .show(ui, |ui| {
@@ -6012,7 +6068,7 @@ impl eframe::App for CFDApp {
                                     && !self.solver_is_moving;
                                 let rk4 = ui.add_enabled(
                                     rk4_enabled,
-                                    egui::SelectableLabel::new(
+                                    egui::Button::selectable(
                                         self.time_scheme == GpuTimeScheme::RK4,
                                         "RK4 (Explicit, adaptive CFL)",
                                     ),
@@ -6058,7 +6114,7 @@ impl eframe::App for CFDApp {
                                         !moving_active || CFDApp::ale_model_for(id).is_some();
                                     let entry = ui.add_enabled(
                                         selectable,
-                                        egui::SelectableLabel::new(self.model_id == id, label),
+                                        egui::Button::selectable(self.model_id == id, label),
                                     );
                                     if entry.clicked() && selectable {
                                         self.model_id = id;
@@ -6092,7 +6148,7 @@ impl eframe::App for CFDApp {
                                 // affects the unstructured solve; on structured it is
                                 // the same transpiled kernels + shared banded solve.)
                                 for choice in BackendChoice::ALL {
-                                    let entry = ui.add(egui::SelectableLabel::new(
+                                    let entry = ui.add(egui::Button::selectable(
                                             self.backend == choice,
                                             choice.label(),
                                     ));
@@ -6375,9 +6431,9 @@ impl eframe::App for CFDApp {
                 .unwrap_or((0.0, 1.0)),
         };
 
-        self.render_right_panel(ctx, has_solver, min_val, max_val);
-        self.render_bottom_panel(ctx);
-        self.render_central_panel(ctx, is_initializing, has_solver, min_val, max_val);
+        self.render_right_panel(root_ui, has_solver, min_val, max_val);
+        self.render_bottom_panel(root_ui);
+        self.render_central_panel(root_ui, is_initializing, has_solver, min_val, max_val);
 
         // Schedule after controls and Direct activation have run. In
         // particular, a paused Plot -> Direct transition and the first Run
@@ -11051,6 +11107,10 @@ fn solver_worker_main(
     // Keep a replaced solver (and therefore its wgpu Device) alive until all
     // callbacks from its invalidated generation have released their credits.
     let mut retired_autonomous_modes: Vec<SolverMode> = Vec::new();
+    // CFD2_PERF_LOG=1: stderr telemetry for the headed perf harness — per-batch
+    // submit->completion latency, batch-level stats, and >2ms submit/poll
+    // stalls (the vsync lock-convoy signature).
+    let perf_log = std::env::var_os("CFD2_PERF_LOG").is_some();
 
     loop {
         while let Ok(cmd) = cmd_rx.try_recv() {
@@ -11125,6 +11185,7 @@ fn solver_worker_main(
         let autonomous_eligible = autonomous_policy.is_some();
 
         if autonomous_scheduler.is_active() {
+            let perf_poll_start = std::time::Instant::now();
             let mut current_pollable = false;
             let current_poll = match mode.as_ref() {
                 Some(SolverMode::Structured(s)) => {
@@ -11140,6 +11201,10 @@ fn solver_worker_main(
                 }
                 _ => Ok(()),
             };
+            let perf_poll_ms = perf_poll_start.elapsed().as_secs_f64() * 1.0e3;
+            if perf_log && perf_poll_ms > 2.0 {
+                eprintln!("[stall] device.poll took {perf_poll_ms:.3} ms");
+            }
             let current_poll_error = current_poll.err();
             let mut retired_poll_succeeded = false;
             let mut retired_poll_error = None;
@@ -11292,6 +11357,17 @@ fn solver_worker_main(
                     completed.completed_at,
                 );
                 step_idx = step_idx.wrapping_add(u64::from(completed.accepted_steps));
+                if perf_log {
+                    eprintln!(
+                        "[batch] steps={} submit->done={:.3} ms",
+                        completed.accepted_steps,
+                        completed
+                            .completed_at
+                            .duration_since(completed.ticket.submitted_at)
+                            .as_secs_f64()
+                            * 1.0e3,
+                    );
+                }
 
                 if !completed.is_healthy() {
                     autonomous_error.get_or_insert_with(|| {
@@ -11401,6 +11477,7 @@ fn solver_worker_main(
         if running && autonomous_eligible {
             while let Some(ticket) = autonomous_scheduler.reserve(std::time::Instant::now()) {
                 let tx = autonomous_completion_tx.clone();
+                let perf_submit_start = std::time::Instant::now();
                 let submitted = match mode.as_mut() {
                     Some(SolverMode::Structured(s)) => s.submit_autonomous_batch(
                         ticket.requested_steps as usize,
@@ -11427,6 +11504,10 @@ fn solver_worker_main(
                         .map(|submission| Some(submission.submission_index)),
                     _ => Err("autonomous structured solver disappeared".to_string()),
                 };
+                let perf_submit_ms = perf_submit_start.elapsed().as_secs_f64() * 1.0e3;
+                if perf_log && perf_submit_ms > 2.0 {
+                    eprintln!("[stall] submit took {perf_submit_ms:.3} ms");
+                }
                 match submitted {
                     Ok(Some(_)) => {}
                     Ok(None) => {

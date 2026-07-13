@@ -173,8 +173,8 @@ impl LloydResources {
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("voronoi:lloyd_pl"),
-            bind_group_layouts: &[&bgl],
-            push_constant_ranges: &[],
+            bind_group_layouts: &[Some(&bgl)],
+            immediate_size: 0,
         });
         let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("voronoi:lloyd_shader"),

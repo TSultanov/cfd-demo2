@@ -526,3 +526,39 @@ Findings:
   submissions are still unreclaimed (no polling during encode). The GUI's
   3 ms batch-time controller keeps batches far below the ceiling; headless
   drivers must chunk batches and poll between submissions.
+- THIRD user-visible gap (2026-07-13, root-caused with a headed harness):
+  the "shared-GPU render/compositor tax" above was NOT a diffuse tax — it was
+  vsync. With AutoVsync presentation the eframe render thread blocks inside
+  the surface acquire (Metal `nextDrawable`) waiting for the next display
+  refresh while holding a wgpu device lock, and every solver-worker
+  `queue.submit` convoys behind it (~8 ms measured per submit, one blocked
+  submit per in-flight batch per frame). Autonomous batch completions were
+  therefore quantized to the display refresh: exactly 2-in-flight x 60 Hz =
+  ~120 batch completions/s regardless of backend, with the 3 ms batch
+  controller stuck at 1-3 steps/batch (each 1-step batch "took" 16.6 ms).
+  Measured headed via CFD2_AUTOSTART={structured-rk4|unstructured-rk4} +
+  CFD2_PERF_LOG=1 (autostart harness in CFDApp::new): structured 120 steps/s,
+  unstructured 360 steps/s with vsync; ~2000 and ~1300-2500 steps/s without
+  (t reached in 25 s: 4.1x / 4.2x more). FIX: the app now presents
+  AutoNoVsync by default (src/main.rs) — rendering is already paced at
+  ~refresh rate by `request_repaint_after(16ms)`, so presentation cadence is
+  unchanged while the solver runs free; CFD2_VSYNC=1 restores synced
+  presentation. wgpu 27 -> 29 upgrade alone did NOT change the convoy.
+- wgpu 29 / egui 0.35 upgrade notes (2026-07-13): coordinated bumps
+  wgpu 27.0->29.0.4, naga 29, egui/eframe 0.33->0.35, egui_plot 0.36,
+  wgsl_bindgen 0.21.2->0.22.2 (wgpu 30 exists but egui-wgpu 0.35 pins ^29).
+  Breaking changes absorbed: PipelineLayoutDescriptor bind_group_layouts now
+  &[Option<&BindGroupLayout>] and push_constant_ranges -> immediate_size;
+  RenderPipeline/RenderPassDescriptor multiview -> multiview_mask;
+  InstanceDescriptor lost Default (new_without_display_handle_from_env);
+  BufferViewMut no longer derefs to [u8] (slice(..).copy_from_slice);
+  eframe App::update(ctx) -> App::ui(&mut egui::Ui) with egui::Panel
+  replacing SidePanel/TopBottomPanel and Button::selectable replacing
+  SelectableLabel. REAL behavior change: wgpu >=28 enforces the WebGPU
+  usage-scope rule that a dispatch's indirect-args buffer may not also be
+  bound as read-write storage in that dispatch — the explicit control
+  modules' history/rollback indirect dispatches bound the control group
+  (which holds indirect_args RW at binding 2). Fixed with a dedicated
+  INDIRECT|COPY_DST mirror buffer snapshotted by a 36-byte
+  copy_buffer_to_buffer just before each indirect pass
+  (explicit_control.rs + compressible_explicit_control.rs).

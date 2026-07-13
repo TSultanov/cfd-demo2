@@ -203,7 +203,12 @@ const COMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     low_mach_model: GpuLowMachPrecondModel::WeissSmith,
     low_mach_theta_floor: 1e-8,
     low_mach_pressure_coupling_alpha: 0.01,
-    inlet_velocity: 0.002,
+    // Same obstacle regime as the incompressible and pressure-based (all-Mach)
+    // demos: Re = U*D/nu ~ 150 with D = 0.2 (the 2D-laminar shedding band), so
+    // every model family runs the SAME physical default case. The previous
+    // 0.002 sat at Re ~ 27 — below the ~47 shedding threshold, so the default
+    // obstacle could never develop a street under this model at all.
+    inlet_velocity: 0.011,
     outlet_back_pressure: 0.0,
     allmach_precond_uref_min: 0.0, // density-based compressible: floor unused
     pressure_inlet: false,

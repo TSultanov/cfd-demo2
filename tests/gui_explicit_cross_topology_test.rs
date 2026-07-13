@@ -477,6 +477,6 @@ fn structured_obstacle_long_run_pressure_stays_acoustic() {
     );
     assert!(
         max_speed < 0.05,
-        "structured obstacle velocity runaway: max|u| = {max_speed:.4e} m/s at inlet 0.002"
+        "structured obstacle velocity runaway: max|u| = {max_speed:.4e} m/s at inlet 0.011"
     );
 }

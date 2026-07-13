@@ -43,6 +43,7 @@ const PERIOD: f64 = 80.0 * DT0 as f64;
 
 fn base_params(dt: f32, time_scheme: TimeScheme, psi: f32) -> RuntimeParams {
     RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: false,
         target_cfl: 0.9,
         requested_dt: dt,

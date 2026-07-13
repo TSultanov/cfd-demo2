@@ -67,6 +67,7 @@ fn channel_mesh() -> Mesh {
 /// the two runs being compared execute the identical step sequence.
 fn test_params() -> RuntimeParams {
     RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: false,
         target_cfl: 0.9,
         requested_dt: 0.005,

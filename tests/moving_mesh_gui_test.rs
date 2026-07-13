@@ -31,6 +31,7 @@ fn gpu_adapter_available() -> bool {
 /// the swept mesh fluxes are SCL-closed against a fixed dt).
 fn ale_params() -> RuntimeParams {
     RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: false,
         target_cfl: 0.9,
         requested_dt: 0.01,

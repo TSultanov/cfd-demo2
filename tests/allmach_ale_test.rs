@@ -103,6 +103,7 @@ fn tag_slip_channel(mesh: &mut Mesh) {
 
 fn test_params(time_scheme: TimeScheme, psi: f32) -> RuntimeParams {
     RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: false,
         target_cfl: 0.9,
         requested_dt: DT,

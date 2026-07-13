@@ -39,6 +39,7 @@ fn run_case(
     dt: f32,
 ) -> GuiExplicitRk4Smoke {
     gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+        filter_sigma: None,
         model_id,
         fluid: "Air",
         geometry,
@@ -443,6 +444,7 @@ fn structured_obstacle_long_run_pressure_stays_acoustic() {
         return;
     }
     let smoke = gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+        filter_sigma: None,
         model_id: "compressible_structured",
         fluid: "Air",
         geometry: "obstacle",
@@ -498,6 +500,7 @@ fn cross_topology_nozzle_compressible_pressure_inlet() {
     // c ~ 347); 1000 steps at 6e-6 give the through-flow 6 ms to establish.
     let nozzle_case = |model_id, mesh_kind| {
         gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+        filter_sigma: None,
             model_id,
             fluid: "Air",
             geometry: "nozzle",

@@ -5723,6 +5723,7 @@ mod tests {
             let accepted = plan.snapshot_full();
             let metrics = crate::sim::explicit_cell_metrics(&mesh);
             let params = crate::sim::RuntimeParams {
+            filter_sigma: 0.0,
                 adaptive_dt: true,
                 target_cfl: 0.9,
                 requested_dt: 1.0e-5,
@@ -5953,6 +5954,7 @@ mod tests {
             .expect("reconcile barotropic adaptive");
         let accepted = plan.snapshot_full();
         let params = crate::sim::RuntimeParams {
+            filter_sigma: 0.0,
             adaptive_dt: true,
             target_cfl: 0.9,
             requested_dt: 1.0e-5,
@@ -6464,6 +6466,7 @@ mod tests {
             },
         );
         let params = crate::sim::RuntimeParams {
+            filter_sigma: 0.0,
             adaptive_dt: true,
             target_cfl: 0.9,
             requested_dt: 0.02,

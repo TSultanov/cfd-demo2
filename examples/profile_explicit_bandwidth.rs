@@ -431,6 +431,7 @@ fn measure_unstructured(ctx: &GpuContext, options: Options) -> (Duration, f64, u
 
 fn allmach_params() -> RuntimeParams {
     RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: false,
         target_cfl: 0.9,
         requested_dt: 1.0e-7,

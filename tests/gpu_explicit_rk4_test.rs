@@ -59,6 +59,7 @@ fn explicit_config() -> SolverConfig {
 #[cfg(feature = "meshgen")]
 fn explicit_driver_params() -> RuntimeParams {
     RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: false,
         target_cfl: 0.5,
         requested_dt: 0.01,
@@ -169,6 +170,7 @@ fn gpu_driver_reused_packed_readback_matches_live_field_getters() {
         temperature: 300.0,
     };
     let params = RuntimeParams {
+        filter_sigma: 0.0,
         requested_dt: 1.0e-7,
         log_every_steps: 1,
         density: 1.225,

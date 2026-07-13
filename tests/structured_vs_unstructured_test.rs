@@ -393,6 +393,7 @@ fn base_params(case: &Case) -> RuntimeParams {
         Physics::Incompressible => (EosSpec::Constant, 0.0),
     };
     RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: false,
         target_cfl: 0.9,
         requested_dt: case.dt as f32,

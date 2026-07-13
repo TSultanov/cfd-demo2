@@ -41,6 +41,7 @@ fn air_eos() -> EosSpec {
 /// reconstructed as a `RuntimeParams` so this harness needs no `ui` feature.
 fn incompressible_default_params(outer_iters: u32) -> RuntimeParams {
     RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: true,
         target_cfl: 0.9,
         requested_dt: 0.02,

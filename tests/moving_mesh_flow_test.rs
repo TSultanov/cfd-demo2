@@ -30,6 +30,7 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 fn base_params(dt: f32, visc: f32, u0: f32, time_scheme: TimeScheme) -> RuntimeParams {
     RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: false,
         target_cfl: 0.9,
         requested_dt: dt,

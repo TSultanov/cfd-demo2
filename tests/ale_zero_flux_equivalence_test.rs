@@ -52,6 +52,7 @@ fn channel_mesh() -> Mesh {
 /// both models execute the identical step sequence.
 fn test_params_with(time_scheme: TimeScheme) -> RuntimeParams {
     RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: false,
         target_cfl: 0.9,
         requested_dt: 0.005,

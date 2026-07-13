@@ -9777,6 +9777,10 @@ pub struct GuiExplicitRk4Case<'a> {
     /// Optional gauge inlet-pressure slider override (pressure-inlet cases).
     /// `None` uses the model's real GUI default.
     pub inlet_pressure: Option<f32>,
+    /// Optional structured selective-filter strength override. `None` uses
+    /// the model's real GUI default (0.0 — the GUI seeds 0.2 only when the
+    /// Kep radio is clicked, which a headless case must mirror explicitly).
+    pub filter_sigma: Option<f32>,
 }
 
 /// Stability observations from the real GUI mesh/model/seed/BC/runtime path.
@@ -10284,6 +10288,14 @@ pub fn gui_explicit_rk4_smoke(
             ));
         }
         params.inlet_pressure = inlet_pressure;
+    }
+    if let Some(filter_sigma) = case.filter_sigma {
+        if !(filter_sigma.is_finite() && (0.0..=0.5).contains(&filter_sigma)) {
+            return Err(format!(
+                "GUI RK4 filter sigma override must be in [0, 0.5], got {filter_sigma}"
+            ));
+        }
+        params.filter_sigma = filter_sigma;
     }
 
     let model = if structured {

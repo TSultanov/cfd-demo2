@@ -18,6 +18,7 @@ fn run_with_inlet(
     inlet_velocity: Option<f32>,
 ) {
     let smoke = match gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+        filter_sigma: None,
         model_id,
         fluid: "Air",
         geometry: "obstacle",
@@ -123,6 +124,7 @@ fn run_nozzle_fine_dt(
     fixed_dt: Option<f32>,
 ) {
     let smoke = match gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+        filter_sigma: None,
         model_id,
         fluid: "Air",
         geometry: "nozzle",
@@ -192,6 +194,7 @@ fn run_nozzle_fine_dt(
 
 fn run_nozzle_backend(model_id: &str, mesh_kind: &str, steps: usize, backend: &str) {
     let smoke = match gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+        filter_sigma: None,
         model_id,
         fluid: "Air",
         geometry: "nozzle",
@@ -269,6 +272,7 @@ fn main() {
         //   CFD2_AUTOSTART="unstructured-rk4:cell=0.005,u=1000" CFD2_PERF_LOG=1
         for steps in [24usize] {
             let smoke = match gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+        filter_sigma: None,
                 model_id: "compressible",
                 fluid: "Air",
                 geometry: "obstacle",
@@ -313,6 +317,7 @@ fn main() {
         // Sample just before the step-3541 failure and locate the cell with
         // the minimum internal energy / density.
         let smoke = gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+        filter_sigma: None,
             model_id: "compressible",
             fluid: "Air",
             geometry: "obstacle",
@@ -356,6 +361,7 @@ fn main() {
         // shock). GUI halts with 1 invalid cell at t ~ 1e-3.
         for steps in [1000usize, 3000, 6000] {
             let smoke = match gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+        filter_sigma: None,
                 model_id: "compressible",
                 fluid: "Air",
                 geometry: "obstacle",
@@ -422,6 +428,7 @@ fn main() {
         // and report per-x-band velocity/pressure extrema.
         for steps in [200usize, 450, 650] {
             let smoke = gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+        filter_sigma: None,
                 model_id: "compressible",
                 fluid: "Air",
                 geometry: "nozzle",

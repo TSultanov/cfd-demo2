@@ -60,6 +60,7 @@ fn rigid_at(p: [f64; 2], amp: f64) -> [f64; 2] {
 
 fn test_params(time_scheme: TimeScheme) -> RuntimeParams {
     RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: false,
         target_cfl: 0.9,
         requested_dt: DT,

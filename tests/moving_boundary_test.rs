@@ -58,6 +58,7 @@ fn identity_motion(_t: f64, p: [f64; 2]) -> [f64; 2] {
 
 fn base_params(dt: f32) -> RuntimeParams {
     RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: false,
         target_cfl: 0.9,
         requested_dt: dt,

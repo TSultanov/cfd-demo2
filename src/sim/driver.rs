@@ -2504,6 +2504,7 @@ mod tests {
 
     fn density_transition_params() -> RuntimeParams {
         RuntimeParams {
+            filter_sigma: 0.0,
             adaptive_dt: true,
             target_cfl: 0.5,
             requested_dt: 1.0e-5,

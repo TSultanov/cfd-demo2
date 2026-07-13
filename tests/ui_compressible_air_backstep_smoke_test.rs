@@ -38,6 +38,7 @@ fn ui_compressible_air_backstep_smoke() {
     // `low_mach_model: Off` gives the full-sound-speed acoustic CFL update; the driver
     // applies the uniform-freestream IC internally.
     let params = RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: true,
         target_cfl: 0.95,
         requested_dt: 0.001,

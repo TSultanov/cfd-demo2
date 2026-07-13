@@ -36,6 +36,7 @@ fn case<'a>(
     steps: usize,
 ) -> GuiExplicitRk4Case<'a> {
     GuiExplicitRk4Case {
+        filter_sigma: None,
         model_id,
         fluid: "Air",
         geometry,

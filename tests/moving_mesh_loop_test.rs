@@ -38,6 +38,7 @@ fn channel() -> (RectangularChannel, Vector2<f64>) {
 
 fn test_params() -> RuntimeParams {
     RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: false,
         target_cfl: 0.9,
         requested_dt: DT,

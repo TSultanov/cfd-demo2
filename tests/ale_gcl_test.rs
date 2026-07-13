@@ -83,6 +83,7 @@ fn vertex_position(x0: f64, y0: f64, t: f64) -> (f64, f64) {
 
 fn test_params(time_scheme: TimeScheme) -> RuntimeParams {
     RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: false,
         target_cfl: 0.9,
         requested_dt: DT as f32,

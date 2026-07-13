@@ -306,6 +306,7 @@ fn run_structured(name: &str, allmach: bool, precond: CoupledPrecondKind) {
 
 fn gui_params(allmach: bool) -> RuntimeParams {
     RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: true,
         target_cfl: 0.9,
         requested_dt: 0.02,

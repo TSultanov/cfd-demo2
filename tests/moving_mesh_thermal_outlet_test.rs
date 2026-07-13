@@ -111,6 +111,7 @@ fn movingmesh_thermal_adapt_recycle_reorder_outlet_stable() {
     // The GUI ALLMACH thermal-obstacle params: BDF2, dt-seed 0.02, 8 outers
     // auto-converge, real Air (psi = 1/c² ≈ 8.3e-6), the reported inlet 0.011.
     let params = RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: false, // driver flow-CFL adaptive dt is wired below instead
         target_cfl: 0.9,
         requested_dt: 0.02,

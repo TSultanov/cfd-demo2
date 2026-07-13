@@ -57,6 +57,7 @@ fn gpu_context() -> Option<GpuContext> {
 
 fn test_params() -> RuntimeParams {
     RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: false,
         target_cfl: 0.9,
         requested_dt: DT,

@@ -77,6 +77,7 @@ fn params_for(family: Family) -> RuntimeParams {
         // The validated incompressible moving-mesh recipe (the spike/hernia
         // configs): BDF2, VanLeer, 6 outers, Re ~ 150 on the D=0.2 obstacle.
         Family::Incompressible => RuntimeParams {
+        filter_sigma: 0.0,
             adaptive_dt: false,
             target_cfl: 0.9,
             requested_dt: 0.01,
@@ -109,6 +110,7 @@ fn params_for(family: Family) -> RuntimeParams {
         // incompressible defaults (BDF2, dt 1e-2) are NOT stable for the
         // all-Mach family on a coarse obstacle mesh.
         Family::AllMach => RuntimeParams {
+        filter_sigma: 0.0,
             adaptive_dt: false,
             target_cfl: 0.9,
             requested_dt: 0.005,

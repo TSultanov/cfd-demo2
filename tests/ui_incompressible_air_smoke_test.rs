@@ -33,6 +33,7 @@ fn ui_incompressible_air_smoke_does_not_blow_up_immediately() {
 
     // GUI-like incompressible (coupled SIMPLE) runtime knobs for Air, as primitives.
     let params = RuntimeParams {
+        filter_sigma: 0.0,
         adaptive_dt: false,
         target_cfl: 0.9,
         requested_dt: 0.001,

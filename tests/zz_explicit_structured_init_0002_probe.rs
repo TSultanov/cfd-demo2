@@ -24,6 +24,7 @@ fn run_presented(
     presentation: &str,
 ) {
     let case = GuiExplicitRk4Case {
+        filter_sigma: None,
         model_id,
         fluid: "Air",
         geometry: "obstacle",
@@ -99,6 +100,7 @@ fn probe_direct_matches_plot_above_split_threshold() {
     for model_id in ["allmach_thermal_structured", "compressible_structured"] {
         let smoke = |presentation| {
             gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+        filter_sigma: None,
                 model_id,
                 fluid: "Air",
                 geometry: "obstacle",

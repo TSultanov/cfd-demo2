@@ -47,6 +47,7 @@ mod probe {
 
     fn gui_params() -> RuntimeParams {
         RuntimeParams {
+        filter_sigma: 0.0,
             adaptive_dt: false,
             target_cfl: 0.9,
             requested_dt: 0.02,

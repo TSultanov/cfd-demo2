@@ -952,10 +952,14 @@ impl CfdRenderResources {
         }
         self.update_bind_group(device, field_buffer, range_buffer);
         self.field_sequence = sequence;
-        // Never retain legend text from the field buffer that was just
-        // replaced. The new sequence becomes visible only after its exact tiny
-        // readback arrives.
-        self.legend_ranges = None;
+        // Deliberately KEEP the previous frame's legend metadata: its exact
+        // readback for this sequence arrives asynchronously a frame or so
+        // later, and while frames stream continuously that gap covers most
+        // paints. A <=1-frame-stale number is indistinguishable to the reader;
+        // clearing here made the legend flash its 0..1 placeholder on nearly
+        // every other paint. (Drawn COLORS never consult this CPU value — the
+        // shader normalizes from the GPU-resident `field_ranges` buffer that
+        // is always sequence-consistent with the bound field.)
         true
     }
 
@@ -969,9 +973,11 @@ impl CfdRenderResources {
         true
     }
 
+    /// Freshest measured range for the legend text. May lag the displayed
+    /// field by a frame while its readback is in flight; the 0..1 placeholder
+    /// appears only before the first readback of a run (or after a reset).
     pub fn legend_range(&self, field: CfdRangeField) -> [f32; 2] {
         self.legend_ranges
-            .filter(|ranges| ranges.sequence() == self.field_sequence)
             .map_or([0.0, 1.0], |ranges| ranges.range(field))
     }
 
@@ -1243,6 +1249,58 @@ mod tests {
         assert_eq!(ranges.range(CfdRangeField::VelocityX), [-5.0, 3.0]);
         assert_eq!(ranges.range(CfdRangeField::VelocityY), [1.0, 12.0]);
         assert_eq!(ranges.range(CfdRangeField::VelocityMagnitude), [5.0, 13.0]);
+    }
+
+    #[test]
+    fn legend_holds_previous_range_until_the_new_readback_lands() {
+        let instance =
+            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
+        let Ok(adapter) =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+        else {
+            eprintln!("skipping legend hold test: no adapter");
+            return;
+        };
+        let Ok((device, _queue)) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
+        else {
+            eprintln!("skipping legend hold test: no device");
+            return;
+        };
+        let buffer = |label: &str| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size: 256,
+                usage: wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            })
+        };
+        let field_buffer = buffer("legend hold field");
+        let range_buffer = buffer("legend hold range");
+
+        let mut renderer =
+            CfdRenderResources::new(&device, wgpu::TextureFormat::Rgba8Unorm, 3, NO_HEADROOM);
+
+        // Before any readback the placeholder is all the legend can show.
+        assert_eq!(renderer.legend_range(CfdRangeField::Pressure), [0.0, 1.0]);
+
+        assert!(renderer.update_field_snapshot(&device, &field_buffer, &range_buffer, 1));
+        assert!(renderer.update_legend_ranges(tagged_ranges(1, 2.0, 3.0)));
+        assert_eq!(renderer.legend_range(CfdRangeField::Pressure), [2.0, 3.0]);
+
+        // Binding the next streamed frame must NOT flash the 0..1 placeholder
+        // while frame 2's readback is still in flight: the previous measured
+        // range holds.
+        assert!(renderer.update_field_snapshot(&device, &field_buffer, &range_buffer, 2));
+        assert_eq!(renderer.legend_range(CfdRangeField::Pressure), [2.0, 3.0]);
+
+        // A readback for a frame other than the displayed one is rejected...
+        assert!(!renderer.update_legend_ranges(tagged_ranges(1, 7.0, 8.0)));
+        assert_eq!(renderer.legend_range(CfdRangeField::Pressure), [2.0, 3.0]);
+
+        // ...and the exact readback replaces the held text.
+        assert!(renderer.update_legend_ranges(tagged_ranges(2, 4.0, 5.0)));
+        assert_eq!(renderer.legend_range(CfdRangeField::Pressure), [4.0, 5.0]);
     }
 
     #[test]

@@ -7,7 +7,7 @@ use crate::solver::mesh::{
     generate_cut_cell_mesh, generate_cvt_mesh, generate_delaunay_mesh,
     generate_structured_rect_mesh, generate_structured_symmetric_nozzle_mesh,
     generate_voronoi_mesh, BackwardsStep, BoundarySides, BoundaryType, ChannelWithObstacle,
-    LloydConfig, Mesh, Nozzle,
+    Geometry, LloydConfig, Mesh, Nozzle,
 };
 use crate::solver::model::{
     allmach_pressure_ale_model, allmach_pressure_model, allmach_thermal_ale_model,
@@ -2774,18 +2774,8 @@ impl CFDApp {
 
         let mesh = match selected_geometry {
             GeometryType::BackwardsStep => {
-                let length = 3.5;
-                let height_outlet = 1.0;
-                let height_inlet = 0.5;
-                let step_x = 0.5;
-
-                let domain_size = Vector2::new(length, height_outlet);
-                let geo = BackwardsStep {
-                    length,
-                    height_inlet,
-                    height_outlet,
-                    step_x,
-                };
+                let geo = gui_backstep_geometry();
+                let domain_size = Vector2::new(geo.length, geo.height_outlet);
 
                 let gen_start = std::time::Instant::now();
                 // `Fitted` is a nozzle-only option; it never reaches this geometry
@@ -2851,14 +2841,8 @@ impl CFDApp {
                 mesh
             }
             GeometryType::ChannelObstacle => {
-                let length = 3.0;
-                let domain_size = Vector2::new(length, 1.0);
-                let geo = ChannelWithObstacle {
-                    length,
-                    height: 1.0,
-                    obstacle_center: Point2::new(1.0, 0.51), // Offset to trigger vortex shedding
-                    obstacle_radius: 0.1,
-                };
+                let geo = gui_channel_obstacle_geometry();
+                let domain_size = Vector2::new(geo.length, geo.height);
 
                 let gen_start = std::time::Instant::now();
                 // `Fitted` is a nozzle-only option; it never reaches this geometry
@@ -2935,11 +2919,12 @@ impl CFDApp {
                 // the body-fitted structured grid (the validated default); the
                 // unstructured mesh types conform to the same wall profile via the
                 // `Nozzle` SDF geometry and honour the full sizing controls.
-                let length = 3.0;
-                let height = 1.0;
-                let throat_h = 0.40;
-                let throat_frac = 0.40;
-                let exit_h = 0.80;
+                let shared_geo = gui_nozzle_geometry();
+                let length = shared_geo.length;
+                let height = shared_geo.height;
+                let throat_h = shared_geo.throat_height;
+                let throat_frac = shared_geo.throat_frac;
+                let exit_h = shared_geo.exit_height;
 
                 match mesh_type {
                     MeshType::Fitted => {
@@ -2994,13 +2979,7 @@ impl CFDApp {
                         // box is the inlet-height rectangle; the mesher tags the left
                         // edge Inlet, the right edge Outlet, and the flat bottom Wall.
                         let domain_size = Vector2::new(length, height);
-                        let geo = Nozzle {
-                            length,
-                            height,
-                            throat_height: throat_h,
-                            throat_frac,
-                            exit_height: exit_h,
-                        };
+                        let geo = shared_geo;
 
                         let gen_start = std::time::Instant::now();
                         let mut mesh = match mesh_type {
@@ -3442,9 +3421,9 @@ impl CFDApp {
         // In structured mode the immersed obstacle is a Brinkman mask, not a cut
         // cell, so cache which cells fall inside the selected geometry's solid so
         // the renderer can draw the obstacle as an overlay (the mesh is a full
-        // rectangle). Domain is the 3×1 channel `build_structured_init` uses.
+        // rectangle). The mask uses the same ground-truth geometry objects as
+        // the unstructured meshers.
         self.structured_solid_mask = if self.mesh_mode == MeshMode::Structured2D {
-            let (lx, ly) = (3.0_f64, 1.0_f64);
             let geom = self.selected_geometry;
             self.cached_cells
                 .iter()
@@ -3453,7 +3432,7 @@ impl CFDApp {
                     let (cx, cy) = poly
                         .iter()
                         .fold((0.0, 0.0), |(ax, ay), p| (ax + p[0], ay + p[1]));
-                    structured_geometry_is_solid(geom, cx / n, cy / n, lx, ly)
+                    structured_geometry_is_solid(geom, cx / n, cy / n)
                 })
                 .collect()
         } else {
@@ -3820,12 +3799,13 @@ impl CFDApp {
 
         // Every structured flow model runs a CHANNEL (inlet left, outlet right,
         // no-slip walls) whose immersed obstacle — a Brinkman `ibm_penalty_U`
-        // mask, never a cut cell — is the structured analogue of the unstructured
-        // geometry. This includes the density-based compressible model, which
-        // drives the channel with a uniform-freestream momentum IC + conserved-
-        // Dirichlet inlet (its bc_expr closure keeps the dependent entries
-        // thermodynamically consistent).
-        let (lx, ly) = (3.0_f64, 1.0_f64);
+        // mask, never a cut cell — rasterizes the SAME ground-truth geometry the
+        // unstructured meshers cut (identical domain and shape). This includes
+        // the density-based compressible model, which drives the channel with a
+        // uniform-freestream momentum IC + conserved-Dirichlet inlet (its
+        // bc_expr closure keeps the dependent entries thermodynamically
+        // consistent).
+        let (lx, ly) = gui_geometry_domain(request.selected_geometry);
         // Resolution tracks the user's max-cell-size slider with no artificial
         // DOF cap (the old clamp(…, 192)×clamp(…, 96) floor at 18 432 cells was a
         // GUI convenience limit, not a solver bound). Only reject non-positive /
@@ -3909,7 +3889,7 @@ impl CFDApp {
                 ly / ny as f64,
             );
             seed_structured_freestream(&mut cpu, request.model_id, u_in, &request.params);
-            seed_structured_ibm(&mut cpu, request.selected_geometry, lx, ly);
+            seed_structured_ibm(&mut cpu, request.selected_geometry);
             setup_structured_bcs(&mut cpu, request.model_id, u_in, s, &request.params);
             let ports = UiPortSet::from_layout(cpu.state_layout());
             let cached_u = ports
@@ -3962,7 +3942,7 @@ impl CFDApp {
             seed_structured_freestream(&mut solver, request.model_id, u_in, &request.params);
             // Immersed obstacle from the selected geometry (Brinkman mask; all three
             // structured models now declare an `ibm_penalty_U` field).
-            seed_structured_ibm(&mut solver, request.selected_geometry, lx, ly);
+            seed_structured_ibm(&mut solver, request.selected_geometry);
             setup_structured_bcs(&mut solver, request.model_id, u_in, s, &request.params);
             let ports = UiPortSet::from_layout(solver.state_layout());
             let cached_u = ports
@@ -7654,23 +7634,78 @@ fn seed_structured_state(
 /// Is `(x, y)` inside the SOLID of the structured geometry (for the Brinkman mask)?
 /// `ChannelObstacle` = a cylinder; `BackwardsStep` = a solid block at the inlet
 /// floor; `Nozzle` = the region outside a converging–diverging profile.
-fn structured_geometry_is_solid(geom: GeometryType, x: f64, y: f64, lx: f64, ly: f64) -> bool {
+/// The unstructured GUI geometries are the GROUND TRUTH for every mesh mode.
+/// These shared constructors keep `build_mesh_with` (SDF meshing), the fitted
+/// nozzle grid, and the structured Brinkman mask in exact agreement.
+fn gui_channel_obstacle_geometry() -> ChannelWithObstacle {
+    ChannelWithObstacle {
+        length: 3.0,
+        height: 1.0,
+        obstacle_center: Point2::new(1.0, 0.51), // Offset to trigger vortex shedding
+        obstacle_radius: 0.1,
+    }
+}
+
+fn gui_backstep_geometry() -> BackwardsStep {
+    BackwardsStep {
+        length: 3.5,
+        height_inlet: 0.5,
+        height_outlet: 1.0,
+        step_x: 0.5,
+    }
+}
+
+/// Converging–diverging nozzle, area ratio exit/throat = 2, matching the
+/// validated `allmach_thermal_supersonic_test`.
+fn gui_nozzle_geometry() -> Nozzle {
+    Nozzle {
+        length: 3.0,
+        height: 1.0,
+        throat_height: 0.40,
+        throat_frac: 0.40,
+        exit_height: 0.80,
+    }
+}
+
+/// Bounding-box domain of the selected geometry — identical for the
+/// unstructured meshers and the structured (dense-Cartesian) grid.
+fn gui_geometry_domain(geom: GeometryType) -> (f64, f64) {
     match geom {
-        GeometryType::ChannelObstacle => {
-            let (cx, cy, r) = (lx / 3.0, ly * 0.51, ly * 0.1);
-            (x - cx).hypot(y - cy) < r
-        }
         GeometryType::BackwardsStep => {
-            // Step: the inlet occupies the top; a solid block fills the bottom half
-            // upstream of x = lx/3 (the expansion behind the step).
-            x < lx / 3.0 && y < ly * 0.5
+            let geo = gui_backstep_geometry();
+            (geo.length, geo.height_outlet)
+        }
+        GeometryType::ChannelObstacle => {
+            let geo = gui_channel_obstacle_geometry();
+            (geo.length, geo.height)
         }
         GeometryType::Nozzle => {
-            // Converging–diverging: half-width narrows to a throat at x = lx/2,
-            // widening toward the ends. Solid outside the profile.
-            let xc = (x - lx * 0.5) / (lx * 0.5); // -1..1
-            let half = ly * (0.18 + 0.30 * xc * xc); // throat 0.18, ends 0.48
-            (y - ly * 0.5).abs() > half
+            let geo = gui_nozzle_geometry();
+            (geo.length, geo.height)
+        }
+    }
+}
+
+fn structured_geometry_is_solid(geom: GeometryType, x: f64, y: f64) -> bool {
+    let point = Point2::new(x, y);
+    match geom {
+        GeometryType::ChannelObstacle => !gui_channel_obstacle_geometry().is_inside(&point),
+        GeometryType::BackwardsStep => !gui_backstep_geometry().is_inside(&point),
+        GeometryType::Nozzle => {
+            // The GUI-default (validated) nozzle mesh is the FITTED symmetric
+            // bell, so the mask rasterizes that profile: fluid occupies
+            // `|y - height/2| <= nozzle_height(x)/2` (the SDF mesh variants'
+            // flat-bottom profile is a non-default alternative).
+            let geo = gui_nozzle_geometry();
+            let xi = (x / geo.length).clamp(0.0, 1.0);
+            let h = crate::solver::mesh::structured::nozzle_height(
+                xi,
+                geo.height,
+                geo.throat_height,
+                geo.throat_frac,
+                geo.exit_height,
+            );
+            (y - 0.5 * geo.height).abs() > 0.5 * h
         }
     }
 }
@@ -7679,12 +7714,12 @@ fn structured_geometry_is_solid(geom: GeometryType, x: f64, y: f64, lx: f64, ly:
 /// `ibm_penalty_U` (large negative inside the solid; a `source_coeff(Sp,U)` sink
 /// pins U→0 there, with an exact per-stage projection under all-Mach RK4).
 /// No-op for models without the field.
-fn seed_structured_ibm(s: &mut impl StructuredSeed, geom: GeometryType, lx: f64, ly: f64) {
+fn seed_structured_ibm(s: &mut impl StructuredSeed, geom: GeometryType) {
     let Some(off) = s.sc_field_offset("ibm_penalty_U") else {
         return;
     };
     s.sc_set_component(off, move |x, y| {
-        if structured_geometry_is_solid(geom, x, y, lx, ly) {
+        if structured_geometry_is_solid(geom, x, y) {
             -STRUCTURED_IBM_PENALTY_RATE
         } else {
             0.0
@@ -9594,6 +9629,21 @@ pub struct GuiExplicitRk4Smoke {
     pub min_total_energy_density: Option<f64>,
     pub min_internal_energy_density: Option<f64>,
     pub packed_state: Vec<f32>,
+    /// Cell-center positions, index-aligned with the packed state rows
+    /// (structured: row-major `p = j*nx + i`; unstructured: mesh centroids).
+    pub cell_centers: Vec<(f64, f64)>,
+    /// Structured Brinkman-solid mask (all-`false` for unstructured meshes,
+    /// which have no cells inside the solid).
+    pub cell_solid: Vec<bool>,
+    /// Per-cell velocity (`u` primitive / `U` state vector), absolute.
+    pub velocity: Vec<(f32, f32)>,
+    /// Per-cell pressure AS STORED (gauge for the compressible family; both
+    /// topologies share the same gauge references, so values compare 1:1).
+    pub pressure: Vec<f32>,
+    /// Per-cell density as stored, when the model has a `rho` field.
+    pub density: Option<Vec<f32>>,
+    /// Per-cell temperature, when the model has a `T` field.
+    pub temperature: Option<Vec<f32>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -9939,6 +9989,56 @@ fn gui_matrix_state_diagnostic(
     )
 }
 
+/// Cell centers + Brinkman solid mask for a structured grid, index-aligned
+/// with the packed state rows (row-major `p = j*nx + i`).
+fn structured_cell_geometry(
+    grid: &StructuredGrid,
+    geometry: GeometryType,
+) -> (Vec<(f64, f64)>, Vec<bool>) {
+    let cells = grid.num_cells();
+    let mut centers = Vec::with_capacity(cells);
+    let mut solid = Vec::with_capacity(cells);
+    for p in 0..cells {
+        let (x, y) = grid.cell_center(p);
+        centers.push((x, y));
+        solid.push(structured_geometry_is_solid(geometry, x, y));
+    }
+    (centers, solid)
+}
+
+/// Split the packed state into per-cell physical samples for cross-topology
+/// comparison: velocity (`u` primitive, falling back to the `U` state vector),
+/// pressure, and — where present — density and temperature, all AS STORED.
+#[allow(clippy::type_complexity)]
+fn gui_matrix_cell_fields(
+    layout: &crate::solver::model::backend::state_layout::StateLayout,
+    state: &[f32],
+) -> Result<
+    (
+        Vec<(f32, f32)>,
+        Vec<f32>,
+        Option<Vec<f32>>,
+        Option<Vec<f32>>,
+    ),
+    String,
+> {
+    let stride = layout.stride() as usize;
+    let offset = |name: &str| layout.offset_for(name).map(|value| value as usize);
+    let velocity_offset = offset("u")
+        .or_else(|| offset("U"))
+        .ok_or("explicit GUI model exposes neither a 'u' nor a 'U' velocity field")?;
+    let pressure_offset =
+        offset("p").ok_or("explicit GUI model exposes no 'p' pressure field")?;
+    let rows = || state.chunks_exact(stride);
+    let velocity = rows()
+        .map(|row| (row[velocity_offset], row[velocity_offset + 1]))
+        .collect();
+    let pressure = rows().map(|row| row[pressure_offset]).collect();
+    let density = offset("rho").map(|rho| rows().map(|row| row[rho]).collect());
+    let temperature = offset("T").map(|t| rows().map(|row| row[t]).collect());
+    Ok((velocity, pressure, density, temperature))
+}
+
 /// Execute one bounded matrix row through the same GUI mesh/model/IC/BC/runtime
 /// helpers and the same ordinary/autonomous routing policy as the worker.
 #[doc(hidden)]
@@ -10026,8 +10126,9 @@ pub fn gui_explicit_rk4_smoke(
 
     let mut min_dt = f64::INFINITY;
     let mut max_dt = 0.0_f64;
-    let (route, cells, final_time, layout, packed_state) = if structured {
-        let (lx, ly) = (3.0_f64, 1.0_f64);
+    let (route, cells, final_time, layout, packed_state, cell_centers, cell_solid) = if structured
+    {
+        let (lx, ly) = gui_geometry_domain(geometry);
         let nx = ((lx / case.cell_size).round() as usize).max(1);
         let ny = ((ly / case.cell_size).round() as usize).max(1);
         let grid = StructuredGrid::new(nx, ny, lx, ly);
@@ -10064,7 +10165,7 @@ pub fn gui_explicit_rk4_smoke(
                 params.inlet_velocity as f64,
                 &params,
             );
-            seed_structured_ibm(&mut solver, geometry, lx, ly);
+            seed_structured_ibm(&mut solver, geometry);
             setup_structured_bcs(
                 &mut solver,
                 case.model_id,
@@ -10125,12 +10226,15 @@ pub fn gui_explicit_rk4_smoke(
             let final_time = solver.time();
             let layout = solver.state_layout().clone();
             let state = solver.packed_state_f32();
+            let (cell_centers, cell_solid) = structured_cell_geometry(&grid, geometry);
             (
                 if autonomous { "autonomous" } else { "ordinary" },
                 grid.num_cells(),
                 final_time,
                 layout,
                 state,
+                cell_centers,
+                cell_solid,
             )
         } else {
             let mut solver = StructuredModelSolver::with_config(
@@ -10171,7 +10275,7 @@ pub fn gui_explicit_rk4_smoke(
                 params.inlet_velocity as f64,
                 &params,
             );
-            seed_structured_ibm(&mut solver, geometry, lx, ly);
+            seed_structured_ibm(&mut solver, geometry);
             setup_structured_bcs(
                 &mut solver,
                 case.model_id,
@@ -10198,12 +10302,15 @@ pub fn gui_explicit_rk4_smoke(
                 min_dt = min_dt.min(outcome.dt as f64);
                 max_dt = max_dt.max(outcome.dt as f64);
             }
+            let (cell_centers, cell_solid) = structured_cell_geometry(&grid, geometry);
             (
                 "ordinary",
                 grid.num_cells(),
                 solver.time(),
                 solver.state_layout().clone(),
                 solver.packed_state_f32(),
+                cell_centers,
+                cell_solid,
             )
         }
     } else {
@@ -10337,12 +10444,20 @@ pub fn gui_explicit_rk4_smoke(
         let final_time = build.driver.solver().time() as f64;
         let layout = build.driver.solver().model().state_layout.clone();
         let state = pollster::block_on(build.driver.solver().read_state_f32());
+        let cell_centers = mesh
+            .cell_cx
+            .iter()
+            .zip(&mesh.cell_cy)
+            .map(|(&x, &y)| (x, y))
+            .collect();
         (
             if autonomous { "autonomous" } else { "ordinary" },
             cells,
             final_time,
             layout,
             state,
+            cell_centers,
+            vec![false; cells],
         )
     };
 
@@ -10376,6 +10491,8 @@ pub fn gui_explicit_rk4_smoke(
             [0.0; 3]
         },
     )?;
+    let (velocity, pressure, density, temperature) =
+        gui_matrix_cell_fields(&layout, &packed_state)?;
     Ok(GuiExplicitRk4Smoke {
         topology: if structured { "structured" } else { "unstructured" },
         model_id: case.model_id.to_string(),
@@ -10393,6 +10510,12 @@ pub fn gui_explicit_rk4_smoke(
         min_total_energy_density,
         min_internal_energy_density,
         packed_state,
+        cell_centers,
+        cell_solid,
+        velocity,
+        pressure,
+        density,
+        temperature,
     })
 }
 
@@ -10913,7 +11036,7 @@ fn structured_allmach_rk4_smoke_impl(
             params.inlet_velocity as f64,
             params,
         );
-        seed_structured_ibm(solver, geometry, lx, ly);
+        seed_structured_ibm(solver, geometry);
         setup_structured_bcs(
             solver,
             "allmach_thermal_structured",

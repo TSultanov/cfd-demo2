@@ -7822,7 +7822,9 @@ fn setup_structured_bcs(
         let rho0 = reference.stored_rho as f32;
         let momentum_x = reference.momentum_x as f32;
         let e0 = reference.stored_total_energy_density as f32;
+        let t0 = reference.temperature as f32;
         let u_in_f32 = u_in as f32;
+        let outlet_p = params.outlet_back_pressure;
         s.sc_set_boundaries(move |edge, _x, _y| {
             let d = |v: f32| StructBc { kind: 1, value: v };
             let n = || StructBc {
@@ -7838,6 +7840,15 @@ fn setup_structured_bcs(
             // acts as a wall and the flow never develops. Walls pin u to 0
             // (no-slip, matching the rho_u Dirichlet and the unstructured
             // declarations); outlet extrapolates everything.
+            // KIND CONTRACT: the ghost builder consumes `bc_value` only for
+            // kind-1 channels; kind 2 reinterprets it as a GRADIENT
+            // (`ghost = owner + value*d`), and the viscous residual adds
+            // `coeff*area*value` outright. The bc_expr closure REWRITES the
+            // dependent channels' VALUES every stage, so every closure-written
+            // channel a kernel consumes must be kind 1 — leaving one at kind 2
+            // feeds the closure's absolute value in as a gradient (the T
+            // channel then injects ~kappa*area*300 of heat per boundary face,
+            // a positive feedback that pressurizes the whole channel).
             let (btype, mut v): (u32, Vec<StructBc>) = match edge {
                 StructEdge::Left => (
                     1,
@@ -7849,10 +7860,31 @@ fn setup_structured_bcs(
                         d(u_in_f32),
                         d(0.0),
                         n(),
-                        n(),
+                        d(t0),
                     ],
                 ),
-                StructEdge::Right => (2, vec![n(); 8]),
+                // Outlet: the gauge back-pressure anchor lives in channel 6
+                // (read by the closure to rebuild ghost rho_e/T, exactly like
+                // the unstructured driver's Outlet `p` Dirichlet); all other
+                // channels are closure-extrapolated from the interior and
+                // consumed as kind-1 values. All-Neumann here leaves the
+                // subsonic channel without any absolute-pressure anchor: the
+                // density-following inlet momentum (`rho_u = rho_abs*u_in`)
+                // pumps mass in a positive feedback and the mean pressure
+                // grows without bound until the health check halts the run.
+                StructEdge::Right => (
+                    2,
+                    vec![
+                        d(0.0),
+                        d(0.0),
+                        d(0.0),
+                        d(e0),
+                        d(0.0),
+                        d(0.0),
+                        d(outlet_p),
+                        d(t0),
+                    ],
+                ),
                 // No-slip wall: momentum and velocity pinned to 0,
                 // rho/rho_e/p/T zero-gradient.
                 _ => (
@@ -9605,6 +9637,9 @@ pub struct GuiExplicitRk4Case<'a> {
     /// Optional exact advection radio selection. `None` uses the model's real
     /// GUI default.
     pub advection_scheme: Option<Scheme>,
+    /// Optional inlet-velocity slider override. `None` uses the model's real
+    /// GUI default.
+    pub inlet_velocity: Option<f32>,
 }
 
 /// Stability observations from the real GUI mesh/model/seed/BC/runtime path.
@@ -10110,6 +10145,14 @@ pub fn gui_explicit_rk4_smoke(
     }
     if let Some(advection_scheme) = case.advection_scheme {
         params.advection_scheme = advection_scheme;
+    }
+    if let Some(inlet_velocity) = case.inlet_velocity {
+        if !inlet_velocity.is_finite() {
+            return Err(format!(
+                "GUI RK4 inlet velocity override must be finite, got {inlet_velocity}"
+            ));
+        }
+        params.inlet_velocity = inlet_velocity;
     }
 
     let model = if structured {

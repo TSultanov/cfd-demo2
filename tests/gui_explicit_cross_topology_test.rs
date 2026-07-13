@@ -51,6 +51,7 @@ fn run_case(
         steps: STEPS,
         requested_dt: Some(dt),
         advection_scheme: None,
+        inlet_velocity: None,
     })
     .unwrap_or_else(|error| panic!("{geometry}/{model_id}: {error}"))
 }
@@ -370,7 +371,7 @@ fn cross_topology_obstacle_compressible() {
         "compressible",
         "compressible_structured",
         CHANNEL_DT,
-        &[("u_x", 0.45), ("u_y", 0.8), ("p", 0.45), ("rho", 0.45)],
+        &[("u_x", 0.15), ("u_y", 0.8), ("p", 0.15), ("rho", 0.15)],
     );
 }
 
@@ -382,7 +383,7 @@ fn cross_topology_backstep_compressible() {
         "compressible",
         "compressible_structured",
         CHANNEL_DT,
-        &[("u_x", 0.6), ("u_y", 0.6), ("p", 0.7), ("rho", 0.7)],
+        &[("u_x", 0.3), ("u_y", 0.6), ("p", 0.3), ("rho", 0.3)],
     );
 }
 
@@ -423,5 +424,59 @@ fn cross_topology_backstep_allmach_thermal_quiescent() {
         "allmach_thermal_structured",
         CHANNEL_DT,
         &[("u_x", 1.0e-6), ("u_y", 1.0e-6), ("p", 1.0e-4)],
+    );
+}
+
+/// Long-horizon stability of the structured GUI obstacle case: with the
+/// outlet gauge-pressure anchor and the kind-1 BC contract (see
+/// `setup_structured_bcs`), the fluid pressure stays at the ~1 Pa acoustic
+/// level indefinitely. The pre-fix code let the boundary closures feed
+/// absolute values into gradient-interpreted kind-2 channels (a spurious
+/// ~kappa*area*T heat source per boundary face) with no pressure anchor
+/// anywhere — the mean pressure then grew without bound (~3.2e3 Pa by step
+/// 6000, ~4e6 Pa by step 12000, health-check halt at t~0.25 s in the GUI).
+#[test]
+fn structured_obstacle_long_run_pressure_stays_acoustic() {
+    if let Err(error) = gui_explicit_rk4_gpu_available() {
+        eprintln!("skipping structured long-run gate: {error}");
+        return;
+    }
+    let smoke = gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+        model_id: "compressible_structured",
+        fluid: "Air",
+        geometry: "obstacle",
+        mesh_kind: "structured",
+        backend: "gpu",
+        adaptive: true,
+        presentation: "plot",
+        moving_mesh: false,
+        cell_size: CELL_SIZE,
+        steps: 6000,
+        requested_dt: None,
+        advection_scheme: None,
+        inlet_velocity: None,
+    })
+    .expect("structured GUI obstacle long run");
+    let mut max_gauge_p = 0.0_f64;
+    let mut max_speed = 0.0_f64;
+    for (cell, &solid) in smoke.cell_solid.iter().enumerate() {
+        if solid {
+            continue;
+        }
+        max_gauge_p = max_gauge_p.max(f64::from(smoke.pressure[cell]).abs());
+        let (ux, uy) = smoke.velocity[cell];
+        max_speed = max_speed.max(f64::from(ux).hypot(f64::from(uy)));
+    }
+    println!(
+        "[long-run] structured obstacle t={:.4e}: max|p'|={max_gauge_p:.4e} max|u|={max_speed:.4e}",
+        smoke.final_time
+    );
+    assert!(
+        max_gauge_p < 50.0,
+        "structured obstacle mean-pressure runaway is back: max|p'| = {max_gauge_p:.4e} Pa"
+    );
+    assert!(
+        max_speed < 0.05,
+        "structured obstacle velocity runaway: max|u| = {max_speed:.4e} m/s at inlet 0.002"
     );
 }

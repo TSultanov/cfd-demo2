@@ -48,6 +48,7 @@ fn case<'a>(
         steps,
         requested_dt: None,
         advection_scheme: None,
+        inlet_velocity: None,
     }
 }
 

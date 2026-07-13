@@ -2,7 +2,7 @@ use crate::solver::ir::{
     FaceScalarExpr as S, FaceSide, FaceVec2Expr as V, FluxLayout, FluxModuleKernelSpec, LimiterSpec,
 };
 use crate::solver::model::backend::algebraic::AlgExpr;
-use crate::solver::model::backend::ast::EquationSystem;
+use crate::solver::model::backend::ast::{Coefficient, EquationSystem};
 use crate::solver::model::flux_module::FluxSchemeSpec;
 use crate::solver::scheme::Scheme;
 
@@ -75,6 +75,29 @@ pub fn lower_flux_scheme(
     match flux_scheme {
         FluxSchemeSpec::CentralUpwind(decl) => derive_central_upwind(system, decl, reconstruction),
     }
+}
+
+/// True when any equation term's coefficient references the Brinkman
+/// momentum-penalty mask (the structured immersed-obstacle model variants).
+/// Field name matches `IBM_MOMENTUM_PENALTY_FIELD` (kept a literal so this
+/// stays resolvable in the build.rs include!() codegen context).
+fn system_has_ibm_penalty(system: &EquationSystem) -> bool {
+    fn coeff_references(coeff: &Coefficient, name: &str) -> bool {
+        match coeff {
+            Coefficient::Constant { .. } => false,
+            Coefficient::Field(field) | Coefficient::MagSqr(field) => field.name() == name,
+            Coefficient::Product(a, b) | Coefficient::Sum(a, b) => {
+                coeff_references(a, name) || coeff_references(b, name)
+            }
+        }
+    }
+    system.equations().iter().any(|equation| {
+        equation.terms().iter().any(|term| {
+            term.coeff
+                .as_ref()
+                .is_some_and(|coeff| coeff_references(coeff, "ibm_penalty_U"))
+        })
+    })
 }
 
 fn derive_central_upwind(
@@ -1097,7 +1120,7 @@ fn derive_central_upwind(
     let phi_up_x = {
         let conv = S::Add(
             Box::new(phi_u_x),
-            Box::new(S::Mul(Box::new(p_blend.clone()), Box::new(sf_x))),
+            Box::new(S::Mul(Box::new(p_blend.clone()), Box::new(sf_x.clone()))),
         );
         // Subtract the explicit tauMC traction contribution (integrated over face area).
         S::Sub(
@@ -1111,7 +1134,7 @@ fn derive_central_upwind(
     let phi_up_y = {
         let conv = S::Add(
             Box::new(phi_u_y),
-            Box::new(S::Mul(Box::new(p_blend), Box::new(sf_y))),
+            Box::new(S::Mul(Box::new(p_blend), Box::new(sf_y.clone()))),
         );
         S::Sub(
             Box::new(conv),
@@ -1166,16 +1189,107 @@ fn derive_central_upwind(
     // `lap_<conserved>` unknowns + `laplacian(bih_eps4, lap_X)` per conserved
     // equation), not on the explicit flux here.
 
+    // IBM (Brinkman) impermeable-wall face seal — the central-upwind twin of
+    // the Rhie–Chow whole-flux seal (see `derive_advecting_velocity_flux`).
+    // The Brinkman `source_coeff(Sp, rho_u)` sink pins only the MOMENTUM
+    // inside the mask; without a face seal the mass/energy Kurganov fluxes
+    // still cross solid faces, so the obstacle is porous — measured on the
+    // GUI channel-obstacle (cell 0.005): the solid interior settles ~1 Pa
+    // BELOW ambient, continuously ingesting mass whose momentum the penalty
+    // destroys, which fattens the dead-velocity annulus to ~17 cells and
+    // relieves the fore/aft stagnation differential through the body. A wall
+    // admits NO flux, so every component's face flux vanishes on any face
+    // touching a penalty cell:
+    //
+    //   seal = 1 - min(|Sp_own| + |Sp_neigh|, 1)
+    //
+    // fluid-fluid faces: |0|+|0| = 0 => seal = 1.0 and `phi * 1.0` is the
+    // IEEE identity; penalty-adjacent faces (|Sp| ~ 1e5) => seal = 0.0
+    // exactly. Non-IBM systems (the unstructured compressible family) never
+    // take this branch, keeping their committed kernels byte-identical. The
+    // no-slip wall DRAG survives: the implicit `laplacian(mu, u)` term is
+    // assembled outside this flux module and sees the penalty cells' u = 0.
+    // (The `laplacian(kappa, T)` heat path likewise stays open, making the
+    // sealed obstacle a ~T_ref-isothermal wall rather than the unstructured
+    // walls' adiabatic zero-gradient — negligible at these speeds.)
+    let ibm_seal = system_has_ibm_penalty(system);
+    let solid_frac = |side: FaceSide| {
+        S::Min(
+            Box::new(S::Abs(Box::new(S::state(side, "ibm_penalty_U")))),
+            Box::new(S::lit(1.0)),
+        )
+    };
+    let seal = S::Sub(
+        Box::new(S::lit(1.0)),
+        Box::new(S::Min(
+            Box::new(S::Add(
+                Box::new(solid_frac(FaceSide::Owner)),
+                Box::new(solid_frac(FaceSide::Neighbor)),
+            )),
+            Box::new(S::lit(1.0)),
+        )),
+    );
+    // Scalar (mass/energy) components: a wall admits NO flux — zero outright.
+    let sealed_scalar = |phi: S| {
+        if ibm_seal {
+            S::Mul(Box::new(phi), Box::new(seal.clone()))
+        } else {
+            phi
+        }
+    };
+    // MOMENTUM components: the Kurganov momentum flux CONTAINS the pressure
+    // force `p_blend*Sf`, so zeroing the whole face flux would make the
+    // immersed wall a pressure-release (vacuum) surface — the wall-adjacent
+    // fluid cell then feels an unbalanced net pressure force from its other
+    // faces and accelerates INTO the obstacle without bound (measured: the
+    // structured GUI obstacle ran to max|u| ~ 1.4e2 m/s, max|p'| ~ 2.6e4 Pa
+    // by t ~ 0.1 s under a whole-flux momentum seal). A wall face carries
+    // exactly the WALL PRESSURE FORCE and nothing else; with the zero-gradient
+    // wall pressure closure that is the FLUID side's stored (gauge) cell
+    // pressure: p_wall = p_fluid * Sf. The gauge reference cancels around any
+    // closed fluid cell (every face of a fluid cell carries the same gauge
+    // convention), so the stored pressure is the correct force variable.
+    let sealed_momentum = |phi: S, sf_component: S| {
+        if !ibm_seal {
+            return phi;
+        }
+        // Select the FLUID side's cell pressure: own fluid -> p_own; own
+        // solid -> p_neigh (solid-solid faces pick the neighbor's frozen
+        // reference pressure; both cells are momentum-pinned so the force is
+        // inert there).
+        let p_wall = S::Add(
+            Box::new(S::Mul(
+                Box::new(S::Sub(
+                    Box::new(S::lit(1.0)),
+                    Box::new(solid_frac(FaceSide::Owner)),
+                )),
+                Box::new(S::state(FaceSide::Owner, decl.pressure_field)),
+            )),
+            Box::new(S::Mul(
+                Box::new(solid_frac(FaceSide::Owner)),
+                Box::new(S::state(FaceSide::Neighbor, decl.pressure_field)),
+            )),
+        );
+        let wall_force = S::Mul(
+            Box::new(S::Sub(Box::new(S::lit(1.0)), Box::new(seal.clone()))),
+            Box::new(S::Mul(Box::new(p_wall), Box::new(sf_component))),
+        );
+        S::Add(
+            Box::new(S::Mul(Box::new(phi), Box::new(seal.clone()))),
+            Box::new(wall_force),
+        )
+    };
+
     let mut flux = Vec::new();
     for name in &components {
         if name == rho_name {
-            flux.push(phi.clone());
+            flux.push(sealed_scalar(phi.clone()));
         } else if name == &format!("{rho_u_name}_x") {
-            flux.push(phi_up_x.clone());
+            flux.push(sealed_momentum(phi_up_x.clone(), sf_x.clone()));
         } else if name == &format!("{rho_u_name}_y") {
-            flux.push(phi_up_y.clone());
+            flux.push(sealed_momentum(phi_up_y.clone(), sf_y.clone()));
         } else if name == rho_e_name {
-            flux.push(phi_ep.clone());
+            flux.push(sealed_scalar(phi_ep.clone()));
         } else {
             // Auxiliary coupled unknowns (e.g. primitive fields coupled via diffusion/constraints)
             // get zero face flux by default.

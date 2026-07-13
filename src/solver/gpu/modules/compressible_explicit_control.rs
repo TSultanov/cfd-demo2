@@ -1594,7 +1594,7 @@ mod tests {
 
     #[test]
     fn raw_eos_constant_word_indices_are_pinned() {
-        assert_eq!(std::mem::size_of::<GpuConstants>(), 28 * 4);
+        assert_eq!(std::mem::size_of::<GpuConstants>(), 29 * 4);
         assert_eq!(std::mem::offset_of!(GpuConstants, eos_gamma), 14 * 4);
         assert_eq!(std::mem::offset_of!(GpuConstants, eos_gm1), 15 * 4);
         assert_eq!(std::mem::offset_of!(GpuConstants, eos_r), 16 * 4);
@@ -1611,6 +1611,10 @@ mod tests {
         assert_eq!(
             std::mem::offset_of!(GpuConstants, eos_gauge_p_bias),
             24 * 4
+        );
+        assert_eq!(
+            std::mem::offset_of!(GpuConstants, bc_pressure_inlet),
+            25 * 4
         );
     }
 

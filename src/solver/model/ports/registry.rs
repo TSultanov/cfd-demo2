@@ -1802,7 +1802,7 @@ mod tests {
 
         let manifest = eos_uniform_port_manifest();
 
-        assert_eq!(manifest.params.len(), 11);
+        assert_eq!(manifest.params.len(), 12);
 
         let gamma = manifest
             .params

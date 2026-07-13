@@ -9,10 +9,10 @@ ddc98e2925d95e02  bc_expr_update_allmach_pressure_ale.wgsl
 11ee1acda020ddef  bc_expr_update_allmach_thermal.wgsl
 11ee1acda020ddef  bc_expr_update_allmach_thermal_ale.wgsl
 c83d6218b33dcc7d  bc_expr_update_allmach_thermal_structured.wgsl
-a7253fac2615d5da  bc_expr_update_compressible.wgsl
-f1d36164f0bc13a6  bc_expr_update_compressible_mms.wgsl
-3080198d71be8977  bc_expr_update_compressible_mms_biharmonic.wgsl
-a02e0ed8ee7ebed1  bc_expr_update_compressible_structured.wgsl
+640269f1bdf75914  bc_expr_update_compressible.wgsl
+eb94908a0434aee8  bc_expr_update_compressible_mms.wgsl
+f6ef46c55da2215a  bc_expr_update_compressible_mms_biharmonic.wgsl
+a31ae15dfca94487  bc_expr_update_compressible_structured.wgsl
 bdb7321f28b9236f  block_precond.wgsl
 f5f4855b97364c1b  dot_product.wgsl
 2edaa603274fed93  dot_product_pair.wgsl

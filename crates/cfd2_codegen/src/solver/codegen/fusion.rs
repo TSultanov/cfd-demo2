@@ -890,6 +890,7 @@ fn constants_extra_params_for_program(program: &KernelProgram) -> Vec<ParamSpec>
         ("eos.gauge_p_ref", "eos_gauge_p_ref"),
         ("eos.gauge_e_ref", "eos_gauge_e_ref"),
         ("eos.gauge_p_bias", "eos_gauge_p_bias"),
+        ("eos.bc_pressure_inlet", "bc_pressure_inlet"),
         ("buoyant.beta_g", "buoyant_beta_g"),
         ("buoyant.t0", "buoyant_t0"),
         ("buoyant.k_over_cp", "buoyant_k_over_cp"),

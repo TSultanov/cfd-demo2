@@ -215,6 +215,19 @@ const COMPRESSIBLE: ModelGuiDefaults = ModelGuiDefaults {
     inlet_pressure: 0.0,
 };
 
+/// Density-based compressible on the NOZZLE geometry: pressure-driven inlet.
+/// A velocity inlet is useless for a CD nozzle (nothing chokes); the committed
+/// bc_expr closures instead prescribe the gauge inlet pressure + reservoir
+/// temperature and let the outlet float (see `BC_PRESSURE_INLET` in the
+/// compressible model). `inlet_pressure` is in gauge Pa against the absolute
+/// ~101 kPa reference.
+pub const COMPRESSIBLE_NOZZLE: ModelGuiDefaults = ModelGuiDefaults {
+    pressure_inlet: true,
+    inlet_pressure: 5.0e4,
+    adaptive_dt: true,
+    ..COMPRESSIBLE
+};
+
 /// All-Mach pressure-based (`allmach_pressure`) defaults.
 ///
 /// The incompressible coupled solver (gauge pressure, Rhie–Chow, Schur) plus a

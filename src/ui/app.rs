@@ -2335,8 +2335,14 @@ impl CFDApp {
             self.model_id,
             "allmach_pressure" | "allmach_thermal" | "allmach_thermal_structured"
         );
+        let is_compressible = matches!(
+            self.model_id,
+            "compressible" | "compressible_structured"
+        );
         let d = if self.selected_geometry == GeometryType::Nozzle && is_allmach {
             crate::ui::model_defaults::ALLMACH_THERMAL_NOZZLE
+        } else if self.selected_geometry == GeometryType::Nozzle && is_compressible {
+            crate::ui::model_defaults::COMPRESSIBLE_NOZZLE
         } else {
             crate::ui::model_defaults::gui_defaults_for(self.model_id)
         };
@@ -5395,6 +5401,8 @@ impl eframe::App for CFDApp {
                                 "allmach_pressure"
                                     | "allmach_thermal"
                                     | "allmach_thermal_structured"
+                                    | "compressible"
+                                    | "compressible_structured"
                             )
                         {
                             // Driving-mode toggle. Flipping it changes the Inlet/Outlet
@@ -5421,11 +5429,21 @@ impl eframe::App for CFDApp {
                             if self.pressure_inlet {
                                 // Pressure-inlet nozzle: tune the pinned inlet gauge
                                 // pressure (the gauge anchor). The outlet floats —
-                                // supersonic outlet, no back-pressure.
+                                // supersonic outlet, no back-pressure. The slider
+                                // range follows the model family's pressure scale
+                                // (all-Mach gauge units vs compressible Pa).
+                                let pressure_ceiling = if matches!(
+                                    self.model_id,
+                                    "compressible" | "compressible_structured"
+                                ) {
+                                    3.0e5
+                                } else {
+                                    0.12
+                                };
                                 let mut p_in = self.inlet_pressure;
                                 if ui
                                     .add(
-                                        adaptive_slider(&mut p_in, 0.0..=0.12)
+                                        adaptive_slider(&mut p_in, 0.0..=pressure_ceiling)
                                             .text("Inlet pressure (gauge)"),
                                     )
                                     .on_hover_text(
@@ -7417,7 +7435,12 @@ fn apply_structured_compressible_runtime(
     // GAUGE STORAGE (matches the unstructured driver): the density-based
     // compressible state stores deviations from the quiescent reference at
     // the fluid density. See docs/compressible-explicit-acoustics.md.
-    s.sc_set_eos(params.eos.runtime_params_gauged(params.density as f64));
+    let mut eos = params.eos.runtime_params_gauged(params.density as f64);
+    // Inlet driving mode: the committed bc_expr closures branch on this
+    // runtime constant (velocity inlet when 0; prescribed gauge pressure +
+    // reservoir temperature with a floating outlet when 1 — the CD nozzle).
+    eos.bc_pressure_inlet = if params.pressure_inlet { 1.0 } else { 0.0 };
+    s.sc_set_eos(eos);
     s.sc_set_inlet_velocity(params.inlet_velocity);
 }
 
@@ -7825,6 +7848,7 @@ fn setup_structured_bcs(
         let t0 = reference.temperature as f32;
         let u_in_f32 = u_in as f32;
         let outlet_p = params.outlet_back_pressure;
+        let inlet_p = params.inlet_pressure;
         s.sc_set_boundaries(move |edge, _x, _y| {
             let d = |v: f32| StructBc { kind: 1, value: v };
             let n = || StructBc {
@@ -7850,6 +7874,11 @@ fn setup_structured_bcs(
             // channel then injects ~kappa*area*300 of heat per boundary face,
             // a positive feedback that pressurizes the whole channel).
             let (btype, mut v): (u32, Vec<StructBc>) = match edge {
+                // Inlet channel 6 holds the prescribed gauge pressure: unused
+                // in velocity mode (the closure writes the interior-following
+                // p over it), THE drive in pressure-inlet mode (the closure
+                // reads it to rebuild rho/rho_u/rho_e at the reservoir
+                // temperature in channel 7).
                 StructEdge::Left => (
                     1,
                     vec![
@@ -7859,7 +7888,7 @@ fn setup_structured_bcs(
                         d(e0),
                         d(u_in_f32),
                         d(0.0),
-                        n(),
+                        d(inlet_p),
                         d(t0),
                     ],
                 ),
@@ -9749,8 +9778,11 @@ fn gui_matrix_params(
         model_id,
         "allmach_pressure" | "allmach_thermal" | "allmach_thermal_structured"
     );
+    let is_compressible = matches!(model_id, "compressible" | "compressible_structured");
     let defaults = if geometry == GeometryType::Nozzle && is_allmach {
         crate::ui::model_defaults::ALLMACH_THERMAL_NOZZLE
+    } else if geometry == GeometryType::Nozzle && is_compressible {
+        crate::ui::model_defaults::COMPRESSIBLE_NOZZLE
     } else {
         crate::ui::model_defaults::gui_defaults_for(model_id)
     };

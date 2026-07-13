@@ -110,6 +110,11 @@ const EOS_RHO_REF: TypedParamRef<Density> = TypedParamRef::new("eos_rho_ref");
 const EOS_GAUGE_RHO_REF: TypedParamRef<Density> = TypedParamRef::new("eos_gauge_rho_ref");
 const EOS_GAUGE_P_REF: TypedParamRef<Pressure> = TypedParamRef::new("eos_gauge_p_ref");
 const EOS_GAUGE_P_BIAS: TypedParamRef<Pressure> = TypedParamRef::new("eos_gauge_p_bias");
+// Inlet driving mode (0 = velocity inlet, 1 = pressure inlet + floating
+// outlet). A runtime constant, so ONE committed bc_expr kernel serves both
+// modes; the closures below branch with `select_gt(mode, 0.5, ..)` and the
+// velocity-mode branch reproduces the historical expressions bit-for-bit.
+const BC_PRESSURE_INLET: TypedParamRef<Dimensionless> = TypedParamRef::new("bc_pressure_inlet");
 
 /// Declared squared sound speed of the runtime EOS:
 /// `c^2 = gamma * R * T + dp_drho`.
@@ -587,25 +592,61 @@ fn compressible_model_impl_topo(
     // (`+ eos_gauge_rho_ref` / `+ eos_gauge_p_ref`, zero when gauge is off).
     let gauge_rho = || B::param(EOS_GAUGE_RHO_REF.to_untyped());
     let gauge_p = || B::param(EOS_GAUGE_P_REF.to_untyped());
-    let inlet_rho_abs = || B::bc(fields.rho) + gauge_rho();
+    // Inlet driving mode: `sel(pressure, velocity)` picks the pressure-inlet
+    // expression when the runtime constant is 1 and the historical
+    // velocity-inlet expression (bit-identical arithmetic) when it is 0.
+    let mode = || B::param(BC_PRESSURE_INLET.to_untyped());
+    let sel = |on_pressure: B, on_velocity: B| {
+        mode().select_gt(B::lit(0.5), on_pressure, on_velocity)
+    };
+    // Pressure mode: the table's p channel holds the prescribed gauge inlet
+    // pressure and the T channel the reservoir temperature; the axial velocity
+    // extrapolates from the interior while the transverse component is pinned.
+    let inlet_p_used = || sel(B::bc(fields.p), p_owner());
+    let inlet_u_used = |component: u32| {
+        if component == 0 {
+            sel(B::interior_comp(fields.u, 0), B::bc_comp(fields.u, 0))
+        } else {
+            sel(B::lit(0.0), B::bc_comp(fields.u, 1))
+        }
+    };
+    // Pressure-mode density from the prescribed state: ideal gas inverts
+    // p = rho R T at the reservoir temperature; a barotropic EOS inverts its
+    // own linear closure `p = p_ref + dp_drho (rho - rho_ref)`.
+    let inlet_rho_abs_pressure = || {
+        gm1().select_gt(
+            B::lit(0.0),
+            (inlet_p_used() + gauge_p())
+                / (r_safe() * B::bc(fields.t).max(B::lit(1.0e-6))),
+            B::param(EOS_RHO_REF.to_untyped())
+                + (inlet_p_used() + gauge_p() - B::param(EOS_P_REF.to_untyped()))
+                    / B::param(EOS_DP_DRHO.to_untyped()).max(B::lit(1.0e-12)),
+        )
+    };
+    let inlet_rho_abs = || {
+        sel(
+            inlet_rho_abs_pressure().max(B::lit(1.0e-6)),
+            B::bc(fields.rho) + gauge_rho(),
+        )
+    };
+    let inlet_rho = || inlet_rho_abs() - gauge_rho();
     let inlet_ke = || {
         B::lit(0.5)
             * inlet_rho_abs()
-            * (B::bc_comp(fields.u, 0) * B::bc_comp(fields.u, 0)
-                + B::bc_comp(fields.u, 1) * B::bc_comp(fields.u, 1))
+            * (inlet_u_used(0) * inlet_u_used(0) + inlet_u_used(1) * inlet_u_used(1))
     };
-    let inlet_p = p_owner();
+    let inlet_p = inlet_p_used();
     let inlet_t =
-        (p_owner() + gauge_p()) / (inlet_rho_abs().max(B::lit(1.0e-6)) * r_safe());
+        (inlet_p_used() + gauge_p()) / (inlet_rho_abs().max(B::lit(1.0e-6)) * r_safe());
     let inlet_rho_e = gm1().select_gt(
         B::lit(0.0),
-        p_owner() / gm1_safe() + inlet_ke(),
+        inlet_p_used() / gm1_safe() + inlet_ke(),
         // For a barotropic EOS, the host seeds the thermodynamic conserved
         // energy from EosSpec. Preserve that prescribed table entry under the
         // bc_expr kernel's snapshot semantics instead of overwriting it with KE.
         B::bc(fields.rho_e),
     );
-    let inlet_rho_u = |component: u32| inlet_rho_abs() * B::bc_comp(fields.u, component);
+    let inlet_rho_u = |component: u32| inlet_rho_abs() * inlet_u_used(component);
 
     // Outlet: extrapolate the non-pressure state from the interior. The
     // positivity floor applies to the ABSOLUTE density; the stored ghost value
@@ -616,7 +657,10 @@ fn compressible_model_impl_topo(
     let outlet_ke = || {
         B::lit(0.5) * outlet_rho_abs() * (outlet_u(0) * outlet_u(0) + outlet_u(1) * outlet_u(1))
     };
-    let outlet_p = || B::bc(fields.p);
+    // Pressure-inlet mode floats the outlet (ghost energy from the interior
+    // pressure — the supersonic-outlet driving); velocity mode anchors it at
+    // the table's back-pressure (the subsonic channel's gauge anchor).
+    let outlet_p = || sel(p_owner(), B::bc(fields.p));
     let outlet_t = (outlet_p() + gauge_p()) / (outlet_rho_abs() * r_safe());
     let outlet_rho_e = gm1().select_gt(
         B::lit(0.0),
@@ -629,12 +673,16 @@ fn compressible_model_impl_topo(
     boundaries.set_field(
         "rho",
         FieldBoundarySpec::new()
-            // Inlet density is Dirichlet (placeholder value); update via the solver's boundary
-            // table API (and keep `rho_u`/`rho_e` consistent with the chosen inlet state).
+            // Inlet density: prescribed via the boundary table in velocity
+            // mode; recomputed from the prescribed pressure/reservoir
+            // temperature in pressure-inlet mode.
             .set_uniform(
                 GpuBoundaryType::Inlet,
                 1,
-                BoundaryCondition::dirichlet_dim::<Density>(1.0),
+                BoundaryCondition::with_expr_value_dim::<Density>(
+                    GpuBcKind::Dirichlet,
+                    inlet_rho(),
+                )?,
             )
             .set_uniform(
                 GpuBoundaryType::Outlet,
@@ -709,12 +757,20 @@ fn compressible_model_impl_topo(
     boundaries.set_field(
         "u",
         FieldBoundarySpec::new()
-            // Inlet velocity is Dirichlet (placeholder value); update via the solver's boundary
-            // table API.
-            .set_uniform(
+            // Inlet velocity: prescribed via the boundary table in velocity
+            // mode; extrapolated axially (transverse pinned) in pressure mode.
+            .set_components(
                 GpuBoundaryType::Inlet,
-                2,
-                BoundaryCondition::dirichlet_dim::<Velocity>(0.0),
+                vec![
+                    BoundaryCondition::with_expr_value_dim::<Velocity>(
+                        GpuBcKind::Dirichlet,
+                        inlet_u_used(0),
+                    )?,
+                    BoundaryCondition::with_expr_value_dim::<Velocity>(
+                        GpuBcKind::Dirichlet,
+                        inlet_u_used(1),
+                    )?,
+                ],
             )
             .set_components(
                 GpuBoundaryType::Outlet,

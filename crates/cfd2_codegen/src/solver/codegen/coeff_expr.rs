@@ -127,6 +127,11 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
             DslType::f32(),
             Pressure::UNIT,
         )),
+        "bc_pressure_inlet" => Some(DynExpr::new(
+            Expr::ident("constants").field("bc_pressure_inlet"),
+            DslType::f32(),
+            Dimensionless::UNIT,
+        )),
         // Buoyant Boussinesq runtime params. beta*g: acceleration per kelvin.
         "buoyant_beta_g" => Some(DynExpr::new(
             Expr::ident("constants").field("buoyant_beta_g"),

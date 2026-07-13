@@ -63,6 +63,15 @@ pub struct EosRuntimeParams {
     /// `p_state = gm1*(rho_e_state - ke) + dp_drho*(rho_state + (gauge_rho_ref
     /// - rho_ref)) + gauge_p_bias` holds in BOTH conventions.
     pub gauge_p_bias: f32,
+    /// Inlet driving mode for the density-based compressible family:
+    /// `0.0` (default) = velocity inlet (prescribed rho/u, pressure follows
+    /// the interior); `1.0` = PRESSURE inlet (prescribed gauge pressure and
+    /// reservoir temperature from the boundary table, velocity extrapolated
+    /// axially) with a FLOATING outlet (ghost energy reconstructed from the
+    /// interior pressure instead of the back-pressure anchor) — the CD-nozzle
+    /// driving. The bc_expr closures branch on this constant, so one committed
+    /// kernel serves both modes.
+    pub bc_pressure_inlet: f32,
 }
 
 impl EosSpec {
@@ -207,6 +216,7 @@ impl EosSpec {
                 gauge_p_ref: 0.0,
                 gauge_e_ref: 0.0,
                 gauge_p_bias: 0.0,
+                bc_pressure_inlet: 0.0,
             },
             EosSpec::LinearCompressibility {
                 bulk_modulus,
@@ -229,6 +239,7 @@ impl EosSpec {
                     // Gauge off: the state-form pressure closure reduces to the
                     // historical absolute form only with bias == p_ref.
                     gauge_p_bias: p_ref as f32,
+                    bc_pressure_inlet: 0.0,
                 }
             }
             EosSpec::Constant => EosRuntimeParams {
@@ -243,6 +254,7 @@ impl EosSpec {
                 gauge_p_ref: 0.0,
                 gauge_e_ref: 0.0,
                 gauge_p_bias: 0.0,
+                bc_pressure_inlet: 0.0,
             },
         }
     }

@@ -189,6 +189,16 @@ fn explicit_compressible_dt_from_rate(
 /// over 16 cells removes that impulse without changing the final BC or MMS.
 const EXPLICIT_INLET_RAMP_CELLS: f64 = 16.0;
 
+
+/// Gauge-storage EOS runtime for the density-based compressible family, with
+/// the inlet-driving-mode constant (see `EosRuntimeParams::bc_pressure_inlet`)
+/// carried from `params.pressure_inlet`.
+fn compressible_eos_runtime(params: &RuntimeParams) -> crate::solver::model::eos::EosRuntimeParams {
+    let mut eos = params.eos.runtime_params_gauged(params.density as f64);
+    eos.bc_pressure_inlet = if params.pressure_inlet { 1.0 } else { 0.0 };
+    eos
+}
+
 pub(crate) fn explicit_allmach_inlet_ramp_time(
     params: &RuntimeParams,
     min_cell_size: f64,
@@ -1211,7 +1221,13 @@ impl SolverDriver {
         // pressure inlet + supersonic (extrapolated) outlet BEFORE the solver bakes the
         // bc_table. The model id / committed kernels are untouched (BC kind is a runtime
         // table, not a kernel). Only the all-Mach nozzle preset sets this.
-        if params.pressure_inlet {
+        if params.pressure_inlet && !model.id.contains("compressible") {
+            // The all-Mach family flips its BC KINDS here. The density-based
+            // compressible family instead branches inside its committed
+            // bc_expr closures on the `bc_pressure_inlet` runtime constant
+            // (set via `compressible_eos_runtime`), so its ModelSpec must not
+            // be mutated — this helper would clobber its outlet `p` anchor
+            // declaration.
             crate::solver::model::apply_pressure_inlet_nozzle_bcs(&mut model);
         }
 
@@ -1288,13 +1304,30 @@ impl SolverDriver {
             // All host helpers below keep their ABSOLUTE-value APIs and
             // convert through the solver's cached references. See
             // docs/compressible-explicit-acoustics.md.
-            let _ = solver
-                .set_eos_runtime(&params.eos.runtime_params_gauged(params.density as f64));
+            let _ = solver.set_eos_runtime(&compressible_eos_runtime(params));
             let _ = solver.set_compressible_inlet_isothermal_x(
                 params.density,
                 params.inlet_velocity,
                 &params.eos,
             );
+            if params.pressure_inlet {
+                // Pressure-driven (nozzle) mode: the bc_expr closures read the
+                // prescribed gauge inlet pressure and reservoir temperature
+                // from the boundary table; velocity extrapolates and the
+                // outlet floats (see BC_PRESSURE_INLET in the model).
+                let eos_rt = params.eos.runtime_params();
+                let reservoir_t = eos_rt.theta_ref / eos_rt.r.max(1.0e-12);
+                let _ = solver.set_boundary_scalar(
+                    crate::solver::gpu::enums::GpuBoundaryType::Inlet,
+                    "p",
+                    params.inlet_pressure,
+                );
+                let _ = solver.set_boundary_scalar(
+                    crate::solver::gpu::enums::GpuBoundaryType::Inlet,
+                    "T",
+                    reservoir_t,
+                );
+            }
             // Implicit stepping: uniform-freestream IC (matching the inlet), not
             // rest — from rest the inlet-injected momentum has no convective
             // transport on the collocated cut-cell mesh and seeds the low-Mach
@@ -1588,8 +1621,7 @@ impl SolverDriver {
             if self.compressible {
                 // Preserve the gauge-storage references across live EOS edits
                 // (a plain set_eos would silently zero them).
-                let _ = solver
-                    .set_eos_runtime(&params.eos.runtime_params_gauged(params.density as f64));
+                let _ = solver.set_eos_runtime(&compressible_eos_runtime(params));
             } else {
                 let _ = solver.set_eos(&params.eos);
             }
@@ -1629,6 +1661,20 @@ impl SolverDriver {
                 params.inlet_velocity,
                 &params.eos,
             );
+            if params.pressure_inlet {
+                let eos_rt = params.eos.runtime_params();
+                let reservoir_t = eos_rt.theta_ref / eos_rt.r.max(1.0e-12);
+                let _ = solver.set_boundary_scalar(
+                    crate::solver::gpu::enums::GpuBoundaryType::Inlet,
+                    "p",
+                    params.inlet_pressure,
+                );
+                let _ = solver.set_boundary_scalar(
+                    crate::solver::gpu::enums::GpuBoundaryType::Inlet,
+                    "T",
+                    reservoir_t,
+                );
+            }
         } else {
             let _ = solver.set_inlet_velocity(params.inlet_velocity);
         }

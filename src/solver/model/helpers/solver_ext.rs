@@ -399,6 +399,10 @@ impl SolverRuntimeParamsExt for GpuUnifiedSolver {
             "eos.gauge_p_bias",
             PlanParamValue::F32(params.gauge_p_bias),
         )?;
+        self.set_named_param(
+            "eos.bc_pressure_inlet",
+            PlanParamValue::F32(params.bc_pressure_inlet),
+        )?;
         Ok(())
     }
 }
@@ -573,6 +577,7 @@ fn evaluate_inlet_declarations(
             "eos_gauge_p_ref" => eos.gauge_p_ref,
             "eos_gauge_e_ref" => eos.gauge_e_ref,
             "eos_gauge_p_bias" => eos.gauge_p_bias,
+            "bc_pressure_inlet" => eos.bc_pressure_inlet,
             other => return Err(format!("inlet seeding: unknown param '{other}'")),
         })
     };
@@ -1019,6 +1024,7 @@ mod tests {
                     "eos_gauge_p_ref" => params.gauge_p_ref,
                     "eos_gauge_e_ref" => params.gauge_e_ref,
                     "eos_gauge_p_bias" => params.gauge_p_bias,
+                    "bc_pressure_inlet" => params.bc_pressure_inlet,
                     other => return Err(format!("unexpected EOS param '{other}'")),
                 })
             };

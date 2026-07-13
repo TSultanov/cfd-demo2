@@ -4981,6 +4981,23 @@ pub(crate) fn param_eos_gauge_p_bias(
     Ok(())
 }
 
+pub(crate) fn param_bc_pressure_inlet(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(v) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.bc_pressure_inlet = v;
+    }
+    r.fields.constants.write(&queue);
+    Ok(())
+}
+
 pub(crate) fn param_buoyant_beta_g(
     plan: &mut GpuProgramPlan,
     value: PlanParamValue,

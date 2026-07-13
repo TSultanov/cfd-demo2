@@ -27,6 +27,7 @@ struct Constants {
     eos_gauge_p_ref: f32,
     eos_gauge_e_ref: f32,
     eos_gauge_p_bias: f32,
+    bc_pressure_inlet: f32,
     buoyant_beta_g: f32,
     buoyant_t0: f32,
     buoyant_k_over_cp: f32,

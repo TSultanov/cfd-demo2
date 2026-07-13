@@ -15,6 +15,7 @@ pub(crate) fn handler_for_key(key: &'static str) -> Option<ProgramParamHandler> 
         "eos.gauge_p_ref" => Some(generic_coupled::param_eos_gauge_p_ref),
         "eos.gauge_e_ref" => Some(generic_coupled::param_eos_gauge_e_ref),
         "eos.gauge_p_bias" => Some(generic_coupled::param_eos_gauge_p_bias),
+        "eos.bc_pressure_inlet" => Some(generic_coupled::param_bc_pressure_inlet),
         "low_mach.model" => Some(generic_coupled::param_low_mach_model),
         "low_mach.theta_floor" => Some(generic_coupled::param_low_mach_theta_floor),
         "low_mach.pressure_coupling_alpha" => {

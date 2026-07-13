@@ -81,6 +81,14 @@ pub fn eos_uniform_port_manifest() -> ModulePortManifest {
                 wgsl_type: "f32",
                 unit: Pressure::UNIT,
             },
+            // Inlet driving mode for the density-based compressible family
+            // (0 = velocity inlet, 1 = pressure inlet + floating outlet).
+            ParamSpec {
+                key: "eos.bc_pressure_inlet",
+                wgsl_field: "bc_pressure_inlet",
+                wgsl_type: "f32",
+                unit: Dimensionless::UNIT,
+            },
         ],
         fields: vec![],
         buffers: vec![],

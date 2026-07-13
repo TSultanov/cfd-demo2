@@ -22,7 +22,9 @@ fn constant_field_unit(name: &str) -> Option<UnitDim> {
         "eos_gauge_rho_ref" => Some(Density::UNIT),
         "eos_gauge_p_ref" | "eos_gauge_e_ref" | "eos_gauge_p_bias" => Some(Pressure::UNIT),
         "eos_gamma" | "eos_gm1" | "component" | "alpha_p" | "scheme"
-        | "alpha_u" | "stride_x" | "time_scheme" => Some(UnitDim::dimensionless()),
+        | "alpha_u" | "stride_x" | "time_scheme" | "bc_pressure_inlet" => {
+            Some(UnitDim::dimensionless())
+        }
         _ => None,
     }
 }

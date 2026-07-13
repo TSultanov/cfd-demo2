@@ -104,7 +104,83 @@ fn run_with_inlet(
     }
 }
 
+fn run_nozzle(model_id: &str, mesh_kind: &str, steps: usize) {
+    run_nozzle_backend(model_id, mesh_kind, steps, "gpu");
+}
+
+fn run_nozzle_backend(model_id: &str, mesh_kind: &str, steps: usize, backend: &str) {
+    let smoke = match gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+        model_id,
+        fluid: "Air",
+        geometry: "nozzle",
+        mesh_kind,
+        backend,
+        adaptive: true,
+        presentation: "plot",
+        moving_mesh: false,
+        cell_size: 0.025,
+        steps,
+        requested_dt: None,
+        advection_scheme: None,
+        inlet_velocity: None,
+    }) {
+        Ok(smoke) => smoke,
+        Err(error) => {
+            println!("nozzle {model_id} {steps} steps: FAILED: {error}");
+            return;
+        }
+    };
+    // Throat station x ~ 1.2 (throat_frac 0.4 * length 3).
+    let mut max_speed = 0.0_f64;
+    let mut throat_u = (0.0_f64, 0usize);
+    let mut exit_u = (0.0_f64, 0usize);
+    let (mut p_min, mut p_max) = (f64::INFINITY, f64::NEG_INFINITY);
+    for (cell, &(x, _y)) in smoke.cell_centers.iter().enumerate() {
+        if smoke.cell_solid[cell] {
+            continue;
+        }
+        let (ux, uy) = smoke.velocity[cell];
+        let speed = f64::from(ux).hypot(f64::from(uy));
+        max_speed = max_speed.max(speed);
+        let p = f64::from(smoke.pressure[cell]);
+        p_min = p_min.min(p);
+        p_max = p_max.max(p);
+        if (x - 1.2).abs() < 0.05 {
+            throat_u.0 += f64::from(ux);
+            throat_u.1 += 1;
+        }
+        if x > 2.9 {
+            exit_u.0 += f64::from(ux);
+            exit_u.1 += 1;
+        }
+    }
+    println!(
+        "nozzle {model_id}/{backend} {steps} steps t={:.4e} dt=[{:.3e},{:.3e}]: max|u|={max_speed:.1} \
+         throat u_x={:.1} (n={}) exit u_x={:.1} (n={}) p'=[{p_min:.3e},{p_max:.3e}]",
+        smoke.final_time,
+        smoke.min_dt,
+        smoke.max_dt,
+        throat_u.0 / throat_u.1.max(1) as f64,
+        throat_u.1,
+        exit_u.0 / exit_u.1.max(1) as f64,
+        exit_u.1,
+    );
+}
+
 fn main() {
+    if std::env::var_os("PROBE_NOZZLE").is_some() {
+        for steps in [500usize, 3000, 10000] {
+            run_nozzle("compressible", "fitted", steps);
+            run_nozzle("compressible_structured", "structured", steps);
+        }
+        return;
+    }
+    if std::env::var_os("PROBE_NOZZLE_CPU").is_some() {
+        run_nozzle_backend("compressible", "fitted", 300, "cpu-transpiled");
+        run_nozzle_backend("compressible", "cutcell", 300, "cpu-transpiled");
+        run_nozzle_backend("compressible", "fitted", 300, "gpu");
+        return;
+    }
     let mach01 = std::env::var_os("PROBE_MACH01").is_some();
     if mach01 {
         // Candidate demo regime: inlet Mach ~0.1 (Re ~ 4.6e5). Watch for a

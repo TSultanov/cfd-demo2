@@ -454,6 +454,7 @@ fn write_kernel_constants_bytes(c: &GpuConstants, eos_fields: &[String], bytes: 
             "eos_gauge_p_ref" => c.eos_gauge_p_ref,
             "eos_gauge_e_ref" => c.eos_gauge_e_ref,
             "eos_gauge_p_bias" => c.eos_gauge_p_bias,
+            "bc_pressure_inlet" => c.bc_pressure_inlet,
             "buoyant_beta_g" => c.buoyant_beta_g,
             "buoyant_t0" => c.buoyant_t0,
             "buoyant_k_over_cp" => c.buoyant_k_over_cp,
@@ -2502,6 +2503,7 @@ impl StructuredGpuSolver {
         self.constants.eos_gauge_p_ref = params.gauge_p_ref;
         self.constants.eos_gauge_e_ref = params.gauge_e_ref;
         self.constants.eos_gauge_p_bias = params.gauge_p_bias;
+        self.constants.bc_pressure_inlet = params.bc_pressure_inlet;
         self.write_kernel_constants();
         // A live EOS switch changes the conserved-domain oracle and its first
         // stable dt. Force the next autonomous entry to seed both from the
@@ -3550,6 +3552,7 @@ impl StructuredGpuSolver {
             gauge_p_ref: self.constants.eos_gauge_p_ref,
             gauge_e_ref: self.constants.eos_gauge_e_ref,
             gauge_p_bias: self.constants.eos_gauge_p_bias,
+            bc_pressure_inlet: self.constants.bc_pressure_inlet,
         }
     }
 

@@ -480,3 +480,84 @@ fn structured_obstacle_long_run_pressure_stays_acoustic() {
         "structured obstacle velocity runaway: max|u| = {max_speed:.4e} m/s at inlet 0.011"
     );
 }
+
+/// The compressible pressure-driven nozzle (the GUI's `Compressible` +
+/// `Nozzle` combination): both topologies must DEVELOP through-flow from rest
+/// under the prescribed 5e4 Pa gauge inlet (the committed bc_expr closures'
+/// pressure-inlet branch), stay bounded, and agree on the interpolated fields
+/// within the calibrated envelopes.
+#[test]
+fn cross_topology_nozzle_compressible_pressure_inlet() {
+    if let Err(error) = gui_explicit_rk4_gpu_available() {
+        eprintln!("skipping compressible nozzle gate: {error}");
+        return;
+    }
+    // The inlet acoustic front needs ~3.5 ms to reach the throat (x = 1.2 at
+    // c ~ 347); 1000 steps at 6e-6 give the through-flow 6 ms to establish.
+    let nozzle_case = |model_id, mesh_kind| {
+        gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+            model_id,
+            fluid: "Air",
+            geometry: "nozzle",
+            mesh_kind,
+            backend: "gpu",
+            adaptive: false,
+            presentation: "plot",
+            moving_mesh: false,
+            cell_size: CELL_SIZE,
+            steps: 1000,
+            requested_dt: Some(6.0e-6),
+            advection_scheme: None,
+            inlet_velocity: None,
+        })
+        .unwrap_or_else(|error| panic!("nozzle/{model_id}: {error}"))
+    };
+    let reference = nozzle_case("compressible", "fitted");
+    let candidate = nozzle_case("compressible_structured", "structured");
+    // Both sides must actually develop: mean axial velocity at the throat
+    // station (x ~ 1.2) well above zero. A dead pressure inlet (missing
+    // runtime constant, missing table value) reads ~0.
+    for (label, smoke) in [("unstructured", &reference), ("structured", &candidate)] {
+        let mut throat = (0.0_f64, 0usize);
+        for (cell, &(x, _y)) in smoke.cell_centers.iter().enumerate() {
+            if !smoke.cell_solid[cell] && (x - 1.2).abs() < 0.05 {
+                throat.0 += f64::from(smoke.velocity[cell].0);
+                throat.1 += 1;
+            }
+        }
+        let mean = throat.0 / throat.1.max(1) as f64;
+        println!("[cross-topology] nozzle/compressible {label} throat u_x = {mean:.2} m/s");
+        assert!(
+            mean > 20.0,
+            "{label} compressible nozzle did not develop (throat u_x = {mean:.3})"
+        );
+    }
+    let metrics = compare(&reference, &candidate);
+    for metric in &metrics {
+        println!(
+            "[cross-topology] nozzle/compressible {}: rel_l2={:.4} \
+             (rms unstructured={:.4e} structured={:.4e})",
+            metric.name, metric.rel_l2, metric.rms_reference, metric.rms_candidate
+        );
+    }
+    // Envelopes: ~2x the observed fitted-vs-rasterized-IBM discrepancy at the
+    // time the gate was written (u_x 0.38, u_y 0.54, p 0.33, rho 0.28, T 0.03).
+    for &(name, max_rel_l2) in &[
+        ("u_x", 0.8_f64),
+        ("u_y", 1.0),
+        ("p", 0.7),
+        ("rho", 0.6),
+        ("T", 0.1),
+    ] {
+        let metric = metrics
+            .iter()
+            .find(|metric| metric.name == name)
+            .unwrap_or_else(|| panic!("case exposes no '{name}' field"));
+        assert!(
+            metric.rel_l2 <= max_rel_l2,
+            "nozzle/compressible {name}: relative L2 discrepancy {:.4} exceeds \
+             the {max_rel_l2} envelope",
+            metric.rel_l2
+        );
+    }
+}

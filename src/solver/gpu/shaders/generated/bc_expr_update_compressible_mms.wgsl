@@ -49,9 +49,9 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
         let bcv_rho_e_c0 = bc_value[idx * 8u + 3u];
         bc_value[idx * 8u + 1u] = (bcv_rho_c0 + constants.eos_gauge_rho_ref) * bcv_u_c0;
         bc_value[idx * 8u + 2u] = (bcv_rho_c0 + constants.eos_gauge_rho_ref) * bcv_u_c1;
-        bc_value[idx * 8u + 3u] = select(bcv_rho_e_c0, max(in_p_c0, 0.000001) / max(constants.eos_gm1, 0.000001) + 0.5 * (bcv_rho_c0 + constants.eos_gauge_rho_ref) * (bcv_u_c0 * bcv_u_c0 + bcv_u_c1 * bcv_u_c1), constants.eos_gm1 > 0.0);
-        bc_value[idx * 8u + 6u] = max(in_p_c0, 0.000001);
-        bc_value[idx * 8u + 7u] = (max(in_p_c0, 0.000001) + constants.eos_gauge_p_ref) / (max(bcv_rho_c0 + constants.eos_gauge_rho_ref, 0.000001) * max(constants.eos_r, 0.000000000001));
+        bc_value[idx * 8u + 3u] = select(bcv_rho_e_c0, (max(in_p_c0 + constants.eos_gauge_p_ref, 0.000001) - constants.eos_gauge_p_ref) / max(constants.eos_gm1, 0.000001) + 0.5 * (bcv_rho_c0 + constants.eos_gauge_rho_ref) * (bcv_u_c0 * bcv_u_c0 + bcv_u_c1 * bcv_u_c1), constants.eos_gm1 > 0.0);
+        bc_value[idx * 8u + 6u] = max(in_p_c0 + constants.eos_gauge_p_ref, 0.000001) - constants.eos_gauge_p_ref;
+        bc_value[idx * 8u + 7u] = (max(in_p_c0 + constants.eos_gauge_p_ref, 0.000001) - constants.eos_gauge_p_ref + constants.eos_gauge_p_ref) / (max(bcv_rho_c0 + constants.eos_gauge_rho_ref, 0.000001) * max(constants.eos_r, 0.000000000001));
     }
     if (face_boundary_type == 2u) {
         let in_rho_c0 = state[base + 0u];

@@ -565,10 +565,18 @@ fn compressible_model_impl_topo(
     use crate::solver::gpu::enums::GpuBcKind;
     use crate::solver::model::backend::boundary::BoundaryExpr as B;
 
-    let p_owner = || B::interior(fields.p).max(B::lit(1.0e-6));
     let gm1 = || B::param(EOS_GM1.to_untyped());
     let gm1_safe = || gm1().max(B::lit(1.0e-6));
     let r_safe = || B::param(EOS_R.to_untyped()).max(B::lit(1.0e-12));
+    // Gauge storage: the interior pressure is STORED (gauge); the positivity
+    // floor is a property of the ABSOLUTE pressure. Flooring the stored value
+    // directly would rectify legitimate negative gauge pressures (acoustic
+    // rarefactions below the reference) at every inlet face. Zero references
+    // reduce this to the historical `interior(p).max(1e-6)`.
+    let p_owner = || {
+        (B::interior(fields.p) + B::param(EOS_GAUGE_P_REF.to_untyped())).max(B::lit(1.0e-6))
+            - B::param(EOS_GAUGE_P_REF.to_untyped())
+    };
 
     // Inlet: kinetic energy of the prescribed state; total energy follows
     // the interior pressure for an ideal gas, while a barotropic EOS preserves

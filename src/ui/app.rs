@@ -7707,24 +7707,45 @@ fn setup_structured_bcs(
         let rho0 = reference.stored_rho as f32;
         let momentum_x = reference.momentum_x as f32;
         let e0 = reference.stored_total_energy_density as f32;
+        let u_in_f32 = u_in as f32;
         s.sc_set_boundaries(move |edge, _x, _y| {
             let d = |v: f32| StructBc { kind: 1, value: v };
             let n = || StructBc {
                 kind: 2,
                 value: 0.0,
             };
+            // Coupled channel order: rho, rho_u_x, rho_u_y, rho_e, u_x, u_y,
+            // p, T. The u CHANNELS ARE LOAD-BEARING at the inlet: the model's
+            // bc_expr kernel recomputes the dependent inlet entries every
+            // stage as `rho_u = rho_abs * bc(u)` (and the rho_e/T closures
+            // from the same prescribed velocity), so leaving u unset (zero)
+            // silently zeroes the momentum drive each stage — the inlet then
+            // acts as a wall and the flow never develops. Walls pin u to 0
+            // (no-slip, matching the rho_u Dirichlet and the unstructured
+            // declarations); outlet extrapolates everything.
             let (btype, mut v): (u32, Vec<StructBc>) = match edge {
-                StructEdge::Left => (1, vec![d(rho0), d(momentum_x), d(0.0)]),
-                StructEdge::Right => (2, vec![n(), n(), n()]),
-                // No-slip wall: momentum pinned to 0, rho/rho_e zero-gradient.
-                _ => (3, vec![n(), d(0.0), d(0.0)]),
+                StructEdge::Left => (
+                    1,
+                    vec![
+                        d(rho0),
+                        d(momentum_x),
+                        d(0.0),
+                        d(e0),
+                        d(u_in_f32),
+                        d(0.0),
+                        n(),
+                        n(),
+                    ],
+                ),
+                StructEdge::Right => (2, vec![n(); 8]),
+                // No-slip wall: momentum and velocity pinned to 0,
+                // rho/rho_e/p/T zero-gradient.
+                _ => (
+                    3,
+                    vec![n(), d(0.0), d(0.0), n(), d(0.0), d(0.0), n(), n()],
+                ),
             };
-            if stride_s >= 4 {
-                v.push(match edge {
-                    StructEdge::Left => d(e0),
-                    _ => n(),
-                });
-            }
+            v.truncate(stride_s);
             (btype, v)
         });
     } else {
@@ -7952,43 +7973,72 @@ mod structured_boundary_tests {
             &params,
         );
 
-        assert_eq!(solver.runtime_eos_for_test(), air.runtime_params());
+        // GAUGE STORAGE: the structured compressible runtime activates the
+        // gauge around the fluid density.
+        assert_eq!(
+            solver.runtime_eos_for_test(),
+            air.runtime_params_gauged(f64::from(params.density))
+        );
         assert_eq!(
             solver.inlet_velocity_for_test().to_bits(),
             params.inlet_velocity.to_bits(),
             "live inlet target must reach generated-kernel constants"
         );
 
-        let expected = structured_compressible_reference_state(
+        // Explicit (RK4) runs seed the STATE from rest while the inlet BC
+        // table carries the prescribed freestream — the flow develops from
+        // the boundary drive (docs/compressible-explicit-acoustics.md).
+        let expected_seed = structured_compressible_reference_state(
+            air,
+            f64::from(params.density),
+            0.0,
+        );
+        let expected_inlet = structured_compressible_reference_state_gauged(
             air,
             f64::from(params.density),
             f64::from(params.inlet_velocity),
+            f64::from(params.density),
         );
         let stored = |value: f64| f64::from(value as f32);
         let scalar = |name: &str| {
             solver.get_scalar(solver.field_offset(name).expect("structured field"))[0]
         };
-        assert_eq!(scalar("rho"), stored(expected.rho));
-        assert_eq!(scalar("rho_e"), stored(expected.total_energy_density));
-        assert_eq!(scalar("p"), stored(expected.pressure));
-        assert_eq!(scalar("T"), stored(expected.temperature));
+        // GAUGE STORAGE: rho/rho_e/p seed and BC tables hold STORED values.
+        assert_eq!(scalar("rho"), stored(expected_seed.stored_rho));
+        assert_eq!(
+            scalar("rho_e"),
+            stored(expected_seed.stored_total_energy_density)
+        );
+        assert_eq!(scalar("p"), stored(expected_seed.stored_pressure));
+        assert_eq!(scalar("T"), stored(expected_seed.temperature));
         let velocity = solver.get_u(solver.field_offset("u").unwrap())[0];
-        assert_eq!(velocity, (stored(f64::from(params.inlet_velocity)), 0.0));
+        assert_eq!(velocity, (0.0, 0.0), "RK4 seeds the velocity from rest");
 
         // Cell 0's west face is the inlet; coupled unknown order is
-        // rho, rho_u.x, rho_u.y, rho_e.
+        // rho, rho_u.x, rho_u.y, rho_e, u.x, u.y, p, T.
         assert_eq!(solver.bc_kind_at(0, 1, 0), 1);
         assert_eq!(solver.bc_kind_at(0, 1, 1), 1);
         assert_eq!(solver.bc_kind_at(0, 1, 3), 1);
-        assert_eq!(solver.bc_value_at(0, 1, 0), stored(expected.rho));
+        assert_eq!(solver.bc_value_at(0, 1, 0), stored(expected_inlet.stored_rho));
         assert_eq!(
             solver.bc_value_at(0, 1, 1),
-            stored(expected.momentum_x)
+            stored(expected_inlet.momentum_x)
         );
         assert_eq!(
             solver.bc_value_at(0, 1, 3),
-            stored(expected.total_energy_density)
+            stored(expected_inlet.stored_total_energy_density)
         );
+        // The inlet u channels are LOAD-BEARING: the bc_expr kernel rebuilds
+        // the dependent inlet entries from the prescribed velocity every
+        // stage, so an unset (zero) u channel silently kills the momentum
+        // drive (the "small pulse then nothing" failure).
+        assert_eq!(solver.bc_kind_at(0, 1, 4), 1);
+        assert_eq!(solver.bc_kind_at(0, 1, 5), 1);
+        assert_eq!(
+            solver.bc_value_at(0, 1, 4),
+            stored(f64::from(params.inlet_velocity))
+        );
+        assert_eq!(solver.bc_value_at(0, 1, 5), 0.0);
     }
 
     #[test]
@@ -8065,7 +8115,10 @@ mod structured_boundary_tests {
         };
         params = live;
 
-        assert_eq!(solver.runtime_eos_for_test(), air.runtime_params());
+        assert_eq!(
+            solver.runtime_eos_for_test(),
+            air.runtime_params_gauged(f64::from(params.density))
+        );
         assert_eq!(
             solver.inlet_velocity_for_test().to_bits(),
             params.inlet_velocity.to_bits()

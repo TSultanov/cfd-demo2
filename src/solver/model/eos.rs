@@ -277,7 +277,15 @@ impl EosSpec {
             return params;
         }
         let gauge_p = self.pressure_for_density(rho0);
-        let gauge_e = self.internal_energy_density(rho0);
+        // For an ideal gas divide by the f32-ROUNDED gm1 the kernels actually
+        // multiply with, so the closure bias `gm1*e_ref - p_ref` cancels to
+        // exactly zero and the stored pressure is exactly zero at the
+        // reference state.
+        let gauge_e = if matches!(self, EosSpec::IdealGas { .. }) && params.gm1 > 0.0 {
+            gauge_p / f64::from(params.gm1)
+        } else {
+            self.internal_energy_density(rho0)
+        };
         params.gauge_rho_ref = rho0 as f32;
         params.gauge_p_ref = gauge_p as f32;
         params.gauge_e_ref = gauge_e as f32;

@@ -205,6 +205,21 @@ As-built decisions:
   "GPU explicit health check halted after 0 accepted batch steps (N invalid
   cells)". Pinned by
   `gpu_structured_obstacle_direct_autonomous_accepts_all_steps`.
+- TRAP #2 (pre-existing, exposed by the rest-start): the structured BC table
+  must fill the inlet `u` CHANNELS (coupled slots 4/5), not only
+  rho/rho_u/rho_e. The model's bc_expr kernel recomputes the dependent inlet
+  entries every stage as `rho_u = rho_abs * bc(u)`, so an unset (zero) u
+  channel silently overwrites the momentum Dirichlet with zero — the inlet
+  acts as a wall and the from-rest flow never develops ("a small pulse goes
+  through and nothing more"). The uniform-freestream IC used to mask this
+  (the field started moving; the dead inlet only starved it slowly). Fixed in
+  `setup_structured_bcs` (inlet u Dirichlet = u_in, wall u Dirichlet = 0
+  no-slip), pinned by the seed/BC unit test asserting the u channels, and
+  verified by a from-rest run holding the inflow-column momentum at
+  rho0*u_in through 1500 steps. Related: `p_owner` (the bc_expr interior
+  pressure) now floors the ABSOLUTE pressure, not the stored gauge value —
+  the raw `max(p', 1e-6)` would rectify legitimate negative acoustic gauge
+  pressures at the inlet.
 
 Semantics changes visible to users/tests:
 

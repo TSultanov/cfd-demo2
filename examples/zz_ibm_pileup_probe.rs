@@ -161,9 +161,32 @@ fn run_nozzle_fine_dt(
             rho_min = rho_min.min(f64::from(rho[cell_idx]));
         }
     }
+    let mut throat = (0.0_f64, 0usize);
+    let mut exit = (0.0_f64, 0.0_f64, 0usize);
+    for (cell_idx, &(x, _y)) in smoke.cell_centers.iter().enumerate() {
+        if smoke.cell_solid[cell_idx] {
+            continue;
+        }
+        let (ux, uy) = smoke.velocity[cell_idx];
+        let speed = f64::from(ux).hypot(f64::from(uy));
+        if (x - 1.2).abs() < 0.05 {
+            throat.0 = throat.0.max(speed);
+            throat.1 += 1;
+        }
+        if x > 2.9 {
+            exit.0 = exit.0.max(speed);
+            exit.1 += f64::from(smoke.pressure[cell_idx]);
+            exit.2 += 1;
+        }
+    }
     println!(
-        "nozzle-fine {model_id} cell={cell} p_in={p_in} dt={fixed_dt:?} {steps} steps t={:.4e} dt=[{:.3e},{:.3e}]: max|u|={max_speed:.1} p'=[{p_min:.3e},{p_max:.3e}] rho'_min={rho_min:.3e}",
-        smoke.final_time, smoke.min_dt, smoke.max_dt
+        "nozzle-fine {model_id} cell={cell} p_in={p_in} dt={fixed_dt:?} {steps} steps t={:.4e} dt=[{:.3e},{:.3e}]: max|u|={max_speed:.1} throat_max|u|={:.1} exit_max|u|={:.1} exit_mean_p'={:.3e} p'=[{p_min:.3e},{p_max:.3e}] rho'_min={rho_min:.3e}",
+        smoke.final_time,
+        smoke.min_dt,
+        smoke.max_dt,
+        throat.0,
+        exit.0,
+        exit.1 / exit.2.max(1) as f64,
     );
 }
 
@@ -232,6 +255,15 @@ fn main() {
         for steps in [500usize, 3000, 10000] {
             run_nozzle("compressible", "fitted", steps);
             run_nozzle("compressible_structured", "structured", steps);
+        }
+        return;
+    }
+    if std::env::var_os("PROBE_NOZZLE_REGIMES").is_some() {
+        // Nozzle start / expansion regimes vs reservoir pressure (area ratio 2,
+        // exit-Mach ~2.2 branch: p_exit/p0 ~ 0.094; shock-at-exit back-pressure
+        // bound ~0.51 p0; underexpanded exit needs p0 > ~1.08 MPa abs).
+        for p_in in [1.0e5_f32, 2.5e5, 1.2e6] {
+            run_nozzle_fine_dt("compressible", "fitted", 20000, p_in, 0.005, None);
         }
         return;
     }

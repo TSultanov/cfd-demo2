@@ -5432,11 +5432,17 @@ impl eframe::App for CFDApp {
                                 // supersonic outlet, no back-pressure. The slider
                                 // range follows the model family's pressure scale
                                 // (all-Mach gauge units vs compressible Pa).
+                                // Compressible ceiling covers the full regime
+                                // ladder of the area-ratio-2 nozzle (p_e/p0 ~
+                                // 0.094 on the supersonic branch): started
+                                // (shock swallowed) above ~1e5 gauge,
+                                // over-expanded interior-supersonic beyond,
+                                // UNDERexpanded exit above ~1.0e6 gauge.
                                 let pressure_ceiling = if matches!(
                                     self.model_id,
                                     "compressible" | "compressible_structured"
                                 ) {
-                                    3.0e5
+                                    1.5e6
                                 } else {
                                     0.12
                                 };

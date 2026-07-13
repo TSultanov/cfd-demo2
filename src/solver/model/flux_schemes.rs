@@ -73,8 +73,814 @@ pub fn lower_flux_scheme(
     reconstruction: Scheme,
 ) -> Result<FluxModuleKernelSpec, String> {
     match flux_scheme {
-        FluxSchemeSpec::CentralUpwind(decl) => derive_central_upwind(system, decl, reconstruction),
+        // The `Scheme` axis doubles as the flux-FAMILY selector for the
+        // compressible conservation systems: the classic reconstruction
+        // schemes all run through the Kurganov central-upwind derivation,
+        // while `Kep` (non-dissipative central two-point) and `Slau2`
+        // (all-speed AUSM) replace the whole face flux. All variants are
+        // compiled into the same flux module and dispatched at runtime via
+        // `constants.scheme`, so the GUI/driver scheme knob switches between
+        // them live.
+        FluxSchemeSpec::CentralUpwind(decl) => match reconstruction {
+            Scheme::Kep => derive_kep(system, decl),
+            Scheme::Slau2 => derive_slau2(system, decl),
+            _ => derive_central_upwind(system, decl, reconstruction),
+        },
     }
+}
+
+// ---------------------------------------------------------------------------
+// Shared expression helpers for the KEP / SLAU2 derivations. The classic
+// central-upwind derivation predates these and keeps its fully-boxed style.
+// ---------------------------------------------------------------------------
+
+fn add(a: S, b: S) -> S {
+    S::Add(Box::new(a), Box::new(b))
+}
+fn sub(a: S, b: S) -> S {
+    S::Sub(Box::new(a), Box::new(b))
+}
+fn mul(a: S, b: S) -> S {
+    S::Mul(Box::new(a), Box::new(b))
+}
+fn div(a: S, b: S) -> S {
+    S::Div(Box::new(a), Box::new(b))
+}
+fn smin(a: S, b: S) -> S {
+    S::Min(Box::new(a), Box::new(b))
+}
+fn smax(a: S, b: S) -> S {
+    S::Max(Box::new(a), Box::new(b))
+}
+fn sabs(a: S) -> S {
+    S::Abs(Box::new(a))
+}
+fn dot(a: V, b: V) -> S {
+    S::Dot(Box::new(a), Box::new(b))
+}
+fn avg(a: S, b: S) -> S {
+    mul(S::lit(0.5), add(a, b))
+}
+/// The IBM (Brinkman) whole-face seal shared by every compressible flux
+/// family (see the detailed rationale in `derive_central_upwind`): scalar
+/// (mass/energy) fluxes vanish on any face touching a penalty cell; momentum
+/// fluxes reduce to the wall pressure force `p_fluid * Sf` so the immersed
+/// wall is impermeable without becoming a pressure-release surface.
+struct IbmSeal {
+    active: bool,
+    seal: S,
+    p_wall: S,
+}
+
+impl IbmSeal {
+    fn build(system: &EquationSystem, pressure_field: &'static str) -> Self {
+        let solid_frac = |side: FaceSide| {
+            smin(sabs(S::state(side, "ibm_penalty_U")), S::lit(1.0))
+        };
+        let seal = sub(
+            S::lit(1.0),
+            smin(
+                add(solid_frac(FaceSide::Owner), solid_frac(FaceSide::Neighbor)),
+                S::lit(1.0),
+            ),
+        );
+        // Fluid side's stored (gauge) cell pressure: own fluid -> p_own; own
+        // solid -> p_neigh (solid-solid faces are momentum-pinned anyway).
+        let p_wall = add(
+            mul(
+                sub(S::lit(1.0), solid_frac(FaceSide::Owner)),
+                S::state(FaceSide::Owner, pressure_field),
+            ),
+            mul(
+                solid_frac(FaceSide::Owner),
+                S::state(FaceSide::Neighbor, pressure_field),
+            ),
+        );
+        IbmSeal {
+            active: system_has_ibm_penalty(system),
+            seal,
+            p_wall,
+        }
+    }
+
+    fn scalar(&self, phi: S) -> S {
+        if self.active {
+            mul(phi, self.seal.clone())
+        } else {
+            phi
+        }
+    }
+
+    fn momentum(&self, phi: S, sf_component: S) -> S {
+        if !self.active {
+            return phi;
+        }
+        let wall_force = mul(
+            sub(S::lit(1.0), self.seal.clone()),
+            mul(self.p_wall.clone(), sf_component),
+        );
+        add(mul(phi, self.seal.clone()), wall_force)
+    }
+}
+
+/// OpenFOAM rhoCentralFoam-style explicit viscous face corrections shared by
+/// every compressible flux family (see the detailed derivation comments in
+/// `derive_central_upwind`): the `tauMC = mu*dev2(grad(U))^T` traction that
+/// complements the implicit `laplacian(mu, u)` momentum term, and the
+/// viscous-work power `sigma . u` for the energy equation. `u_sigma` is the
+/// face velocity the traction power acts on (flux-family choice).
+fn viscous_face_corrections(velocity: &'static str, u_sigma: V) -> (S, S, S) {
+    let ex = V::vec2(S::lit(1.0), S::lit(0.0));
+    let ey = V::vec2(S::lit(0.0), S::lit(1.0));
+    let n = V::normal();
+    let n_x = dot(n.clone(), ex.clone());
+    let n_y = dot(n.clone(), ey.clone());
+    let visc_mu = S::constant("viscosity");
+    let grad_u_x_name = format!("grad_{}_x", velocity);
+    let grad_u_y_name = format!("grad_{}_y", velocity);
+
+    // Face gradient: lerp of cell gradients, boundary-corrected so the normal
+    // component matches snGrad(U) (neighbor-side grads are zeroed on boundary
+    // faces by the resolver; flip the lerp order so boundaries default to the
+    // owner gradient).
+    let grad_u_x_face_raw = V::Lerp(
+        Box::new(V::state_vec2(FaceSide::Neighbor, grad_u_x_name.clone())),
+        Box::new(V::state_vec2(FaceSide::Owner, grad_u_x_name.clone())),
+    );
+    let grad_u_y_face_raw = V::Lerp(
+        Box::new(V::state_vec2(FaceSide::Neighbor, grad_u_y_name.clone())),
+        Box::new(V::state_vec2(FaceSide::Owner, grad_u_y_name.clone())),
+    );
+    let is_boundary = S::is_boundary();
+    let dist_safe = smax(S::dist(), S::lit(1e-6));
+    let u_face = V::state_vec2(FaceSide::Owner, velocity);
+    let u_cell = V::cell_state_vec2(FaceSide::Owner, velocity);
+    let sn_grad_u_x = div(
+        sub(dot(u_face.clone(), ex.clone()), dot(u_cell.clone(), ex.clone())),
+        dist_safe.clone(),
+    );
+    let sn_grad_u_y = div(
+        sub(dot(u_face, ey.clone()), dot(u_cell, ey.clone())),
+        dist_safe,
+    );
+    let grad_u_x_face = V::Add(
+        Box::new(grad_u_x_face_raw.clone()),
+        Box::new(V::MulScalar(
+            Box::new(n.clone()),
+            Box::new(mul(
+                is_boundary.clone(),
+                sub(sn_grad_u_x, dot(n.clone(), grad_u_x_face_raw)),
+            )),
+        )),
+    );
+    let grad_u_y_face = V::Add(
+        Box::new(grad_u_y_face_raw.clone()),
+        Box::new(V::MulScalar(
+            Box::new(n.clone()),
+            Box::new(mul(
+                is_boundary,
+                sub(sn_grad_u_y, dot(n.clone(), grad_u_y_face_raw)),
+            )),
+        )),
+    );
+
+    let two_thirds = S::lit(2.0 / 3.0);
+    let tau_mc_dot_n_components = |side: FaceSide| {
+        let grad_u_x_side = V::state_vec2(side, grad_u_x_name.clone());
+        let grad_u_y_side = V::state_vec2(side, grad_u_y_name.clone());
+        let dux_dx_s = dot(grad_u_x_side.clone(), ex.clone());
+        let dux_dy_s = dot(grad_u_x_side, ey.clone());
+        let duy_dx_s = dot(grad_u_y_side.clone(), ex.clone());
+        let duy_dy_s = dot(grad_u_y_side, ey.clone());
+        let div_u_s = add(dux_dx_s.clone(), duy_dy_s.clone());
+        let tau_xx_s = sub(dux_dx_s, mul(two_thirds.clone(), div_u_s.clone()));
+        let tau_yy_s = sub(duy_dy_s, mul(two_thirds.clone(), div_u_s));
+        let traction_x = mul(
+            visc_mu.clone(),
+            add(mul(tau_xx_s, n_x.clone()), mul(duy_dx_s, n_y.clone())),
+        );
+        let traction_y = mul(
+            visc_mu.clone(),
+            add(mul(dux_dy_s, n_x.clone()), mul(tau_yy_s, n_y.clone())),
+        );
+        (traction_x, traction_y)
+    };
+    let (tau_x_own, tau_y_own) = tau_mc_dot_n_components(FaceSide::Owner);
+    let (tau_x_neigh, tau_y_neigh) = tau_mc_dot_n_components(FaceSide::Neighbor);
+    let tau_mc_dot_n_x = S::Lerp(Box::new(tau_x_neigh), Box::new(tau_x_own));
+    let tau_mc_dot_n_y = S::Lerp(Box::new(tau_y_neigh), Box::new(tau_y_own));
+
+    let sn_grad_u_face = V::vec2(
+        dot(grad_u_x_face, V::normal()),
+        dot(grad_u_y_face, V::normal()),
+    );
+    let traction_tau = V::vec2(tau_mc_dot_n_x.clone(), tau_mc_dot_n_y.clone());
+    let traction_lapl = V::MulScalar(Box::new(sn_grad_u_face), Box::new(S::constant("viscosity")));
+    let traction = V::Add(Box::new(traction_lapl), Box::new(traction_tau));
+    let sigma_dot_u_per_area = dot(traction, u_sigma);
+
+    (tau_mc_dot_n_x, tau_mc_dot_n_y, sigma_dot_u_per_area)
+}
+
+/// Kinetic-energy-preserving central two-point flux (Kennedy–Gruber mass and
+/// momentum pair with a conserved-average total-enthalpy energy flux).
+///
+///   F_rho  = avg(rho) * (avg(u) . Sf)
+///   F_rhoU = F_rho * avg(u) + avg(p') * Sf
+///   F_rhoE = (avg(rho_e) + avg(p)) * (avg(u) . Sf)
+///
+/// The mass/momentum pair satisfies Jameson's discrete kinetic-energy
+/// preservation condition (momentum flux = mdot * avg(u) + pressure), so the
+/// convective terms add NO artificial dissipation at ANY wavenumber: the
+/// c-scale Kurganov jump dissipation that acts as a ~1000x-physical shear
+/// viscosity at low Mach (measured on the explicit obstacle) is absent
+/// entirely, and the only momentum dissipation left is the physical `mu`.
+/// The price is that the scheme is neutrally stable at grid Nyquist —
+/// odd-even modes are invisible to the central pressure gradient — so it is
+/// paired with the structured selective filter (high-order low-pass, damping
+/// ONLY the unresolved tail). Boundary faces keep the first-order Kurganov
+/// closure (the runtime-scheme dispatch applies non-Upwind variants on
+/// interior faces only), which carries the well-tested BC ghost contract.
+///
+/// Gauge storage: all averages act on the STORED deviations; the constant
+/// references advect through dedicated regrouped terms (`ref * phiv`), so a
+/// quiescent gauge state produces exactly zero flux and the deviation
+/// arithmetic never round-trips through reference-magnitude products.
+fn derive_kep(
+    system: &EquationSystem,
+    decl: &CentralUpwindDecl,
+) -> Result<FluxModuleKernelSpec, String> {
+    let flux_layout = FluxLayout::from_system(system);
+    let components: Vec<String> = flux_layout
+        .components
+        .iter()
+        .map(|c| c.name.clone())
+        .collect();
+
+    let ex = V::vec2(S::lit(1.0), S::lit(0.0));
+    let ey = V::vec2(S::lit(0.0), S::lit(1.0));
+    let rho_name = decl.density;
+    let rho_u_name = decl.momentum;
+    let rho_e_name = decl.energy;
+
+    // Raw (cell) states: a two-point KEP flux performs NO reconstruction —
+    // MUSCL extrapolation would break the discrete KE-preservation identity.
+    let rho_raw = |side: FaceSide| S::state(side, rho_name);
+    let rho_e_raw = |side: FaceSide| S::state(side, rho_e_name);
+    let rho_u_raw = |side: FaceSide| V::state_vec2(side, rho_u_name);
+    let rho_abs = |side: FaceSide| add(rho_raw(side), S::constant("eos_gauge_rho_ref"));
+    let u_vec = |side: FaceSide| {
+        V::MulScalar(
+            Box::new(rho_u_raw(side)),
+            Box::new(div(S::lit(1.0), rho_abs(side))),
+        )
+    };
+
+    // Declared EOS over the raw conserved state (gauge pressure).
+    let p_lowered = |side: FaceSide| -> Result<S, String> {
+        lower_alg_to_face(
+            &decl.pressure,
+            &|name| {
+                if name == rho_name {
+                    Ok(rho_raw(side))
+                } else if name == rho_e_name {
+                    Ok(rho_e_raw(side))
+                } else {
+                    Err(format!(
+                        "pressure declaration references scalar '{name}', expected only '{}' or \
+                         '{}'",
+                        rho_name, rho_e_name
+                    ))
+                }
+            },
+            &|name| {
+                if name == rho_u_name {
+                    let momentum = rho_u_raw(side);
+                    Ok(dot(momentum.clone(), momentum))
+                } else {
+                    Err(format!(
+                        "pressure declaration references mag_sqr({name}), expected only \
+                         mag_sqr({rho_u_name})"
+                    ))
+                }
+            },
+        )
+    };
+    let p_own = p_lowered(FaceSide::Owner)?;
+    let p_neigh = p_lowered(FaceSide::Neighbor)?;
+
+    let sf = V::MulScalar(Box::new(V::normal()), Box::new(S::area()));
+    let n_x = dot(V::normal(), ex.clone());
+    let n_y = dot(V::normal(), ey.clone());
+    let sf_x = mul(S::area(), n_x);
+    let sf_y = mul(S::area(), n_y);
+
+    // Face-average velocity and the area-integrated volume flux it carries.
+    let v_bar = V::MulScalar(
+        Box::new(V::Add(
+            Box::new(u_vec(FaceSide::Owner)),
+            Box::new(u_vec(FaceSide::Neighbor)),
+        )),
+        Box::new(S::lit(0.5)),
+    );
+    let phiv_bar = dot(v_bar.clone(), sf);
+    let v_bar_x = dot(v_bar.clone(), ex.clone());
+    let v_bar_y = dot(v_bar.clone(), ey.clone());
+
+    // Viscous corrections: traction power acts on the same face-average
+    // velocity the convective flux advects with.
+    let (tau_mc_dot_n_x, tau_mc_dot_n_y, sigma_dot_u_per_area) =
+        viscous_face_corrections(decl.velocity, v_bar);
+
+    // Mass: deviation + reference advection, grouped so each part keeps its
+    // own magnitude scale in f32 (the WGSL printer preserves grouping).
+    let phi_mass = add(
+        mul(avg(rho_raw(FaceSide::Owner), rho_raw(FaceSide::Neighbor)), phiv_bar.clone()),
+        mul(S::constant("eos_gauge_rho_ref"), phiv_bar.clone()),
+    );
+
+    // Momentum: mdot * avg(u) + avg(p') * Sf - tauMC traction. The constant
+    // gauge reference pressure force telescopes to zero around any closed
+    // cell, so only the stored (gauge) pressure appears — same convention as
+    // the central-upwind momentum flux.
+    let p_bar = avg(p_own.clone(), p_neigh.clone());
+    let phi_up_x = sub(
+        add(
+            mul(phi_mass.clone(), v_bar_x),
+            mul(p_bar.clone(), sf_x.clone()),
+        ),
+        mul(tau_mc_dot_n_x, S::area()),
+    );
+    let phi_up_y = sub(
+        add(mul(phi_mass.clone(), v_bar_y), mul(p_bar, sf_y.clone())),
+        mul(tau_mc_dot_n_y, S::area()),
+    );
+
+    // Energy: central total-enthalpy advection. Deviation part uses stored
+    // rho_e' and gauge p'; the constant reference enthalpy advects through
+    // its own regrouped term (exactly the central-upwind pattern, with the
+    // Kurganov weight sum replaced by the plain face-average volume flux).
+    let reference_enthalpy = add(
+        S::constant("eos_gauge_e_ref"),
+        S::constant("eos_gauge_p_ref"),
+    );
+    let phi_ep = sub(
+        add(
+            mul(
+                add(
+                    avg(rho_e_raw(FaceSide::Owner), rho_e_raw(FaceSide::Neighbor)),
+                    avg(p_own, p_neigh),
+                ),
+                phiv_bar.clone(),
+            ),
+            mul(reference_enthalpy, phiv_bar),
+        ),
+        mul(sigma_dot_u_per_area, S::area()),
+    );
+
+    let seal = IbmSeal::build(system, decl.pressure_field);
+    let mut flux = Vec::new();
+    for name in &components {
+        if name == rho_name {
+            flux.push(seal.scalar(phi_mass.clone()));
+        } else if name == &format!("{rho_u_name}_x") {
+            flux.push(seal.momentum(phi_up_x.clone(), sf_x.clone()));
+        } else if name == &format!("{rho_u_name}_y") {
+            flux.push(seal.momentum(phi_up_y.clone(), sf_y.clone()));
+        } else if name == rho_e_name {
+            flux.push(seal.scalar(phi_ep.clone()));
+        } else {
+            flux.push(S::lit(0.0));
+        }
+    }
+
+    Ok(FluxModuleKernelSpec::ScalarPerComponent { components, flux })
+}
+
+/// SLAU2 all-speed AUSM-family flux (Shima & Kitamura, AIAA J. 2011 / 2013)
+/// over vanLeer-limited MUSCL reconstruction.
+///
+/// The mass flux carries a `(chi/c_bar) * (p_R - p_L)` pressure-diffusion
+/// term with `chi = (1 - M_hat)^2`: at low Mach this is exactly the
+/// pressure–velocity coupling that keeps the collocated odd-even mode damped
+/// (the mechanism whose absence made plain Mach-scaled Kurganov dissipation
+/// blow up in a u-checkerboard), while the velocity-diffusion part of the
+/// interface pressure scales with |u| — so the effective shear dissipation
+/// follows the FLOW speed, not the sound speed. Shock-capturing robustness
+/// comes from the `rho_bar * c_bar`-scaled pressure term (the SLAU2 change
+/// over SLAU). Boundary faces keep the first-order Kurganov closure, like
+/// every non-Upwind variant.
+///
+/// Gauge storage: every pressure DIFFERENCE uses the stored gauge values
+/// directly (identical to absolute differences); the interface pressure that
+/// multiplies `Sf` is assembled in gauge form (the constant reference force
+/// telescopes); the total enthalpy adds the references once per side. The
+/// mass flux is |u|-scale, so no c-scale reference regrouping is needed.
+fn derive_slau2(
+    system: &EquationSystem,
+    decl: &CentralUpwindDecl,
+) -> Result<FluxModuleKernelSpec, String> {
+    let flux_layout = FluxLayout::from_system(system);
+    let components: Vec<String> = flux_layout
+        .components
+        .iter()
+        .map(|c| c.name.clone())
+        .collect();
+
+    let ex = V::vec2(S::lit(1.0), S::lit(0.0));
+    let ey = V::vec2(S::lit(0.0), S::lit(1.0));
+    let rho_name = decl.density;
+    let rho_u_name = decl.momentum;
+    let rho_e_name = decl.energy;
+    let grad_rho_name = format!("grad_{}", rho_name);
+    let grad_rho_e_name = format!("grad_{}", rho_e_name);
+    let grad_t_name = format!("grad_{}", decl.temperature);
+    let grad_rho_u_x_name = format!("grad_{}_x", rho_u_name);
+    let grad_rho_u_y_name = format!("grad_{}_y", rho_u_name);
+
+    // vanLeer-limited MUSCL reconstruction (the family's default limiter),
+    // mirroring the central-upwind `SecondOrderUpwindVanLeer` path exactly.
+    let eps2 = S::lit(1e-30);
+    let vanleer_limiter = |gradf: S, gradcf: S| {
+        let gradf2 = mul(gradf.clone(), gradf.clone());
+        let ratio = div(mul(gradcf, gradf.clone()), add(gradf2, eps2.clone()));
+        let r_raw = sub(mul(S::lit(2.0), ratio), S::lit(1.0));
+        let r = smax(S::lit(-2001.0), smin(r_raw, S::lit(1999.0)));
+        let abs_r = sabs(r.clone());
+        div(add(r, abs_r.clone()), add(S::lit(1.0), abs_r))
+    };
+    let d = V::Sub(
+        Box::new(V::cell_to_face(FaceSide::Owner)),
+        Box::new(V::cell_to_face(FaceSide::Neighbor)),
+    );
+    let reconstruct_scalar_vl = |side: FaceSide, phi_p: S, phi_n: S, grad_p: V, grad_n: V| -> S {
+        let gradf = sub(phi_n.clone(), phi_p.clone());
+        let grad = if side == FaceSide::Owner { grad_p } else { grad_n };
+        let gradcf = dot(d.clone(), grad);
+        let limiter = vanleer_limiter(gradf.clone(), gradcf);
+        let delta = match side {
+            FaceSide::Owner => mul(limiter, S::lambda_other()),
+            FaceSide::Neighbor => mul(limiter, S::lambda()),
+        };
+        match side {
+            FaceSide::Owner => add(phi_p, mul(delta, gradf)),
+            FaceSide::Neighbor => sub(phi_n, mul(delta, gradf)),
+        }
+    };
+    let reconstruct_vec2_vl = |side: FaceSide,
+                               phi_p: V,
+                               phi_n: V,
+                               grad_px: V,
+                               grad_py: V,
+                               grad_nx: V,
+                               grad_ny: V|
+     -> V {
+        let gradf_v = V::Sub(Box::new(phi_n.clone()), Box::new(phi_p.clone()));
+        let gradf = dot(gradf_v.clone(), gradf_v.clone());
+        let (gx, gy) = if side == FaceSide::Owner {
+            (grad_px, grad_py)
+        } else {
+            (grad_nx, grad_ny)
+        };
+        let gradcf_x = dot(d.clone(), gx);
+        let gradcf_y = dot(d.clone(), gy);
+        let gradcf = dot(gradf_v.clone(), V::vec2(gradcf_x, gradcf_y));
+        let limiter = vanleer_limiter(gradf, gradcf);
+        let delta = match side {
+            FaceSide::Owner => mul(limiter, S::lambda_other()),
+            FaceSide::Neighbor => mul(limiter, S::lambda()),
+        };
+        let corr = V::MulScalar(Box::new(gradf_v), Box::new(delta));
+        match side {
+            FaceSide::Owner => V::Add(Box::new(phi_p), Box::new(corr)),
+            FaceSide::Neighbor => V::Sub(Box::new(phi_n), Box::new(corr)),
+        }
+    };
+
+    let rho_raw = |side: FaceSide| S::state(side, rho_name);
+    let rho_e_raw = |side: FaceSide| S::state(side, rho_e_name);
+    let t_raw = |side: FaceSide| S::state(side, decl.temperature);
+    let rho = |side: FaceSide| {
+        reconstruct_scalar_vl(
+            side,
+            rho_raw(FaceSide::Owner),
+            rho_raw(FaceSide::Neighbor),
+            V::state_vec2(FaceSide::Owner, grad_rho_name.clone()),
+            V::state_vec2(FaceSide::Neighbor, grad_rho_name.clone()),
+        )
+    };
+    let rho_e = |side: FaceSide| {
+        reconstruct_scalar_vl(
+            side,
+            rho_e_raw(FaceSide::Owner),
+            rho_e_raw(FaceSide::Neighbor),
+            V::state_vec2(FaceSide::Owner, grad_rho_e_name.clone()),
+            V::state_vec2(FaceSide::Neighbor, grad_rho_e_name.clone()),
+        )
+    };
+    let rho_u = |side: FaceSide| {
+        reconstruct_vec2_vl(
+            side,
+            V::state_vec2(FaceSide::Owner, rho_u_name),
+            V::state_vec2(FaceSide::Neighbor, rho_u_name),
+            V::state_vec2(FaceSide::Owner, grad_rho_u_x_name.clone()),
+            V::state_vec2(FaceSide::Owner, grad_rho_u_y_name.clone()),
+            V::state_vec2(FaceSide::Neighbor, grad_rho_u_x_name.clone()),
+            V::state_vec2(FaceSide::Neighbor, grad_rho_u_y_name.clone()),
+        )
+    };
+    let rho_abs = |side: FaceSide| add(rho(side), S::constant("eos_gauge_rho_ref"));
+    let u_vec = |side: FaceSide| {
+        V::MulScalar(
+            Box::new(rho_u(side)),
+            Box::new(div(S::lit(1.0), rho_abs(side))),
+        )
+    };
+
+    // Declared EOS over the coherent reconstructed conserved state.
+    let p_lowered = |side: FaceSide| -> Result<S, String> {
+        lower_alg_to_face(
+            &decl.pressure,
+            &|name| {
+                if name == rho_name {
+                    Ok(rho(side))
+                } else if name == rho_e_name {
+                    Ok(rho_e(side))
+                } else {
+                    Err(format!(
+                        "pressure declaration references scalar '{name}', expected only '{}' or \
+                         '{}'",
+                        rho_name, rho_e_name
+                    ))
+                }
+            },
+            &|name| {
+                if name == rho_u_name {
+                    let momentum = rho_u(side);
+                    Ok(dot(momentum.clone(), momentum))
+                } else {
+                    Err(format!(
+                        "pressure declaration references mag_sqr({name}), expected only \
+                         mag_sqr({rho_u_name})"
+                    ))
+                }
+            },
+        )
+    };
+    let p_own = p_lowered(FaceSide::Owner)?;
+    let p_neigh = p_lowered(FaceSide::Neighbor)?;
+    let p = |side: FaceSide| {
+        if side == FaceSide::Owner {
+            p_own.clone()
+        } else {
+            p_neigh.clone()
+        }
+    };
+
+    // Acoustic speed per side: sqrt(declared wave_speed_sq) over raw cell
+    // temperatures, vanLeer-reconstructed to the face with the analytic
+    // grad(c) — mirroring the central-upwind treatment.
+    let c_cell_lowered = |side: FaceSide| -> Result<S, String> {
+        Ok(S::Sqrt(Box::new(lower_alg_to_face(
+            &decl.wave_speed_sq,
+            &|name| {
+                if name == decl.temperature {
+                    Ok(t_raw(side))
+                } else {
+                    Err(format!(
+                        "wave-speed declaration references '{name}', expected only '{}'",
+                        decl.temperature
+                    ))
+                }
+            },
+            &|name| {
+                Err(format!(
+                    "wave-speed declaration unexpectedly references mag_sqr({name})"
+                ))
+            },
+        )?)))
+    };
+    let c_cell_own = c_cell_lowered(FaceSide::Owner)?;
+    let c_cell_neigh = c_cell_lowered(FaceSide::Neighbor)?;
+    let c_cell = |side: FaceSide| {
+        if side == FaceSide::Owner {
+            c_cell_own.clone()
+        } else {
+            c_cell_neigh.clone()
+        }
+    };
+    let grad_c = |side: FaceSide| {
+        let denom = smax(c_cell(side), S::lit(1e-12));
+        let factor = div(
+            mul(
+                S::lit(0.5),
+                mul(S::constant("eos_gamma"), S::constant("eos_r")),
+            ),
+            denom,
+        );
+        V::MulScalar(
+            Box::new(V::state_vec2(side, grad_t_name.clone())),
+            Box::new(factor),
+        )
+    };
+    let c_face = |side: FaceSide| {
+        reconstruct_scalar_vl(
+            side,
+            c_cell(FaceSide::Owner),
+            c_cell(FaceSide::Neighbor),
+            grad_c(FaceSide::Owner),
+            grad_c(FaceSide::Neighbor),
+        )
+    };
+
+    // --- SLAU2 interface algebra (per unit area; integrated at the end) ---
+    let u_l = u_vec(FaceSide::Owner);
+    let u_r = u_vec(FaceSide::Neighbor);
+    let rho_l = rho_abs(FaceSide::Owner);
+    let rho_r = rho_abs(FaceSide::Neighbor);
+    let n = V::normal();
+    let vn_l = dot(u_l.clone(), n.clone());
+    let vn_r = dot(u_r.clone(), n.clone());
+    let c_bar = smax(
+        avg(c_face(FaceSide::Owner), c_face(FaceSide::Neighbor)),
+        S::lit(1e-12),
+    );
+    let m_l = div(vn_l.clone(), c_bar.clone());
+    let m_r = div(vn_r.clone(), c_bar.clone());
+
+    // M_hat = min(1, sqrt((|uL|^2+|uR|^2)/2)/c_bar); chi = (1-M_hat)^2.
+    let u2_hat = avg(dot(u_l.clone(), u_l.clone()), dot(u_r.clone(), u_r.clone()));
+    let u_hat = S::Sqrt(Box::new(u2_hat));
+    let m_hat = smin(div(u_hat.clone(), c_bar.clone()), S::lit(1.0));
+    let chi = {
+        let one_minus = sub(S::lit(1.0), m_hat);
+        mul(one_minus.clone(), one_minus)
+    };
+
+    // g = -max(min(ML,0),-1) * min(max(MR,0),1)  in [0,1]: engages only when
+    // the face straddles a sonic rarefaction/shock (ML<0<MR patterns).
+    let g = mul(
+        S::Neg(Box::new(smax(
+            smin(m_l.clone(), S::lit(0.0)),
+            S::lit(-1.0),
+        ))),
+        smin(smax(m_r.clone(), S::lit(0.0)), S::lit(1.0)),
+    );
+
+    // Density-weighted mean normal speed magnitude and its g-blended sides.
+    let vn_bar_abs = div(
+        add(
+            mul(rho_l.clone(), sabs(vn_l.clone())),
+            mul(rho_r.clone(), sabs(vn_r.clone())),
+        ),
+        smax(add(rho_l.clone(), rho_r.clone()), S::lit(1e-30)),
+    );
+    let one_minus_g = sub(S::lit(1.0), g.clone());
+    let vn_abs_p = add(
+        mul(one_minus_g.clone(), vn_bar_abs.clone()),
+        mul(g.clone(), sabs(vn_l.clone())),
+    );
+    let vn_abs_m = add(
+        mul(one_minus_g, vn_bar_abs),
+        mul(g, sabs(vn_r.clone())),
+    );
+
+    // Mass flux (per unit area). The pressure-diffusion term uses the GAUGE
+    // pressure difference (== absolute difference).
+    let mdot = mul(
+        S::lit(0.5),
+        sub(
+            add(
+                mul(rho_l.clone(), add(vn_l.clone(), vn_abs_p)),
+                mul(rho_r.clone(), sub(vn_r.clone(), vn_abs_m)),
+            ),
+            mul(
+                div(chi, c_bar.clone()),
+                sub(p(FaceSide::Neighbor), p(FaceSide::Owner)),
+            ),
+        ),
+    );
+    let mdot_p = mul(S::lit(0.5), add(mdot.clone(), sabs(mdot.clone())));
+    let mdot_m = mul(S::lit(0.5), sub(mdot.clone(), sabs(mdot.clone())));
+
+    // Pressure split polynomials on clamped Mach numbers: the clamp
+    // reproduces the supersonic step values exactly (P+ = 1 at M >= 1,
+    // 0 at M <= -1).
+    let mc_l = smax(smin(m_l, S::lit(1.0)), S::lit(-1.0));
+    let mc_r = smax(smin(m_r, S::lit(1.0)), S::lit(-1.0));
+    let p_plus = {
+        let mp1 = add(mc_l.clone(), S::lit(1.0));
+        mul(
+            mul(S::lit(0.25), mul(mp1.clone(), mp1)),
+            sub(S::lit(2.0), mc_l),
+        )
+    };
+    let p_minus = {
+        let mm1 = sub(mc_r.clone(), S::lit(1.0));
+        mul(
+            mul(S::lit(0.25), mul(mm1.clone(), mm1)),
+            add(S::lit(2.0), mc_r),
+        )
+    };
+
+    // SLAU2 interface pressure, assembled in GAUGE form: the constant
+    // reference force telescopes around closed cells, so only the stored
+    // pressure and the velocity-diffusion term appear.
+    let rho_bar = avg(rho_l.clone(), rho_r.clone());
+    let p_tilde = add(
+        add(
+            avg(p(FaceSide::Owner), p(FaceSide::Neighbor)),
+            mul(
+                mul(S::lit(0.5), sub(p_plus.clone(), p_minus.clone())),
+                sub(p(FaceSide::Owner), p(FaceSide::Neighbor)),
+            ),
+        ),
+        mul(
+            mul(u_hat, sub(add(p_plus, p_minus), S::lit(1.0))),
+            mul(rho_bar, c_bar),
+        ),
+    );
+
+    // Total specific enthalpy per side (absolute).
+    let h_side = |side: FaceSide| {
+        div(
+            add(
+                add(rho_e(side), S::constant("eos_gauge_e_ref")),
+                add(p(side), S::constant("eos_gauge_p_ref")),
+            ),
+            rho_abs(side),
+        )
+    };
+
+    // Viscous corrections: traction power on the arithmetic face-average
+    // velocity.
+    let u_sigma = V::MulScalar(
+        Box::new(V::Add(Box::new(u_l.clone()), Box::new(u_r.clone()))),
+        Box::new(S::lit(0.5)),
+    );
+    let (tau_mc_dot_n_x, tau_mc_dot_n_y, sigma_dot_u_per_area) =
+        viscous_face_corrections(decl.velocity, u_sigma);
+
+    let n_x = dot(n.clone(), ex.clone());
+    let n_y = dot(n, ey.clone());
+    let sf_x = mul(S::area(), n_x.clone());
+    let sf_y = mul(S::area(), n_y.clone());
+
+    let phi_mass = mul(mdot.clone(), S::area());
+    let phi_up_x = sub(
+        mul(
+            add(
+                add(
+                    mul(mdot_p.clone(), dot(u_l.clone(), ex.clone())),
+                    mul(mdot_m.clone(), dot(u_r.clone(), ex)),
+                ),
+                mul(p_tilde.clone(), n_x),
+            ),
+            S::area(),
+        ),
+        mul(tau_mc_dot_n_x, S::area()),
+    );
+    let phi_up_y = sub(
+        mul(
+            add(
+                add(
+                    mul(mdot_p.clone(), dot(u_l, ey.clone())),
+                    mul(mdot_m.clone(), dot(u_r, ey)),
+                ),
+                mul(p_tilde, n_y),
+            ),
+            S::area(),
+        ),
+        mul(tau_mc_dot_n_y, S::area()),
+    );
+    let phi_ep = sub(
+        mul(
+            add(
+                mul(mdot_p, h_side(FaceSide::Owner)),
+                mul(mdot_m, h_side(FaceSide::Neighbor)),
+            ),
+            S::area(),
+        ),
+        mul(sigma_dot_u_per_area, S::area()),
+    );
+
+    let seal = IbmSeal::build(system, decl.pressure_field);
+    let mut flux = Vec::new();
+    for name in &components {
+        if name == rho_name {
+            flux.push(seal.scalar(phi_mass.clone()));
+        } else if name == &format!("{rho_u_name}_x") {
+            flux.push(seal.momentum(phi_up_x.clone(), sf_x.clone()));
+        } else if name == &format!("{rho_u_name}_y") {
+            flux.push(seal.momentum(phi_up_y.clone(), sf_y.clone()));
+        } else if name == rho_e_name {
+            flux.push(seal.scalar(phi_ep.clone()));
+        } else {
+            flux.push(S::lit(0.0));
+        }
+    }
+
+    Ok(FluxModuleKernelSpec::ScalarPerComponent { components, flux })
 }
 
 /// True when any equation term's coefficient references the Brinkman
@@ -183,7 +989,9 @@ fn derive_central_upwind(
     let reconstruct_scalar = |side: FaceSide, phi_cell: S, phi_other: S, grad: V| -> S {
         let grad = V::MulScalar(Box::new(grad), Box::new(positivity_scale(side)));
         match reconstruction {
-            Scheme::Upwind => phi_cell,
+            // Flux-family selectors never reach this derivation (dispatched
+            // in `lower_flux_scheme`); keep the arm total for exhaustiveness.
+            Scheme::Upwind | Scheme::Kep | Scheme::Slau2 => phi_cell,
 
             Scheme::SecondOrderUpwind
             | Scheme::SecondOrderUpwindMinMod
@@ -2042,17 +2850,20 @@ mod tests {
         ];
 
         for (name, wgsl) in generated {
+            // 2 closures (owner+neighbor) x 9 schemes: 7 reconstruction
+            // variants of the central-upwind family + the Kep and Slau2
+            // flux families.
             assert_eq!(
                 wgsl.matches("constants.eos_gm1 * (").count(),
-                14,
-                "{name}: expected owner+neighbor closure for all seven schemes"
+                18,
+                "{name}: expected owner+neighbor closure for all nine schemes"
             );
             assert_eq!(
                 wgsl.matches(
                     "+ (constants.eos_gauge_rho_ref - constants.eos_rho_ref)) + constants.eos_gauge_p_bias"
                 )
                 .count(),
-                14,
+                18,
                 "{name}: gauge-grouped centered affine closure was expanded or omitted"
             );
             assert!(wgsl.contains("s_own_rho_e"));

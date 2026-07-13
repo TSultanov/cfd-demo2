@@ -121,6 +121,10 @@ pub fn scalar_reconstruction_stmts(
             Scheme::QUICK => (LimiterSpec::None, true),
             Scheme::QUICKMinMod => (LimiterSpec::MinMod, true),
             Scheme::QUICKVanLeer => (LimiterSpec::VanLeer, true),
+            // Flux-family selectors (only the compressible flux modules
+            // implement them): the matrix-path reconstruction falls back to
+            // the vanLeer-limited MUSCL default.
+            Scheme::Kep | Scheme::Slau2 => (LimiterSpec::VanLeer, false),
         };
         let (pos, neg) = if quick {
             (
@@ -174,6 +178,10 @@ pub fn scalar_reconstruction_stmts(
                 Scheme::SecondOrderUpwindVanLeer,
                 Scheme::QUICKMinMod,
                 Scheme::QUICKVanLeer,
+                // Flux-family selectors: matrix-path reconstruction uses the
+                // vanLeer MUSCL fallback (see `variant`).
+                Scheme::Kep,
+                Scheme::Slau2,
             ];
             let mut chain: Option<Stmt> = None;
             for s in arms.iter().rev() {

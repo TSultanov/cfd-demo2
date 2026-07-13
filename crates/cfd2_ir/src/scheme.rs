@@ -14,6 +14,21 @@ pub enum Scheme {
     QUICKMinMod,
     /// QUICK with VanLeer-style limiting.
     QUICKVanLeer,
+
+    /// Kinetic-energy-preserving central two-point flux (Kennedy–Gruber
+    /// mass/momentum pair with a conserved-average energy flux). No
+    /// reconstruction, no limiter, ZERO artificial dissipation — pair with
+    /// the structured selective filter for grid-mode stability. Only the
+    /// density-based compressible flux modules implement it; other models
+    /// fall back to `SecondOrderUpwindVanLeer` behaviour.
+    Kep,
+    /// SLAU2 all-speed AUSM-family flux (Shima & Kitamura, 2013) over
+    /// vanLeer-limited MUSCL reconstruction: low-Mach-consistent upwind
+    /// dissipation whose mass-flux pressure-diffusion term keeps the
+    /// collocated pressure–velocity coupling (no odd-even decoupling).
+    /// Only the density-based compressible flux modules implement it; other
+    /// models fall back to `SecondOrderUpwindVanLeer` behaviour.
+    Slau2,
 }
 
 impl Scheme {
@@ -26,6 +41,8 @@ impl Scheme {
             Scheme::SecondOrderUpwindVanLeer => 4,
             Scheme::QUICKMinMod => 5,
             Scheme::QUICKVanLeer => 6,
+            Scheme::Kep => 7,
+            Scheme::Slau2 => 8,
         }
     }
 
@@ -38,6 +55,8 @@ impl Scheme {
             4 => Some(Scheme::SecondOrderUpwindVanLeer),
             5 => Some(Scheme::QUICKMinMod),
             6 => Some(Scheme::QUICKVanLeer),
+            7 => Some(Scheme::Kep),
+            8 => Some(Scheme::Slau2),
             _ => None,
         }
     }
@@ -51,6 +70,8 @@ impl Scheme {
             Scheme::SecondOrderUpwindVanLeer => "sou_vanleer",
             Scheme::QUICKMinMod => "quick_minmod",
             Scheme::QUICKVanLeer => "quick_vanleer",
+            Scheme::Kep => "kep",
+            Scheme::Slau2 => "slau2",
         }
     }
 }
@@ -67,6 +88,8 @@ impl std::str::FromStr for Scheme {
             "sou_vanleer" | "sou-vanleer" => Ok(Scheme::SecondOrderUpwindVanLeer),
             "quick_minmod" | "quick-minmod" => Ok(Scheme::QUICKMinMod),
             "quick_vanleer" | "quick-vanleer" => Ok(Scheme::QUICKVanLeer),
+            "kep" => Ok(Scheme::Kep),
+            "slau2" => Ok(Scheme::Slau2),
             _ => Err(format!("unknown scheme: {}", value)),
         }
     }
@@ -150,9 +173,19 @@ mod tests {
             Scheme::SecondOrderUpwindVanLeer,
             Scheme::QUICKMinMod,
             Scheme::QUICKVanLeer,
+            Scheme::Kep,
+            Scheme::Slau2,
         ] {
             assert_eq!(Scheme::from_gpu_id(scheme.gpu_id()), Some(scheme));
         }
         assert_eq!(Scheme::from_gpu_id(999), None);
+    }
+
+    #[test]
+    fn scheme_flux_family_names_roundtrip() {
+        assert_eq!(Scheme::Kep.as_str(), "kep");
+        assert_eq!(Scheme::Slau2.as_str(), "slau2");
+        assert_eq!("kep".parse::<Scheme>().unwrap(), Scheme::Kep);
+        assert_eq!("slau2".parse::<Scheme>().unwrap(), Scheme::Slau2);
     }
 }

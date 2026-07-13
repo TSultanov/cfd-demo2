@@ -471,6 +471,8 @@ fn resolve_state_slots_for_flux(
                 Scheme::SecondOrderUpwindVanLeer,
                 Scheme::QUICKMinMod,
                 Scheme::QUICKVanLeer,
+                Scheme::Kep,
+                Scheme::Slau2,
             ];
 
             let mut variants = Vec::new();
@@ -545,6 +547,8 @@ fn generate_flux_module_kernel_program_for_model(
                 Scheme::SecondOrderUpwindVanLeer,
                 Scheme::QUICKMinMod,
                 Scheme::QUICKVanLeer,
+                Scheme::Kep,
+                Scheme::Slau2,
             ];
 
             // Env-gated per-phase timing (`CFD2_KGEN_PROFILE=1`): kernel-program

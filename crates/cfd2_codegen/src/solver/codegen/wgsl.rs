@@ -315,9 +315,14 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
             ));
 
             match op.scheme {
+                // Flux-family selectors (Kep/Slau2) only exist for the
+                // compressible flux modules; the matrix-path deferred
+                // correction falls back to the MUSCL default.
                 Scheme::SecondOrderUpwind
                 | Scheme::SecondOrderUpwindMinMod
-                | Scheme::SecondOrderUpwindVanLeer => {
+                | Scheme::SecondOrderUpwindVanLeer
+                | Scheme::Kep
+                | Scheme::Slau2 => {
                     body.push(dsl::if_block_expr(
                         Expr::ident("flux").gt(0.0),
                         dsl::block(vec![
@@ -470,9 +475,14 @@ fn term_div_fn(op: &DiscreteOp) -> Function {
             ));
 
             match op.scheme {
+                // Flux-family selectors (Kep/Slau2) only exist for the
+                // compressible flux modules; the matrix-path deferred
+                // correction falls back to the MUSCL default.
                 Scheme::SecondOrderUpwind
                 | Scheme::SecondOrderUpwindMinMod
-                | Scheme::SecondOrderUpwindVanLeer => {
+                | Scheme::SecondOrderUpwindVanLeer
+                | Scheme::Kep
+                | Scheme::Slau2 => {
                     body.push(dsl::if_block_expr(
                         Expr::ident("flux").gt(0.0),
                         dsl::block(vec![dsl::assign_expr(

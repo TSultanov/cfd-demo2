@@ -1613,7 +1613,7 @@ fn face_stmts_runtime_scheme(
             flux: &'a [FaceScalarExpr],
         }
 
-        let mut by_gpu_id: Vec<Option<ScalarPerComponentVariant<'_>>> = vec![None; 7];
+        let mut by_gpu_id: Vec<Option<ScalarPerComponentVariant<'_>>> = vec![None; 9];
         for (scheme, spec) in variants {
             let FluxModuleKernelSpec::ScalarPerComponent { components, flux } = spec else {
                 panic!("runtime scheme flux module requires ScalarPerComponent variants");
@@ -1679,6 +1679,8 @@ fn face_stmts_runtime_scheme(
             Scheme::SecondOrderUpwindVanLeer,
             Scheme::QUICKMinMod,
             Scheme::QUICKVanLeer,
+            Scheme::Kep,
+            Scheme::Slau2,
         ] {
             let Some(v) = by_gpu_id.get(scheme.gpu_id() as usize).and_then(|v| *v) else {
                 continue;
@@ -1724,7 +1726,7 @@ fn face_stmts_runtime_scheme(
         return body;
     }
 
-    let mut by_gpu_id: Vec<Option<CentralUpwindVariant<'_>>> = vec![None; 7];
+    let mut by_gpu_id: Vec<Option<CentralUpwindVariant<'_>>> = vec![None; 9];
     for (scheme, spec) in variants {
         let FluxModuleKernelSpec::CentralUpwind {
             components,
@@ -1808,6 +1810,8 @@ fn face_stmts_runtime_scheme(
         Scheme::SecondOrderUpwindVanLeer,
         Scheme::QUICKMinMod,
         Scheme::QUICKVanLeer,
+        Scheme::Kep,
+        Scheme::Slau2,
     ] {
         let Some(v) = by_gpu_id.get(scheme.gpu_id() as usize).and_then(|v| *v) else {
             continue;
@@ -1879,6 +1883,8 @@ fn face_stmts_runtime_scheme(
             Scheme::SecondOrderUpwindVanLeer,
             Scheme::QUICKMinMod,
             Scheme::QUICKVanLeer,
+            Scheme::Kep,
+            Scheme::Slau2,
         ] {
             let Some(v) = by_gpu_id.get(scheme.gpu_id() as usize).and_then(|v| *v) else {
                 continue;

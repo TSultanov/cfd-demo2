@@ -326,6 +326,8 @@ pub enum TraceScheme {
     SecondOrderUpwindVanLeer,
     QUICKMinMod,
     QUICKVanLeer,
+    Kep,
+    Slau2,
 }
 
 impl From<Scheme> for TraceScheme {
@@ -338,6 +340,8 @@ impl From<Scheme> for TraceScheme {
             Scheme::SecondOrderUpwindVanLeer => TraceScheme::SecondOrderUpwindVanLeer,
             Scheme::QUICKMinMod => TraceScheme::QUICKMinMod,
             Scheme::QUICKVanLeer => TraceScheme::QUICKVanLeer,
+            Scheme::Kep => TraceScheme::Kep,
+            Scheme::Slau2 => TraceScheme::Slau2,
         }
     }
 }
@@ -352,6 +356,8 @@ impl From<TraceScheme> for Scheme {
             TraceScheme::SecondOrderUpwindVanLeer => Scheme::SecondOrderUpwindVanLeer,
             TraceScheme::QUICKMinMod => Scheme::QUICKMinMod,
             TraceScheme::QUICKVanLeer => Scheme::QUICKVanLeer,
+            TraceScheme::Kep => Scheme::Kep,
+            TraceScheme::Slau2 => Scheme::Slau2,
         }
     }
 }

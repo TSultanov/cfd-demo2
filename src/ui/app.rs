@@ -5449,9 +5449,12 @@ impl eframe::App for CFDApp {
                                     .on_hover_text(
                                         "Pressure-inlet CD nozzle: pins the inlet gauge \
                                          pressure (the gauge anchor); the outlet floats \
-                                         (supersonic, no back-pressure). Higher ⇒ stronger \
-                                         drop ⇒ supersonic exit (M_exit ≈ 1.07 at 0.07). \
-                                         Over-expanded here (the throat over-chokes).",
+                                         (supersonic, no back-pressure). For the \
+                                         compressible model this is the TOTAL (reservoir) \
+                                         gauge pressure — the ghost static state follows \
+                                         the extrapolated inflow via the stagnation \
+                                         relations. Higher ⇒ stronger drop ⇒ supersonic \
+                                         exit.",
                                     )
                                     .changed()
                                 {
@@ -9669,6 +9672,9 @@ pub struct GuiExplicitRk4Case<'a> {
     /// Optional inlet-velocity slider override. `None` uses the model's real
     /// GUI default.
     pub inlet_velocity: Option<f32>,
+    /// Optional gauge inlet-pressure slider override (pressure-inlet cases).
+    /// `None` uses the model's real GUI default.
+    pub inlet_pressure: Option<f32>,
 }
 
 /// Stability observations from the real GUI mesh/model/seed/BC/runtime path.
@@ -10185,6 +10191,14 @@ pub fn gui_explicit_rk4_smoke(
             ));
         }
         params.inlet_velocity = inlet_velocity;
+    }
+    if let Some(inlet_pressure) = case.inlet_pressure {
+        if !inlet_pressure.is_finite() {
+            return Err(format!(
+                "GUI RK4 inlet pressure override must be finite, got {inlet_pressure}"
+            ));
+        }
+        params.inlet_pressure = inlet_pressure;
     }
 
     let model = if structured {

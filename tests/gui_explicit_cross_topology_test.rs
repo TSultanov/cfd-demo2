@@ -52,6 +52,7 @@ fn run_case(
         requested_dt: Some(dt),
         advection_scheme: None,
         inlet_velocity: None,
+        inlet_pressure: None,
     })
     .unwrap_or_else(|error| panic!("{geometry}/{model_id}: {error}"))
 }
@@ -455,6 +456,7 @@ fn structured_obstacle_long_run_pressure_stays_acoustic() {
         requested_dt: None,
         advection_scheme: None,
         inlet_velocity: None,
+        inlet_pressure: None,
     })
     .expect("structured GUI obstacle long run");
     let mut max_gauge_p = 0.0_f64;
@@ -509,6 +511,7 @@ fn cross_topology_nozzle_compressible_pressure_inlet() {
             requested_dt: Some(6.0e-6),
             advection_scheme: None,
             inlet_velocity: None,
+        inlet_pressure: None,
         })
         .unwrap_or_else(|error| panic!("nozzle/{model_id}: {error}"))
     };

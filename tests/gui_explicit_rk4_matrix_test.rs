@@ -49,6 +49,7 @@ fn case<'a>(
         requested_dt: None,
         advection_scheme: None,
         inlet_velocity: None,
+        inlet_pressure: None,
     }
 }
 

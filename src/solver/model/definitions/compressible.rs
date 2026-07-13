@@ -94,6 +94,8 @@ impl Default for CompressibleFields {
 // modules/eos_ports.rs (asserted by `eos_params_match_uniform_port_manifest`);
 // host-side values come from `EosSpec`.
 const EOS_GAMMA: TypedParamRef<Dimensionless> = TypedParamRef::new("eos_gamma");
+const EOS_THETA_REF: TypedParamRef<DivDim<Pressure, Density>> =
+    TypedParamRef::new("eos_theta_ref");
 const EOS_GM1: TypedParamRef<Dimensionless> = TypedParamRef::new("eos_gm1");
 const EOS_R: TypedParamRef<DivDim<Pressure, MulDim<Density, Temperature>>> =
     TypedParamRef::new("eos_r");
@@ -599,10 +601,20 @@ fn compressible_model_impl_topo(
     let sel = |on_pressure: B, on_velocity: B| {
         mode().select_gt(B::lit(0.5), on_pressure, on_velocity)
     };
-    // Pressure mode: the table's p channel holds the prescribed gauge inlet
-    // pressure and the T channel the reservoir temperature; the axial velocity
-    // extrapolates from the interior while the transverse component is pinned.
-    let inlet_p_used = || sel(B::bc(fields.p), p_owner());
+    // Pressure mode: the table's p channel holds the prescribed TOTAL
+    // (stagnation) gauge pressure and the T channel the reservoir TOTAL
+    // temperature; the axial velocity extrapolates from the interior while
+    // the transverse component is pinned.
+    //
+    // The ghost carries the STATIC state obtained from the reservoir via the
+    // energy relation `T_s = T0 - |u|^2/(2 cp)` and the Bernoulli relation
+    // `p_s = p0 - rho0 |u|^2 / 2` (exact at low Mach, conservative — it
+    // under-drives — beyond). Prescribing the table pressure as a fixed
+    // STATIC ghost instead is ill-posed under acceleration: the drive never
+    // falls as the inflow speeds up, so the inlet runs away supersonic
+    // (~750 m/s by t~2 ms at a 1e5 Pa gauge drive) and the state goes
+    // vacuum-negative. Stagnation ghosts are self-limiting: the static drive
+    // vanishes as the dynamic pressure absorbs the reservoir head.
     let inlet_u_used = |component: u32| {
         if component == 0 {
             sel(B::interior_comp(fields.u, 0), B::bc_comp(fields.u, 0))
@@ -610,14 +622,50 @@ fn compressible_model_impl_topo(
             sel(B::lit(0.0), B::bc_comp(fields.u, 1))
         }
     };
-    // Pressure-mode density from the prescribed state: ideal gas inverts
-    // p = rho R T at the reservoir temperature; a barotropic EOS inverts its
+    let inlet_speed_sq =
+        || inlet_u_used(0) * inlet_u_used(0) + inlet_u_used(1) * inlet_u_used(1);
+    // Reservoir (total) absolute pressure and temperature from the table.
+    let inlet_p0_abs = || (B::bc(fields.p) + gauge_p()).max(B::lit(1.0e-6));
+    // Reservoir (total) temperature from the RUNTIME CONSTANT theta_ref = R*T0
+    // (uploaded by the driver), NOT from the T table channel: that channel's
+    // write is the flux-consumed STATIC ghost temperature, so reading it back
+    // as the reservoir input would re-subtract the kinetic head every stage
+    // and decay the reservoir toward the floor (same aliasing as the p
+    // channel, which is why the p write is an identity in pressure mode).
+    let inlet_t0 = || {
+        (B::param(EOS_THETA_REF.to_untyped()) / r_safe()).max(B::lit(1.0e-6))
+    };
+    // cp = gamma R / (gamma - 1); the barotropic branch never reads it.
+    let inlet_cp = || {
+        B::param(EOS_GAMMA.to_untyped()) * B::param(EOS_R.to_untyped()) / gm1_safe()
+    };
+    let inlet_t_static = || {
+        (inlet_t0() - inlet_speed_sq() / (B::lit(2.0) * inlet_cp()))
+            .max(inlet_t0() * B::lit(0.2))
+    };
+    let inlet_rho0_abs = || inlet_p0_abs() / (r_safe() * inlet_t0());
+    let inlet_p_static_abs = || {
+        (inlet_p0_abs() - B::lit(0.5) * inlet_rho0_abs() * inlet_speed_sq())
+            .max(inlet_p0_abs() * B::lit(0.05))
+    };
+    // Stored (gauge) static ghost pressure. The barotropic branch applies the
+    // same Bernoulli subtraction around its own reference density.
+    let inlet_p_pressure_mode = || {
+        gm1().select_gt(
+            B::lit(0.0),
+            inlet_p_static_abs() - gauge_p(),
+            B::bc(fields.p)
+                - B::lit(0.5) * B::param(EOS_RHO_REF.to_untyped()) * inlet_speed_sq(),
+        )
+    };
+    let inlet_p_used = || sel(inlet_p_pressure_mode(), p_owner());
+    // Pressure-mode density from the STATIC ghost state: ideal gas inverts
+    // p = rho R T at the static temperature; a barotropic EOS inverts its
     // own linear closure `p = p_ref + dp_drho (rho - rho_ref)`.
     let inlet_rho_abs_pressure = || {
         gm1().select_gt(
             B::lit(0.0),
-            (inlet_p_used() + gauge_p())
-                / (r_safe() * B::bc(fields.t).max(B::lit(1.0e-6))),
+            (inlet_p_used() + gauge_p()) / (r_safe() * inlet_t_static()),
             B::param(EOS_RHO_REF.to_untyped())
                 + (inlet_p_used() + gauge_p() - B::param(EOS_P_REF.to_untyped()))
                     / B::param(EOS_DP_DRHO.to_untyped()).max(B::lit(1.0e-12)),
@@ -635,7 +683,12 @@ fn compressible_model_impl_topo(
             * inlet_rho_abs()
             * (inlet_u_used(0) * inlet_u_used(0) + inlet_u_used(1) * inlet_u_used(1))
     };
-    let inlet_p = inlet_p_used();
+    // Channel-6 write: IDENTITY in pressure mode — bc(p) is the reservoir
+    // TOTAL pressure the next stage reads back (writing the static ghost
+    // value here would re-subtract the dynamic head every stage and decay
+    // the drive to the floor). The static state reaches the flux through the
+    // rho/rho_u/rho_e/T channels only; nothing consumes the p channel ghost.
+    let inlet_p = sel(B::bc(fields.p), p_owner());
     let inlet_t =
         (inlet_p_used() + gauge_p()) / (inlet_rho_abs().max(B::lit(1.0e-6)) * r_safe());
     let inlet_rho_e = gm1().select_gt(

@@ -121,6 +121,10 @@ impl ModelGuiDefaults {
             allmach_precond_uref_min: self.allmach_precond_uref_min,
             pressure_inlet: self.pressure_inlet,
             inlet_pressure: self.inlet_pressure,
+            // The structured selective filter is opt-in: the GUI seeds a
+            // nonzero strength only when the dissipation-free Kep flux is
+            // selected (see the scheme radios).
+            filter_sigma: 0.0,
         }
     }
 }

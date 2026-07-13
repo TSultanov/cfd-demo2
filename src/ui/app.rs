@@ -1982,6 +1982,10 @@ pub struct CFDApp {
     /// click and suppress Direct-frame requests.
     run_request_generation: u64,
     selected_scheme: Scheme,
+    /// Structured explicit selective-filter strength (0.0 = off). Seeded to
+    /// 0.2 when the dissipation-free `Kep` flux is selected; user-tunable via
+    /// the slider under the scheme radios.
+    filter_sigma: f32,
     current_fluid: Fluid,
     show_mesh_lines: bool,
     // Compute-backend selection (env-driven; applied on Initialize / Reset).
@@ -2188,6 +2192,7 @@ impl CFDApp {
             is_running: false,
             run_request_generation: 0,
             selected_scheme: Scheme::Upwind,
+            filter_sigma: 0.0,
             current_fluid: default_fluid,
             show_mesh_lines: true,
             backend: BackendChoice::Gpu,
@@ -2322,6 +2327,7 @@ impl CFDApp {
             allmach_precond_uref_min: self.allmach_precond_uref_min,
             pressure_inlet: self.pressure_inlet,
             inlet_pressure: self.inlet_pressure,
+            filter_sigma: self.filter_sigma,
         }
     }
 
@@ -5916,6 +5922,59 @@ impl eframe::App for CFDApp {
                             self.update_gpu_scheme();
                         }
 
+                        // Flux-family selectors: only the density-based
+                        // compressible flux modules implement them (other
+                        // models fall back to vanLeer MUSCL), so only offer
+                        // them where they mean what they say.
+                        if self.model_caps.supports_eos_tuning {
+                            if ui
+                                .radio(
+                                    matches!(self.selected_scheme, Scheme::Kep),
+                                    "KEP (central, zero dissipation)",
+                                )
+                                .clicked()
+                            {
+                                self.selected_scheme = Scheme::Kep;
+                                // The dissipation-free flux is neutrally
+                                // stable at grid Nyquist: pair it with the
+                                // selective filter unless the user already
+                                // dialed a strength.
+                                if self.filter_sigma == 0.0 {
+                                    self.filter_sigma = 0.2;
+                                }
+                                self.update_gpu_scheme();
+                            }
+                            if ui
+                                .radio(
+                                    matches!(self.selected_scheme, Scheme::Slau2),
+                                    "SLAU2 (all-speed upwind)",
+                                )
+                                .clicked()
+                            {
+                                self.selected_scheme = Scheme::Slau2;
+                                self.update_gpu_scheme();
+                            }
+                            // Structured explicit runs own the selective
+                            // filter pass; expose its strength wherever it
+                            // can actually run.
+                            if self.mesh_mode == MeshMode::Structured2D
+                                && self.time_scheme == GpuTimeScheme::RK4
+                            {
+                                let response = ui.add(
+                                    egui::Slider::new(&mut self.filter_sigma, 0.0..=0.5)
+                                        .text("Selective filter σ"),
+                                );
+                                if response.drag_stopped() || response.lost_focus() {
+                                    // The pass strength is a live uniform on the
+                                    // solver: a rebuild-free param sync suffices,
+                                    // but the structured worker applies runtime
+                                    // params on (re)build — reuse the scheme
+                                    // path's rebuild for consistency.
+                                    self.update_gpu_scheme();
+                                }
+                            }
+                        }
+
                         if self.model_caps.supports_eos_tuning {
                             ui.label("Compressible solver uses this for KT flux reconstruction + deferred-correction advection.");
                         }
@@ -7410,6 +7469,7 @@ trait StructuredSeed {
     fn sc_field_offset(&self, name: &str) -> Option<usize>;
     fn sc_set_eos(&mut self, params: EosRuntimeParams);
     fn sc_set_inlet_velocity(&mut self, velocity: f32);
+    fn sc_set_filter_sigma(&mut self, sigma: f32);
     fn sc_set_named<F: Fn(f64, f64) -> f64>(&mut self, name: &str, f: F);
     fn sc_set_component<F: Fn(f64, f64) -> f64>(&mut self, offset: usize, f: F);
     fn sc_set_boundaries<F: Fn(StructEdge, f64, f64) -> (u32, Vec<StructBc>)>(&mut self, f: F);
@@ -7423,6 +7483,9 @@ impl StructuredSeed for StructuredGpuSolver {
     }
     fn sc_set_inlet_velocity(&mut self, velocity: f32) {
         self.set_inlet_ramp(velocity, 0.0)
+    }
+    fn sc_set_filter_sigma(&mut self, sigma: f32) {
+        self.set_filter_sigma(sigma)
     }
     fn sc_set_named<F: Fn(f64, f64) -> f64>(&mut self, name: &str, f: F) {
         self.set_named_field(name, f)
@@ -7443,6 +7506,9 @@ impl StructuredSeed for StructuredModelSolver {
     }
     fn sc_set_inlet_velocity(&mut self, velocity: f32) {
         self.set_inlet_ramp(velocity, 0.0)
+    }
+    fn sc_set_filter_sigma(&mut self, sigma: f32) {
+        self.set_filter_sigma(sigma)
     }
     fn sc_set_named<F: Fn(f64, f64) -> f64>(&mut self, name: &str, f: F) {
         self.set_named_field(name, f)
@@ -7473,6 +7539,9 @@ fn apply_structured_compressible_runtime(
     eos.bc_pressure_inlet = if params.pressure_inlet { 1.0 } else { 0.0 };
     s.sc_set_eos(eos);
     s.sc_set_inlet_velocity(params.inlet_velocity);
+    // Selective conserved-field filter (explicit RK4 only; the setter is a
+    // no-op on solvers that did not build the pass).
+    s.sc_set_filter_sigma(params.filter_sigma);
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -11283,6 +11352,7 @@ fn solver_worker_main(
         log_every_steps: 50,
         advection_scheme: Scheme::Upwind,
         time_scheme: GpuTimeScheme::Euler,
+        filter_sigma: 0.0,
         preconditioner: PreconditionerType::Jacobi,
         outer_iters: 1,
         outer_auto_converge: false,

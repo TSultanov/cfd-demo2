@@ -74,4 +74,13 @@ pub struct RuntimeParams {
     /// Inlet gauge pressure pinned when [`Self::pressure_inlet`] is set (units Pressure).
     /// Higher → stronger drop → faster throughflow. (Ignored unless `pressure_inlet`.)
     pub inlet_pressure: f32,
+    /// Strength of the structured explicit-RK4 selective conserved-field
+    /// filter (dimensionless, `0.0` = pass fully skipped and bit-inert).
+    /// The high-order low-pass filter damps grid-Nyquist content by `sigma`
+    /// per step while leaving resolved scales (>= ~12 cells/wavelength)
+    /// untouched — the stability companion of the dissipation-free `Kep`
+    /// flux (the GUI seeds `0.2` when that scheme is selected). Only the
+    /// density-based structured compressible family builds the pass; every
+    /// other solver ignores the value.
+    pub filter_sigma: f32,
 }

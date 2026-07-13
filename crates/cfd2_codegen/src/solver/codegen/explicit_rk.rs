@@ -238,29 +238,41 @@ fn coefficient_may_be_nonzero(coefficient: Option<&Coefficient>) -> bool {
     }
 }
 
-/// Enforce the structured all-Mach immersed solid as an algebraic velocity
-/// constraint at every RK abscissa. This removes the artificial `-1e5 U`
-/// Brinkman stiffness from the explicit stability spectrum while preserving
-/// its intended limit (U=0 in solid cells). Fluid cells are byte-identical.
+/// Enforce the structured immersed solid as an algebraic momentum constraint
+/// at every RK abscissa. This removes the artificial `-1e5` Brinkman
+/// stiffness from the explicit stability spectrum while preserving its
+/// intended limit (zero momentum in solid cells) — without it the explicit
+/// dt is capped at ~2.5/penalty_rate regardless of the acoustic CFL. Covers
+/// both momentum conventions: the pressure-based primitive `U` and the
+/// density-based conserved `rho_u` (whose recovered primitive `u` is zeroed
+/// alongside so the stage-local caches stay consistent). Fluid cells are
+/// byte-identical.
 fn append_ibm_velocity_projection(body: &mut Vec<Stmt>, slots: &ResolvedStateSlotsSpec) {
     let Some(penalty) = slots.slots.iter().find(|slot| slot.name == "ibm_penalty_U") else {
         return;
     };
-    let Some(velocity) = slots.slots.iter().find(|slot| slot.name == "U") else {
-        return;
-    };
-    if velocity.kind.component_count() < 2 {
+    let momentum_like: Vec<_> = slots
+        .slots
+        .iter()
+        .filter(|slot| {
+            matches!(slot.name.as_str(), "U" | "u" | "rho_u")
+                && slot.kind.component_count() >= 2
+        })
+        .collect();
+    if momentum_like.is_empty() {
         return;
     }
 
     let penalty_value = state_component_slot(slots.stride, "state", "idx", penalty, 0);
     let solid = penalty_value.lt(0.0);
-    for component in 0..2 {
-        let value = state_component_slot(slots.stride, "state", "idx", velocity, component);
-        body.push(dsl::assign_expr(
-            value.clone(),
-            dsl::select(value, 0.0, solid.clone()),
-        ));
+    for slot in momentum_like {
+        for component in 0..2 {
+            let value = state_component_slot(slots.stride, "state", "idx", slot, component);
+            body.push(dsl::assign_expr(
+                value.clone(),
+                dsl::select(value, 0.0, solid.clone()),
+            ));
+        }
     }
 }
 

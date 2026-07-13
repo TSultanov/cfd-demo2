@@ -964,8 +964,9 @@ fn gpu_structured_compressible_adaptive_batch_matches_one_step_submissions() {
 
     let h = grid.dx.min(grid.dy) as f32;
     let wave_dt = 0.5 * h / (0.2 + 1.4_f32.sqrt());
-    let ibm_dt = 2.5 * 0.5 / 1.0e5;
-    let expected_dt = wave_dt.min(ibm_dt).clamp(1.0e-9, 100.0);
+    // The RK4 stages project rho_u to zero in solid cells, so the Brinkman
+    // penalty no longer bounds the explicit dt (acoustic/diffusion only).
+    let expected_dt = wave_dt.clamp(1.0e-9, 100.0);
     assert_eq!(
         batched_status.dt.to_bits(),
         expected_dt.to_bits(),
@@ -1052,10 +1053,10 @@ fn gpu_structured_compressible_hot_state_cfl_uses_local_characteristic_speed() {
         "accepted-state local characteristic was discarded: {status:?}"
     );
     let h = grid.dx.min(grid.dy) as f32;
-    let ibm_dt = 2.5 * target_cfl / 1.0e5;
-    let reference_only_dt = (target_cfl * h / reference_sound)
-        .min(ibm_dt)
-        .min(initial_dt as f32 * 1.2);
+    // No Brinkman dt bound: the stage projection keeps the penalty out of
+    // the explicit stability spectrum (acoustic bounds only below).
+    let reference_only_dt =
+        (target_cfl * h / reference_sound).min(initial_dt as f32 * 1.2);
     assert!(
         status.dt_old < 0.5 * reference_only_dt,
         "hot accepted-step dt {} did not shrink below reference-only bound {reference_only_dt}",
@@ -1067,7 +1068,6 @@ fn gpu_structured_compressible_hot_state_cfl_uses_local_characteristic_speed() {
         status.dt
     );
     let metric_dt = (target_cfl * h / status.max_base_rate)
-        .min(ibm_dt)
         .min(status.dt_old * 1.2)
         .clamp(1.0e-9, 100.0);
     assert!(

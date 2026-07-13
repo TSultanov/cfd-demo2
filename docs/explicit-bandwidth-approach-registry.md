@@ -507,6 +507,19 @@ Findings:
   (per-kernel uniforms could alias one buffer with dynamic offsets, or stage
   kernels could read dt/time from the control buffer) and fuse the
   reset/accept control passes. The audit-every-step safety contract stays.
+- SECOND user-visible gap (2026-07-13, follow-up): with both backends at
+  ~1.2-1.3 ms/step in the GUI (the difference to the isolated-probe numbers
+  is the shared-GPU render/compositor tax, which hits both equally), the
+  structured obstacle still advanced SIMULATED time ~17% slower because its
+  accepted dt was pinned at 7.5e-6 = 2.5*CFL/1e5 — the explicit stability
+  bound of the -1e5 Brinkman penalty (the cut-cell mesh has real walls and
+  no such bound; its dt was the min-cell acoustic 9.96e-6). FIXED by
+  extending the RK4 stage-kernel algebraic solid projection (previously
+  all-Mach-only, keyed on the primitive `U`) to the conserved momentum
+  `rho_u` (+ its primitive cache `u`), and removing the reaction bound from
+  both dt oracles (structured autonomous WGSL + host CFL). The obstacle case
+  now runs at the acoustic bound 2.16e-5 (2.9x), stable over 1500 steps —
+  the structured sim rate beats the unstructured equivalent by ~2.4x.
 - TRAP (headless only): a single autonomous submission with many steps
   deadlocks inside `CommandEncoder::finish` on Metal — deferred pass encoding
   allocates from the queue's ~64 command-buffer pool while earlier

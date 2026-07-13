@@ -7043,17 +7043,10 @@ fn structured_pin_dt(
             }
 
             // The structured density-based model carries a -1e5 1/s Brinkman
-            // reaction in immersed-solid cells. The implicit path puts that
-            // sink on the matrix diagonal; RK4 integrates it explicitly, so
-            // acoustic/diffusive CFL limits alone are insufficient. Keep
-            // |lambda*dt| inside the negative-real RK4 stability interval.
-            if model_id == "compressible_structured"
-                && s.st_layout().offset_for("ibm_penalty_U").is_some()
-            {
-                let reaction_dt = RK4_NEGATIVE_REAL_SAFETY * params.target_cfl.clamp(0.0, 1.0)
-                    / STRUCTURED_IBM_PENALTY_RATE;
-                stable_dt = Some(stable_dt.map_or(reaction_dt, |dt| dt.min(reaction_dt)));
-            }
+            // reaction in immersed-solid cells, but the RK4 stage kernels
+            // enforce the solid as an algebraic momentum projection
+            // (rho_u = 0 at every abscissa), so the penalty never enters the
+            // explicit stability spectrum and no reaction dt bound applies.
         }
         if let Some(mut next_dt) = stable_dt {
             let current_dt = s.st_dt();
@@ -8169,10 +8162,10 @@ mod structured_boundary_tests {
         let wave_dt = target_cfl * h / (params.inlet_velocity.abs() + sound);
         let diffusion_dt = 0.25 * target_cfl * h * h
             / (params.viscosity.abs() / params.density.abs().max(1.0e-12));
-        let ibm_dt = 2.5 * target_cfl.clamp(0.0, 1.0) / 1.0e5;
+        // No Brinkman reaction bound: the RK4 stages project rho_u to zero
+        // in solid cells, so the -1e5 penalty never limits the explicit dt.
         let expected = wave_dt
             .min(diffusion_dt)
-            .min(ibm_dt)
             .min(params.requested_dt * 1.2)
             .clamp(1.0e-9, 100.0);
         assert!(

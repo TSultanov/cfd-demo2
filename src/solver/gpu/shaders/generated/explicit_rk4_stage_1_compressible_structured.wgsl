@@ -126,4 +126,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     state[idx * 23u + 9u] = (state[idx * 23u + 8u] + constants.eos_gauge_p_ref) / (max(state[idx * 23u + 0u] + constants.eos_gauge_rho_ref, 0.00000001) * max(constants.eos_r, 0.000000000001));
     state[idx * 23u + 10u] = state[idx * 23u + 1u] / max(state[idx * 23u + 0u] + constants.eos_gauge_rho_ref, 0.00000001);
     state[idx * 23u + 11u] = state[idx * 23u + 2u] / max(state[idx * 23u + 0u] + constants.eos_gauge_rho_ref, 0.00000001);
+    state[idx * 23u + 1u] = select(state[idx * 23u + 1u], 0.0, state[idx * 23u + 22u] < 0.0);
+    state[idx * 23u + 2u] = select(state[idx * 23u + 2u], 0.0, state[idx * 23u + 22u] < 0.0);
+    state[idx * 23u + 10u] = select(state[idx * 23u + 10u], 0.0, state[idx * 23u + 22u] < 0.0);
+    state[idx * 23u + 11u] = select(state[idx * 23u + 11u], 0.0, state[idx * 23u + 22u] < 0.0);
 }

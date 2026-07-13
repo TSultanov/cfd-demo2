@@ -1274,7 +1274,7 @@ fn update_dt() {{
         //   dt_wave = CFL h_min /
         //             max(max_i(|u_i|+c_i), |u_in|+c_ref)
         //   dt_diff = 0.25 CFL h_min^2 / (|mu|/|rho_ref|)
-        //   dt_ibm  = 2.5 clamp(CFL,0,1) / 1e5.
+        //   (the Brinkman reaction is projected out per stage; no dt_ibm).
         // The reference term protects a cold/quiescent inlet; the accepted-
         // state maximum protects hot/compressed cells whose local c exceeds it.
         let min_h = min(grid.dx, grid.dy);
@@ -1296,11 +1296,10 @@ fn update_dt() {{
             proposed = select(diffusion_dt, min(proposed, diffusion_dt), has_bound);
             has_bound = has_bound || finite_f32(diffusion_dt);
         }}
-        if (params.has_ibm_penalty != 0u) {{
-            let reaction_dt = 2.5 * clamp(params.target_cfl, 0.0, 1.0) / 1.0e5;
-            proposed = select(reaction_dt, min(proposed, reaction_dt), has_bound);
-            has_bound = true;
-        }}
+        // No Brinkman reaction bound: the RK4 stage kernels enforce the
+        // immersed solid as an algebraic momentum projection (rho_u = 0 in
+        // solid cells at every abscissa), so the -1e5 penalty never enters
+        // the explicit stability spectrum and dt is acoustic/diffusion-bound.
         if (!has_bound) {{
             halt_batch();
             return;

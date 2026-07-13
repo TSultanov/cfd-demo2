@@ -40,6 +40,9 @@ struct Constants {
     eos_gauge_e_ref: f32,
     eos_gauge_p_bias: f32,
     bc_pressure_inlet: f32,
+    eos_p_floor: f32,
+    eos_t_floor: f32,
+    eos_rho_floor: f32,
 }
 
 struct LowMachParams {

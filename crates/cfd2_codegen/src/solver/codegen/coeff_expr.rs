@@ -132,6 +132,21 @@ pub fn coeff_named_expr_dyn(name: &str) -> Option<DynExpr> {
             DslType::f32(),
             Dimensionless::UNIT,
         )),
+        "eos_p_floor" => Some(DynExpr::new(
+            Expr::ident("constants").field("eos_p_floor"),
+            DslType::f32(),
+            Pressure::UNIT,
+        )),
+        "eos_t_floor" => Some(DynExpr::new(
+            Expr::ident("constants").field("eos_t_floor"),
+            DslType::f32(),
+            Temperature::UNIT,
+        )),
+        "eos_rho_floor" => Some(DynExpr::new(
+            Expr::ident("constants").field("eos_rho_floor"),
+            DslType::f32(),
+            Density::UNIT,
+        )),
         // Buoyant Boussinesq runtime params. beta*g: acceleration per kelvin.
         "buoyant_beta_g" => Some(DynExpr::new(
             Expr::ident("constants").field("buoyant_beta_g"),

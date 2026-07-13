@@ -4998,6 +4998,57 @@ pub(crate) fn param_bc_pressure_inlet(
     Ok(())
 }
 
+pub(crate) fn param_eos_p_floor(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(v) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.eos_p_floor = v;
+    }
+    r.fields.constants.write(&queue);
+    Ok(())
+}
+
+pub(crate) fn param_eos_t_floor(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(v) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.eos_t_floor = v;
+    }
+    r.fields.constants.write(&queue);
+    Ok(())
+}
+
+pub(crate) fn param_eos_rho_floor(
+    plan: &mut GpuProgramPlan,
+    value: PlanParamValue,
+) -> Result<(), String> {
+    let PlanParamValue::F32(v) = value else {
+        return Err("invalid value type".into());
+    };
+    let queue = plan.context.queue.clone();
+    let r = res_mut(plan);
+    {
+        let values = r.fields.constants.values_mut();
+        values.eos_rho_floor = v;
+    }
+    r.fields.constants.write(&queue);
+    Ok(())
+}
+
 pub(crate) fn param_buoyant_beta_g(
     plan: &mut GpuProgramPlan,
     value: PlanParamValue,

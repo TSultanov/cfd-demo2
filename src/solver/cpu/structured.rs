@@ -855,6 +855,9 @@ impl StructuredModelSolver {
                 "bc_pressure_inlet",
                 Value::F32(c.bc_pressure_inlet),
             )
+            .with_constant("constants", "eos_p_floor", Value::F32(c.eos_p_floor))
+            .with_constant("constants", "eos_t_floor", Value::F32(c.eos_t_floor))
+            .with_constant("constants", "eos_rho_floor", Value::F32(c.eos_rho_floor))
             .with_constant("constants", "buoyant_beta_g", Value::F32(c.buoyant_beta_g))
             .with_constant("constants", "buoyant_t0", Value::F32(c.buoyant_t0))
             .with_constant(
@@ -1411,6 +1414,9 @@ impl StructuredModelSolver {
         self.constants.eos_gauge_e_ref = params.gauge_e_ref;
         self.constants.eos_gauge_p_bias = params.gauge_p_bias;
         self.constants.bc_pressure_inlet = params.bc_pressure_inlet;
+        self.constants.eos_p_floor = params.p_floor;
+        self.constants.eos_t_floor = params.t_floor;
+        self.constants.eos_rho_floor = params.rho_floor;
     }
 
     #[cfg(test)]
@@ -1428,6 +1434,9 @@ impl StructuredModelSolver {
             gauge_e_ref: self.constants.eos_gauge_e_ref,
             gauge_p_bias: self.constants.eos_gauge_p_bias,
             bc_pressure_inlet: self.constants.bc_pressure_inlet,
+            p_floor: self.constants.eos_p_floor,
+            t_floor: self.constants.eos_t_floor,
+            rho_floor: self.constants.eos_rho_floor,
         }
     }
 

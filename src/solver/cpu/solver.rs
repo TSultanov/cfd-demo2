@@ -901,6 +901,9 @@ impl CpuSolver {
             "eos.gauge_e_ref" => self.constants.eos_gauge_e_ref = v,
             "eos.gauge_p_bias" => self.constants.eos_gauge_p_bias = v,
             "eos.bc_pressure_inlet" => self.constants.bc_pressure_inlet = v,
+            "eos.p_floor" => self.constants.eos_p_floor = v,
+            "eos.t_floor" => self.constants.eos_t_floor = v,
+            "eos.rho_floor" => self.constants.eos_rho_floor = v,
             _ => return false,
         }
         true
@@ -2163,6 +2166,9 @@ fn constants_ctx(c: &GpuConstants, lm: &GpuLowMachParams) -> Ctx {
             "bc_pressure_inlet",
             Value::F32(c.bc_pressure_inlet),
         )
+        .with_constant("constants", "eos_p_floor", Value::F32(c.eos_p_floor))
+        .with_constant("constants", "eos_t_floor", Value::F32(c.eos_t_floor))
+        .with_constant("constants", "eos_rho_floor", Value::F32(c.eos_rho_floor))
         // Buoyant Boussinesq tail (mirrors the buoyant uniform port manifest).
         .with_constant("constants", "buoyant_beta_g", Value::F32(c.buoyant_beta_g))
         .with_constant("constants", "buoyant_t0", Value::F32(c.buoyant_t0))

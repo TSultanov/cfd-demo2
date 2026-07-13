@@ -251,10 +251,61 @@ fn run_nozzle_backend(model_id: &str, mesh_kind: &str, steps: usize, backend: &s
 }
 
 fn main() {
+    env_logger::init();
     if std::env::var_os("PROBE_NOZZLE").is_some() {
         for steps in [500usize, 3000, 10000] {
             run_nozzle("compressible", "fitted", steps);
             run_nozzle("compressible_structured", "structured", steps);
+        }
+        return;
+    }
+    if std::env::var_os("PROBE_MACH3_DIRECT").is_some() {
+        // The GUI scenario: Direct presentation = AUTONOMOUS route, whose
+        // audit kernel carries the conserved-state repair. NOTE: this harness
+        // submits ALL steps as ONE autonomous batch, which blows the Metal
+        // ~64-command-buffer pool beyond a few dozen steps (BufferAsyncError
+        // after a device loss). For LONG autonomous stress runs use the real
+        // GUI worker instead:
+        //   CFD2_AUTOSTART="unstructured-rk4:cell=0.005,u=1000" CFD2_PERF_LOG=1
+        for steps in [24usize] {
+            let smoke = match gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+                model_id: "compressible",
+                fluid: "Air",
+                geometry: "obstacle",
+                mesh_kind: "cutcell",
+                backend: "gpu",
+                adaptive: true,
+                presentation: "direct",
+                moving_mesh: false,
+                cell_size: 0.005,
+                steps,
+                requested_dt: None,
+                advection_scheme: None,
+                inlet_velocity: Some(1000.0),
+                inlet_pressure: None,
+            }) {
+                Ok(smoke) => smoke,
+                Err(error) => {
+                    println!("mach3-direct {steps} steps: FAILED: {error}");
+                    continue;
+                }
+            };
+            let mut max_speed = 0.0_f64;
+            let (mut p_min, mut p_max) = (f64::INFINITY, f64::NEG_INFINITY);
+            let mut rho_min = f64::INFINITY;
+            for (cell, _) in smoke.cell_centers.iter().enumerate() {
+                let (ux, uy) = smoke.velocity[cell];
+                max_speed = max_speed.max(f64::from(ux).hypot(f64::from(uy)));
+                p_min = p_min.min(f64::from(smoke.pressure[cell]));
+                p_max = p_max.max(f64::from(smoke.pressure[cell]));
+                if let Some(rho) = &smoke.density {
+                    rho_min = rho_min.min(f64::from(rho[cell]));
+                }
+            }
+            println!(
+                "mach3-direct {steps} steps t={:.4e} dt=[{:.3e},{:.3e}]: max|u|={max_speed:.1} p'=[{p_min:.3e},{p_max:.3e}] rho'_min={rho_min:.3e}",
+                smoke.final_time, smoke.min_dt, smoke.max_dt
+            );
         }
         return;
     }

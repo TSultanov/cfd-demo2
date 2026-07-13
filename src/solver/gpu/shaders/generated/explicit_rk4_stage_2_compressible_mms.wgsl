@@ -28,6 +28,9 @@ struct Constants {
     eos_gauge_e_ref: f32,
     eos_gauge_p_bias: f32,
     bc_pressure_inlet: f32,
+    eos_p_floor: f32,
+    eos_t_floor: f32,
+    eos_rho_floor: f32,
 }
 
 
@@ -107,8 +110,8 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     state[idx * 26u + 2u] = rk_base[idx * 4u + 2u] + constants.dt * 0.5 * rate_2;
     rk_accum[idx * 4u + 3u] += rate_3 / 3.0;
     state[idx * 26u + 7u] = rk_base[idx * 4u + 3u] + constants.dt * 0.5 * rate_3;
-    state[idx * 26u + 8u] = constants.eos_gm1 * (state[idx * 26u + 7u] - 0.5 * (state[idx * 26u + 1u] * state[idx * 26u + 1u] + state[idx * 26u + 2u] * state[idx * 26u + 2u]) / max(state[idx * 26u + 0u] + constants.eos_gauge_rho_ref, 0.00000001)) + constants.eos_dp_drho * (state[idx * 26u + 0u] + (constants.eos_gauge_rho_ref - constants.eos_rho_ref)) + constants.eos_gauge_p_bias;
-    state[idx * 26u + 9u] = (state[idx * 26u + 8u] + constants.eos_gauge_p_ref) / (max(state[idx * 26u + 0u] + constants.eos_gauge_rho_ref, 0.00000001) * max(constants.eos_r, 0.000000000001));
+    state[idx * 26u + 8u] = max(constants.eos_gm1 * (state[idx * 26u + 7u] - 0.5 * (state[idx * 26u + 1u] * state[idx * 26u + 1u] + state[idx * 26u + 2u] * state[idx * 26u + 2u]) / max(state[idx * 26u + 0u] + constants.eos_gauge_rho_ref, 0.00000001)) + constants.eos_dp_drho * (state[idx * 26u + 0u] + (constants.eos_gauge_rho_ref - constants.eos_rho_ref)) + constants.eos_gauge_p_bias, constants.eos_p_floor);
+    state[idx * 26u + 9u] = max((state[idx * 26u + 8u] + constants.eos_gauge_p_ref) / (max(state[idx * 26u + 0u] + constants.eos_gauge_rho_ref, 0.00000001) * max(constants.eos_r, 0.000000000001)), constants.eos_t_floor);
     state[idx * 26u + 10u] = state[idx * 26u + 1u] / max(state[idx * 26u + 0u] + constants.eos_gauge_rho_ref, 0.00000001);
     state[idx * 26u + 11u] = state[idx * 26u + 2u] / max(state[idx * 26u + 0u] + constants.eos_gauge_rho_ref, 0.00000001);
 }

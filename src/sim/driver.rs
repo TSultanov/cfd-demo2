@@ -753,32 +753,30 @@ fn sample_compressible_explicit_state(
             continue;
         }
 
-        let rho = f64::from(row[rho_off]) + f64::from(gauge[0]);
+        // FLOORED THERMODYNAMICS (matches the on-device recovery and audits):
+        // p/T clamp to the runtime floors instead of invalidating the step —
+        // only a non-finite state rejects. Floored values feed the CFL rate.
+        let p_floor_abs = f64::from(eos.p_floor) + f64::from(gauge[1]);
+        let t_floor = f64::from(eos.t_floor);
+        let rho = (f64::from(row[rho_off]) + f64::from(gauge[0])).max(1.0e-8);
         let mx = f64::from(row[momentum_off]);
         let my = f64::from(row[momentum_off + 1]);
         let total_energy = f64::from(row[energy_off]) + f64::from(gauge[2]);
-        if !(rho.is_finite() && rho > 0.0) {
-            sample.invalid += 1;
-            continue;
-        }
         let kinetic = 0.5 * (mx * mx + my * my) / rho;
         let internal = total_energy - kinetic;
-        let pressure = f64::from(eos.gm1) * internal
+        let pressure = (f64::from(eos.gm1) * internal
             + f64::from(eos.dp_drho) * (rho - f64::from(eos.rho_ref))
-            + f64::from(eos.p_ref);
-        let sound_sq = f64::from(eos.gamma) * pressure / rho + f64::from(eos.dp_drho);
+            + f64::from(eos.p_ref))
+        .max(p_floor_abs);
+        let sound_sq =
+            f64::from(eos.gamma) * pressure.max(1.0e-30) / rho + f64::from(eos.dp_drho);
         let speed = mx.hypot(my) / rho;
-        let temperature = pressure / (rho * f64::from(eos.r).max(1.0e-30));
+        let temperature = (pressure / (rho * f64::from(eos.r).max(1.0e-30))).max(t_floor);
         let closure_valid = pressure.is_finite()
             && sound_sq.is_finite()
             && sound_sq > 0.0
             && speed.is_finite()
-            && (!ideal_gas
-                || (internal.is_finite()
-                    && internal > 0.0
-                    && pressure > 0.0
-                    && temperature.is_finite()
-                    && temperature > 0.0));
+            && (!ideal_gas || (internal.is_finite() && temperature.is_finite()));
         if !closure_valid {
             sample.invalid += 1;
             continue;

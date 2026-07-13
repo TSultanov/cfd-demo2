@@ -262,6 +262,13 @@ struct StructuredAutonomousParams {
     // (zero = absolute storage).
     eos_gauge_rho_ref: f32,
     eos_gauge_e_ref: f32,
+    /// ABSOLUTE floored-recovery thermodynamic floors (1 Pa / 1 K on gauged
+    /// production runs; hugely negative = inert otherwise). The audit clamps
+    /// its reconstructed p/T with these instead of rejecting the step.
+    eos_p_floor_abs: f32,
+    eos_t_floor: f32,
+    /// STORED-form conserved-density floor for the in-place repair.
+    eos_rho_floor: f32,
 }
 
 #[repr(u32)]
@@ -455,6 +462,9 @@ fn write_kernel_constants_bytes(c: &GpuConstants, eos_fields: &[String], bytes: 
             "eos_gauge_e_ref" => c.eos_gauge_e_ref,
             "eos_gauge_p_bias" => c.eos_gauge_p_bias,
             "bc_pressure_inlet" => c.bc_pressure_inlet,
+            "eos_p_floor" => c.eos_p_floor,
+            "eos_t_floor" => c.eos_t_floor,
+            "eos_rho_floor" => c.eos_rho_floor,
             "buoyant_beta_g" => c.buoyant_beta_g,
             "buoyant_t0" => c.buoyant_t0,
             "buoyant_k_over_cp" => c.buoyant_k_over_cp,
@@ -867,14 +877,30 @@ fn structured_autonomous_wgsl(
     // none of them participate in the thermodynamic-domain decision.
     // Gauge storage: the packed state holds deviations from the constant
     // reference; the thermodynamic-domain audit runs on ABSOLUTE values.
-    let density = state.data[base + {rho}u] + params.eos_gauge_rho_ref;
+    // FLOORED THERMODYNAMICS (matches the primitive recovery): p/T clamp to
+    // the runtime floors (1 Pa / 1 K on gauged production runs) instead of
+    // rejecting the step — a vacuum-crossing cell survives with a clamped
+    // recovery. Only a NON-FINITE state (or an out-of-domain constants set)
+    // invalidates. Floored values feed the adaptive-CFL characteristic.
+    // CONSERVED-STATE REPAIR (inert at the f32::MIN defaults): clamp the
+    // stored density and total energy in place so a vacuum-crossing cell
+    // cannot feed progressively wilder fluxes until the state reaches Inf.
+    // Post-step, between RK steps — the stage arithmetic stays untouched.
+    state.data[base + {rho}u] = max(state.data[base + {rho}u], params.eos_rho_floor);
+    let repair_rho = max(state.data[base + {rho}u] + params.eos_gauge_rho_ref, 1.0e-8);
+    let repair_ke = 0.5
+        * (state.data[base + {rho_u}u] * state.data[base + {rho_u}u]
+            + state.data[base + {rho_u_y}u] * state.data[base + {rho_u_y}u])
+        / repair_rho;
+    let rho_e_min = (params.eos_p_floor_abs - params.eos_p_ref)
+        / max(params.eos_gm1, 1.0e-6)
+        + repair_ke - params.eos_gauge_e_ref;
+    state.data[base + {rho_e}u] = max(state.data[base + {rho_e}u], rho_e_min);
+
+    let density = max(state.data[base + {rho}u] + params.eos_gauge_rho_ref, 1.0e-8);
     let momentum_x = state.data[base + {rho_u}u];
     let momentum_y = state.data[base + {rho_u_y}u];
     let total_energy_density = state.data[base + {rho_e}u] + params.eos_gauge_e_ref;
-    if (!(density > 0.0)) {{
-        atomicAdd(&control.invalid_cells, 1u);
-        return;
-    }}
     let inv_density = 1.0 / density;
     let velocity_x = momentum_x * inv_density;
     let velocity_y = momentum_y * inv_density;
@@ -883,14 +909,16 @@ fn structured_autonomous_wgsl(
     let kinetic_energy_density = 0.5
         * (momentum_x * momentum_x + momentum_y * momentum_y) * inv_density;
     let internal_energy_density = total_energy_density - kinetic_energy_density;
-    let pressure = params.eos_gm1 * internal_energy_density
-        + params.eos_dp_drho * (density - params.eos_rho_ref) + params.eos_p_ref;
-    let temperature = pressure / (density * params.eos_r);
-    let sound_speed_sq = params.eos_gamma * pressure * inv_density
+    let pressure = max(
+        params.eos_gm1 * internal_energy_density
+            + params.eos_dp_drho * (density - params.eos_rho_ref) + params.eos_p_ref,
+        params.eos_p_floor_abs,
+    );
+    let temperature = max(pressure / (density * params.eos_r), params.eos_t_floor);
+    let sound_speed_sq = params.eos_gamma * max(pressure, 1.0e-30) * inv_density
         + params.eos_dp_drho;
     if (!(params.eos_gamma > 0.0) || !(params.eos_gm1 > 0.0)
-        || !(params.eos_r > 0.0) || !(internal_energy_density > 0.0)
-        || !(pressure > 0.0) || !(temperature > 0.0)
+        || !(params.eos_r > 0.0)
         || !(sound_speed_sq > 0.0) || !finite_f32(inv_density)
         || !finite_f32(speed) || !finite_f32(kinetic_energy_density)
         || !finite_f32(internal_energy_density) || !finite_f32(pressure)
@@ -1034,6 +1062,7 @@ struct Params {{
     inlet_velocity: f32, eos_gamma: f32, eos_gm1: f32, eos_r: f32,
     eos_dp_drho: f32, eos_p_ref: f32, eos_theta_ref: f32, eos_rho_ref: f32,
     eos_gauge_rho_ref: f32, eos_gauge_e_ref: f32,
+    eos_p_floor_abs: f32, eos_t_floor: f32, eos_rho_floor: f32,
 }};
 struct F32Buffer {{ data: array<f32> }};
 struct U32Buffer {{ data: array<u32> }};
@@ -1620,6 +1649,9 @@ impl StructuredAutonomousControl {
             eos_theta_ref: 1.0,
             eos_rho_ref: 0.0,
             eos_gauge_rho_ref: 0.0,
+            eos_p_floor_abs: f32::MIN,
+            eos_t_floor: f32::MIN,
+            eos_rho_floor: f32::MIN,
             eos_gauge_e_ref: 0.0,
         };
         let control = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -2504,6 +2536,9 @@ impl StructuredGpuSolver {
         self.constants.eos_gauge_e_ref = params.gauge_e_ref;
         self.constants.eos_gauge_p_bias = params.gauge_p_bias;
         self.constants.bc_pressure_inlet = params.bc_pressure_inlet;
+        self.constants.eos_p_floor = params.p_floor;
+        self.constants.eos_t_floor = params.t_floor;
+        self.constants.eos_rho_floor = params.rho_floor;
         self.write_kernel_constants();
         // A live EOS switch changes the conserved-domain oracle and its first
         // stable dt. Force the next autonomous entry to seed both from the
@@ -3046,6 +3081,11 @@ impl StructuredGpuSolver {
             eos_rho_ref: self.constants.eos_rho_ref,
             eos_gauge_rho_ref: self.constants.eos_gauge_rho_ref,
             eos_gauge_e_ref: self.constants.eos_gauge_e_ref,
+            // Absolute floor: stored-form floor + gauge reference (exactly
+            // 1.0 Pa on gauged production runs; ~f32::MIN = inert otherwise).
+            eos_p_floor_abs: self.constants.eos_p_floor + self.constants.eos_gauge_p_ref,
+            eos_t_floor: self.constants.eos_t_floor,
+            eos_rho_floor: self.constants.eos_rho_floor,
         };
         self.ctx
             .queue
@@ -3553,6 +3593,9 @@ impl StructuredGpuSolver {
             gauge_e_ref: self.constants.eos_gauge_e_ref,
             gauge_p_bias: self.constants.eos_gauge_p_bias,
             bc_pressure_inlet: self.constants.bc_pressure_inlet,
+            p_floor: self.constants.eos_p_floor,
+            t_floor: self.constants.eos_t_floor,
+            rho_floor: self.constants.eos_rho_floor,
         }
     }
 

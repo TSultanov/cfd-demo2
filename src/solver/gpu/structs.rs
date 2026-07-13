@@ -119,6 +119,12 @@ pub struct GpuConstants {
     /// Compressible inlet driving mode (see `EosRuntimeParams::bc_pressure_inlet`):
     /// 0 = velocity inlet (default), 1 = pressure inlet + floating outlet.
     pub bc_pressure_inlet: f32,
+    /// Stored-form recovered-pressure floor (`f32::MIN` = inert).
+    pub eos_p_floor: f32,
+    /// Recovered-temperature floor (`f32::MIN` = inert).
+    pub eos_t_floor: f32,
+    /// Stored-form conserved-density floor (`f32::MIN` = inert).
+    pub eos_rho_floor: f32,
 
     // --- Buoyant Boussinesq model (runtime) ---
     // LAYOUT CONTRACT: tail fields must mirror the buoyant port manifest
@@ -160,6 +166,9 @@ impl Default for GpuConstants {
             eos_gauge_e_ref: 0.0,
             eos_gauge_p_bias: 0.0,
             bc_pressure_inlet: 0.0,
+            eos_p_floor: f32::MIN,
+            eos_t_floor: f32::MIN,
+            eos_rho_floor: f32::MIN,
             buoyant_beta_g: crate::solver::model::BUOYANT_BETA_G as f32,
             buoyant_t0: crate::solver::model::BUOYANT_T0 as f32,
             buoyant_k_over_cp: crate::solver::model::BUOYANT_K_OVER_CP as f32,

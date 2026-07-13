@@ -145,7 +145,7 @@ impl PrimitiveDerivations {
         );
         let gas_r = Expr::call_named(
             "max",
-            vec![constants.field("eos_r"), Expr::lit_f32(1.0e-12)],
+            vec![constants.clone().field("eos_r"), Expr::lit_f32(1.0e-12)],
         );
 
         derivations.insert("u_x".into(), Expr::ident("rho_u_x") / safe_rho_abs.clone());
@@ -154,15 +154,38 @@ impl PrimitiveDerivations {
         let rho_u_sq = Expr::ident("rho_u_x") * Expr::ident("rho_u_x")
             + Expr::ident("rho_u_y") * Expr::ident("rho_u_y");
         let kinetic = Expr::lit_f32(0.5) * rho_u_sq / safe_rho_abs.clone();
+        // PRODUCTION THERMODYNAMIC FLOORS: the recovered (stored-form)
+        // pressure and the recovered temperature are floored by the runtime
+        // constants `eos_p_floor` / `eos_t_floor`. Their default is f32::MIN,
+        // making the max() provably inert (MMS and absolute-storage paths are
+        // untouched bitwise); gauged production runs set the STORED-form
+        // equivalents of 1 Pa absolute / 1 K (see
+        // `EosRuntimeParams::runtime_params_gauged`). A vacuum-crossing cell
+        // (Mach-3 lee-side cut cell, violent nozzle start) then recovers a
+        // tiny positive state and the run survives instead of halting.
+        let p_floor = constants.clone().field("eos_p_floor");
+        let t_floor = constants.clone().field("eos_t_floor");
         derivations.insert(
             "p".into(),
-            gm1 * (Expr::ident("rho_e") - kinetic)
-                + dp_drho * (Expr::ident("rho") + (gauge_rho - rho_ref))
-                + p_bias,
+            Expr::call_named(
+                "max",
+                vec![
+                    gm1 * (Expr::ident("rho_e") - kinetic)
+                        + dp_drho * (Expr::ident("rho") + (gauge_rho - rho_ref))
+                        + p_bias,
+                    p_floor,
+                ],
+            ),
         );
         derivations.insert(
             "T".into(),
-            (Expr::ident("p") + gauge_p) / (safe_rho_abs * gas_r),
+            Expr::call_named(
+                "max",
+                vec![
+                    (Expr::ident("p") + gauge_p) / (safe_rho_abs * gas_r),
+                    t_floor,
+                ],
+            ),
         );
 
         Self { derivations }

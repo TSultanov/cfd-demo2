@@ -1295,25 +1295,53 @@ fn audit_cell(cell: u32, accepted: bool) {
         return;
     }
 
-    let rho = state_value(cell, params.rho_off, accepted) + gauge_rho_ref;
+    // FLOORED THERMODYNAMICS (matches the primitive recovery): a
+    // vacuum-crossing cell is clamped to the runtime floors (1 Pa / 1 K on
+    // gauged production runs, inert f32::MIN defaults elsewhere) instead of
+    // rejecting the step — only a NON-FINITE state invalidates. The floored
+    // values also feed the adaptive-CFL wave speeds so the rate stays sane.
+    let p_floor_state = bitcast<f32>(constants_words[26]);
+    let t_floor = bitcast<f32>(constants_words[27]);
+    let rho_floor_state = bitcast<f32>(constants_words[28]);
+    let p_bias = bitcast<f32>(constants_words[24]);
+    // CONSERVED-STATE REPAIR (candidate pass only; inert at the f32::MIN
+    // defaults): clamp the stored density to the floor-consistent value and
+    // the stored total energy to the value that recovers exactly the floored
+    // pressure at the current momentum. Repairing here — post-step, between
+    // RK steps — keeps the stage arithmetic untouched while preventing a
+    // vacuum-crossing cell from feeding progressively wilder fluxes until
+    // the state reaches Inf.
+    if (!accepted) {
+        let rho_index = cell * params.state_stride + params.rho_off;
+        state[rho_index] = max(state[rho_index], rho_floor_state);
+        let rho_repaired = max(state[rho_index] + gauge_rho_ref, 1.0e-8);
+        let m_x = state[cell * params.state_stride + params.rho_u_off];
+        let m_y = state[cell * params.state_stride + params.rho_u_off + 1u];
+        let ke = 0.5 * (m_x * m_x + m_y * m_y) / rho_repaired;
+        let rho_e_index = cell * params.state_stride + params.rho_e_off;
+        // State-form inverse of the pressure closure: p_state = gm1*(rho_e_state
+        // - ke) + p_bias, so the stored floor needs NO extra gauge_e term (the
+        // bias already encodes it).
+        let rho_e_min = (p_floor_state - p_bias) / max(gm1, 1.0e-6) + ke;
+        state[rho_e_index] = max(state[rho_e_index], rho_e_min);
+    }
+    let rho_raw = state_value(cell, params.rho_off, accepted) + gauge_rho_ref;
+    let rho = max(rho_raw, 1.0e-8);
     let mx = state_value(cell, params.rho_u_off, accepted);
     let my = state_value(cell, params.rho_u_off + 1u, accepted);
     let rho_e = state_value(cell, params.rho_e_off, accepted) + gauge_e_ref;
-    if !(rho > 0.0) {
-        atomicAdd(&control.invalid_count, 1u);
-        return;
-    }
     let kinetic_density = 0.5 * (mx * mx + my * my) / rho;
     let internal_density = rho_e - kinetic_density;
-    let pressure = gm1 * internal_density;
-    let temperature = pressure / (rho * gas_r);
-    let sound_sq = gamma * pressure / rho;
+    let gauge_p_ref = bitcast<f32>(constants_words[22]);
+    let pressure = max(gm1 * internal_density, p_floor_state + gauge_p_ref);
+    let temperature = max(pressure / (rho * gas_r), t_floor);
+    let sound_sq = gamma * max(pressure, 1.0e-30) / rho;
     let ux = mx / rho;
     let uy = my / rho;
     let speed = length(vec2<f32>(ux, uy));
-    if !finite(kinetic_density) || !finite(internal_density) || !(internal_density > 0.0)
-        || !finite(pressure) || !(pressure > 0.0)
-        || !finite(temperature) || !(temperature > 0.0)
+    if !finite(kinetic_density) || !finite(internal_density)
+        || !finite(pressure)
+        || !finite(temperature)
         || !finite(sound_sq) || !(sound_sq > 0.0)
         || !finite(speed) {
         atomicAdd(&control.invalid_count, 1u);
@@ -1594,7 +1622,7 @@ mod tests {
 
     #[test]
     fn raw_eos_constant_word_indices_are_pinned() {
-        assert_eq!(std::mem::size_of::<GpuConstants>(), 29 * 4);
+        assert_eq!(std::mem::size_of::<GpuConstants>(), 32 * 4);
         assert_eq!(std::mem::offset_of!(GpuConstants, eos_gamma), 14 * 4);
         assert_eq!(std::mem::offset_of!(GpuConstants, eos_gm1), 15 * 4);
         assert_eq!(std::mem::offset_of!(GpuConstants, eos_r), 16 * 4);
@@ -1616,6 +1644,9 @@ mod tests {
             std::mem::offset_of!(GpuConstants, bc_pressure_inlet),
             25 * 4
         );
+        assert_eq!(std::mem::offset_of!(GpuConstants, eos_p_floor), 26 * 4);
+        assert_eq!(std::mem::offset_of!(GpuConstants, eos_t_floor), 27 * 4);
+        assert_eq!(std::mem::offset_of!(GpuConstants, eos_rho_floor), 28 * 4);
     }
 
     #[test]

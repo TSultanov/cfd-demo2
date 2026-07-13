@@ -72,6 +72,20 @@ pub struct EosRuntimeParams {
     /// driving. The bc_expr closures branch on this constant, so one committed
     /// kernel serves both modes.
     pub bc_pressure_inlet: f32,
+    /// STORED-form floor for the recovered pressure (`p_state >= p_floor`).
+    /// `f32::MIN` (the default) makes the floor provably inert. Gauged
+    /// production runs set it to `1 Pa - gauge_p_ref`: a vacuum-crossing cell
+    /// recovers 1 Pa absolute instead of halting the health audit. Kept out
+    /// of the MMS/absolute paths, whose order-1 nondimensional pressures a
+    /// 1 Pa floor would clip.
+    pub p_floor: f32,
+    /// Absolute floor for the recovered temperature (1 K on gauged production
+    /// runs; `f32::MIN` = inert by default).
+    pub t_floor: f32,
+    /// STORED-form floor for the conserved density, consistent with the p/T
+    /// floors: `rho >= p_floor/(R*T_floor)` (~3.5e-3 kg/m^3 for air).
+    /// `f32::MIN` = inert.
+    pub rho_floor: f32,
 }
 
 impl EosSpec {
@@ -217,6 +231,9 @@ impl EosSpec {
                 gauge_e_ref: 0.0,
                 gauge_p_bias: 0.0,
                 bc_pressure_inlet: 0.0,
+                p_floor: f32::MIN,
+                t_floor: f32::MIN,
+                rho_floor: f32::MIN,
             },
             EosSpec::LinearCompressibility {
                 bulk_modulus,
@@ -240,6 +257,9 @@ impl EosSpec {
                     // historical absolute form only with bias == p_ref.
                     gauge_p_bias: p_ref as f32,
                     bc_pressure_inlet: 0.0,
+                    p_floor: f32::MIN,
+                    t_floor: f32::MIN,
+                    rho_floor: f32::MIN,
                 }
             }
             EosSpec::Constant => EosRuntimeParams {
@@ -255,6 +275,9 @@ impl EosSpec {
                 gauge_e_ref: 0.0,
                 gauge_p_bias: 0.0,
                 bc_pressure_inlet: 0.0,
+                p_floor: f32::MIN,
+                t_floor: f32::MIN,
+                rho_floor: f32::MIN,
             },
         }
     }
@@ -304,6 +327,16 @@ impl EosSpec {
         params.gauge_p_bias = (f64::from(params.gm1) * gauge_e
             + f64::from(params.p_ref)
             - gauge_p) as f32;
+        // Production thermodynamic floors (see the field docs): stored-form
+        // pressure floor at 1 Pa absolute, temperature floor at 1 K, density
+        // floor at the consistent p/(R*T) — IDEAL GAS ONLY (the barotropic
+        // energy closure has no gm1 inverse, so its floors stay inert).
+        if matches!(self, EosSpec::IdealGas { .. }) {
+            params.p_floor = (1.0 - gauge_p) as f32;
+            params.t_floor = 1.0;
+            params.rho_floor =
+                (1.0 / f64::from(params.r.max(1.0e-12)) - rho0) as f32;
+        }
         params
     }
 }

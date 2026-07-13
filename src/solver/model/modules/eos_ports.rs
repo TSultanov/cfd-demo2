@@ -89,6 +89,26 @@ pub fn eos_uniform_port_manifest() -> ModulePortManifest {
                 wgsl_type: "f32",
                 unit: Dimensionless::UNIT,
             },
+            // Production thermodynamic floors for the recovered p/T
+            // (f32::MIN default = inert; gauged runs set 1 Pa / 1 K).
+            ParamSpec {
+                key: "eos.p_floor",
+                wgsl_field: "eos_p_floor",
+                wgsl_type: "f32",
+                unit: Pressure::UNIT,
+            },
+            ParamSpec {
+                key: "eos.t_floor",
+                wgsl_field: "eos_t_floor",
+                wgsl_type: "f32",
+                unit: Temperature::UNIT,
+            },
+            ParamSpec {
+                key: "eos.rho_floor",
+                wgsl_field: "eos_rho_floor",
+                wgsl_type: "f32",
+                unit: Density::UNIT,
+            },
         ],
         fields: vec![],
         buffers: vec![],

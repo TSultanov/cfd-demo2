@@ -464,6 +464,21 @@ pub struct StructuredModelSolver {
     /// Model id + accumulated sim time (GUI parity with `StructuredGpuSolver`).
     model_id: &'static str,
     time: f64,
+    /// Runtime strength of the selective conserved-field low-pass filter
+    /// applied once per explicit-RK4 step (see [`Self::set_filter_sigma`]).
+    /// `0.0` (default) skips the pass entirely — trivially bit-inert.
+    filter_sigma: f32,
+    /// State-layout offsets of the filtered conserved components
+    /// `[rho, rho_u_x, rho_u_y, rho_e]`; `None` unless the layout carries all
+    /// of `rho`/`rho_u`/`rho_e` (the density-based compressible family).
+    filter_components: Option<[usize; 4]>,
+    /// State-layout offset of the Brinkman solid mask `ibm_penalty_U`
+    /// (`< 0` = solid, the `append_ibm_velocity_projection` convention);
+    /// `None` = no solid checks.
+    filter_penalty: Option<usize>,
+    /// Ping-pong scratch for the dimension-split filter (`n * state_stride`;
+    /// kept across steps to avoid per-step allocation).
+    filter_scratch: Vec<f32>,
     /// WARM START for the banded coupled solve: the previous outer's RAW linear
     /// solution (the update kernel overwrites the `x` buffer with the APPLIED
     /// under-relaxed value, so the raw solution must be kept host-side).
@@ -634,6 +649,26 @@ impl StructuredModelSolver {
                 .map(|g| g.into_iter().map(|o| o as usize).collect())
                 .collect();
 
+        // Selective conserved-field filter targets (density-based compressible
+        // family only): all of rho/rho_u/rho_e must be in the state layout.
+        let filter_components = match (
+            model.state_layout.offset_for("rho"),
+            model.state_layout.offset_for("rho_u"),
+            model.state_layout.offset_for("rho_e"),
+        ) {
+            (Some(rho), Some(rho_u), Some(rho_e)) => Some([
+                rho as usize,
+                rho_u as usize,
+                rho_u as usize + 1,
+                rho_e as usize,
+            ]),
+            _ => None,
+        };
+        let filter_penalty = model
+            .state_layout
+            .offset_for("ibm_penalty_U")
+            .map(|o| o as usize);
+
         Ok(Self {
             grid,
             s,
@@ -661,6 +696,10 @@ impl StructuredModelSolver {
             schur_layout,
             model_id: model.id,
             time: 0.0,
+            filter_sigma: 0.0,
+            filter_components,
+            filter_penalty,
+            filter_scratch: Vec::new(),
             prev_x: None,
             last_stats: StructuredStepStats::default(),
         })
@@ -914,11 +953,77 @@ impl StructuredModelSolver {
             self.run(stage_id, n, &ctx);
         }
 
+        // Selective conserved-field filter, once per logical step after RK
+        // stage 4 (no-op at sigma == 0.0 — the bit-inert default).
+        self.apply_conserved_filter();
+
         self.dt_old = self.dt;
         self.step_count = self.step_count.saturating_add(1);
         self.time = base_time + self.dt;
         self.constants.time = self.time as f32;
         self.last_stats = StructuredStepStats::default();
+    }
+
+    /// Runtime strength of the selective conserved-field low-pass filter
+    /// applied once per explicit-RK4 step (parity with
+    /// `StructuredGpuSolver::set_filter_sigma`): a dimension-split (x then y)
+    /// binomial high-order filter over `rho`/`rho_u`/`rho_e` that damps
+    /// grid-Nyquist modes while leaving resolved scales untouched. `0.0`
+    /// (the default) skips the pass entirely. Stored harmlessly on models
+    /// without the conserved layout.
+    pub fn set_filter_sigma(&mut self, sigma: f32) {
+        self.filter_sigma = sigma;
+    }
+
+    /// Apply the selective filter to the conserved fields of `state` (both
+    /// directional passes, ping-ponging through [`Self::filter_scratch`]).
+    /// The arithmetic mirrors the GPU WGSL exactly — same f32 operations in
+    /// the same pinned pairwise-symmetric order — so CPU and GPU agree
+    /// closely. The x-pass reads `state` and writes the scratch (copying all
+    /// non-filtered components through bit-exactly); the y-pass reads the
+    /// scratch and writes back to `state`.
+    fn apply_conserved_filter(&mut self) {
+        if self.filter_sigma == 0.0 {
+            return;
+        }
+        let Some(components) = self.filter_components else {
+            return;
+        };
+        let sigma = self.filter_sigma;
+        let (nx, ny) = (self.grid.nx, self.grid.ny);
+        let stride = self.state_stride;
+        let state = self.buffers.f32_vec("state");
+        let mut scratch = std::mem::take(&mut self.filter_scratch);
+        scratch.resize(state.len(), 0.0);
+        // x-pass: state -> scratch.
+        scratch.copy_from_slice(&state);
+        structured_filter_pass(
+            &state,
+            &mut scratch,
+            nx,
+            ny,
+            stride,
+            FilterAxis::X,
+            components,
+            self.filter_penalty,
+            sigma,
+        );
+        // y-pass: scratch -> state (reusing the snapshot Vec as the output).
+        let mut result = state;
+        result.copy_from_slice(&scratch);
+        structured_filter_pass(
+            &scratch,
+            &mut result,
+            nx,
+            ny,
+            stride,
+            FilterAxis::Y,
+            components,
+            self.filter_penalty,
+            sigma,
+        );
+        self.buffers.copy_into_f32("state", &result);
+        self.filter_scratch = scratch;
     }
 
     pub fn step(&mut self) {
@@ -1470,6 +1575,120 @@ impl StructuredModelSolver {
     pub fn unknowns(&self) -> usize {
         self.s
     }
+}
+
+/// Direction of one selective-filter pass over the dense grid.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum FilterAxis {
+    X,
+    Y,
+}
+
+/// One directional pass of the selective conserved-field filter: for every
+/// fluid cell whose `pos-N..pos+N` stencil along `axis` stays inside the grid
+/// and clear of solid cells (`ibm_penalty_U < 0` in `src`), overwrite the four
+/// conserved components of `dst` (pre-copied from `src`) with
+/// `q - sigma * D(q)` using the largest binomial stencil `N in {4,3,2}` that
+/// fits; clearance < 2 (or a solid centre cell) leaves the copied value.
+/// The arithmetic is the exact f32 sequence of the GPU WGSL
+/// (`structured_conserved_filter_wgsl`).
+#[allow(clippy::too_many_arguments)]
+fn structured_filter_pass(
+    src: &[f32],
+    dst: &mut [f32],
+    nx: usize,
+    ny: usize,
+    stride: usize,
+    axis: FilterAxis,
+    components: [usize; 4],
+    penalty: Option<usize>,
+    sigma: f32,
+) {
+    let step = match axis {
+        FilterAxis::X => 1usize,
+        FilterAxis::Y => nx,
+    };
+    let is_solid =
+        |cell: usize| -> bool { penalty.is_some_and(|off| src[cell * stride + off] < 0.0) };
+    for j in 0..ny {
+        for i in 0..nx {
+            let cell = j * nx + i;
+            if is_solid(cell) {
+                continue;
+            }
+            let (pos, count) = match axis {
+                FilterAxis::X => (i, nx),
+                FilterAxis::Y => (j, ny),
+            };
+            let room = pos.min(count - 1 - pos);
+            let limit = room.min(4);
+            let mut clearance = 0usize;
+            for ring in 1..=limit {
+                if is_solid(cell - ring * step) || is_solid(cell + ring * step) {
+                    break;
+                }
+                clearance = ring;
+            }
+            if clearance < 2 {
+                continue;
+            }
+            for comp in components {
+                dst[cell * stride + comp] =
+                    structured_filtered_component(src, cell, comp, stride, step, clearance, sigma);
+            }
+        }
+    }
+}
+
+/// The filtered value of component `comp` of `cell` along stride `step` with
+/// stencil half-width `clearance` (2, 3 or 4). Weights are binomial
+/// (`transfer = 1 - sigma*sin^(2N)(k*h/2)`), all exact binary fractions, and
+/// the evaluation order is pinned pairwise-symmetric — highest ring first,
+/// centre term last — identical to the GPU WGSL so both backends compute the
+/// same f32 sequence.
+fn structured_filtered_component(
+    src: &[f32],
+    cell: usize,
+    comp: usize,
+    stride: usize,
+    step: usize,
+    clearance: usize,
+    sigma: f32,
+) -> f32 {
+    let q = |ring: usize, sign_negative: bool| -> f32 {
+        let neighbour = if sign_negative {
+            cell - ring * step
+        } else {
+            cell + ring * step
+        };
+        src[neighbour * stride + comp]
+    };
+    let q0 = src[cell * stride + comp];
+    let s1 = q(1, true) + q(1, false);
+    let s2 = q(2, true) + q(2, false);
+    let d = if clearance >= 4 {
+        let s3 = q(3, true) + q(3, false);
+        let s4 = q(4, true) + q(4, false);
+        let mut d = 0.00390625_f32 * s4;
+        d = d - 0.03125_f32 * s3;
+        d = d + 0.109375_f32 * s2;
+        d = d - 0.21875_f32 * s1;
+        d = d + 0.2734375_f32 * q0;
+        d
+    } else if clearance == 3 {
+        let s3 = q(3, true) + q(3, false);
+        let mut d = -0.015625_f32 * s3;
+        d = d + 0.09375_f32 * s2;
+        d = d - 0.234375_f32 * s1;
+        d = d + 0.3125_f32 * q0;
+        d
+    } else {
+        let mut d = 0.0625_f32 * s2;
+        d = d - 0.25_f32 * s1;
+        d = d + 0.375_f32 * q0;
+        d
+    };
+    q0 - sigma * d
 }
 
 #[cfg(test)]

@@ -471,3 +471,45 @@ matrix and the focused cold-Direct structured/unstructured GPU snapshot tests
 green. A post-consolidation rerun of the complete GUI matrix was interrupted at
 the stop request; the mandatory full MMS and ALE sweeps were not started after
 the final integration. They remain release gates rather than inferred passes.
+
+
+## Structured explicit throughput audit (2026-07-13)
+
+Measured on the M3 Max, compressible_structured RK4, gauge storage, obstacle-
+class grids (tests were run via a temporary probe; numbers are queue-drained
+wall time per step):
+
+| Grid | autonomous batch | pipelined (2 in flight) | ordinary step() | CPU-transpiled x1 |
+|---|---:|---:|---:|---:|
+| 120x40 (4.8k) | 0.42 ms | 0.33 ms | 0.19 ms | 6.1 ms |
+| 240x80 (19.2k) | 0.54 ms | 0.49 ms | 0.29 ms | — |
+| 480x160 (76.8k) | 1.41 ms | 1.41 ms | 1.04 ms | — |
+
+Findings:
+
+- THE user-facing regression ("structured obstacle ~2x slower than
+  unstructured") was the GUI's structured backend default: switching to the
+  dense grid force-selected the CPU-transpiled backend — correct for the
+  implicit coupled solve (host-side banded solver; the GPU path reads the
+  banded matrix back every outer), but the explicit RK4 program is fully
+  GPU-resident. The single-threaded CPU bridge runs ~6 ms/step where the
+  structured GPU runs 0.33-0.43 ms/step (the unstructured GPU obstacle
+  reference is ~1.4 ms/step at the same cell count). FIXED: the structured
+  backend default is now scheme-aware (`structured_backend_default`,
+  src/ui/app.rs) — RK4 -> GPU, implicit -> CPU-transpiled — re-applied on
+  mesh-mode switches and time-scheme changes.
+- Autonomous-batch overhead is flat ~0.23-0.37 ms/step over the ordinary
+  route at every size (batch size 1..128 makes no difference): per step the
+  batch encodes a history pass, 4x(constants-patch pass + ~5
+  copy_buffer_to_buffer into per-kernel uniforms), reset-metrics, the
+  full-domain conserved-state audit, accept, and rollback — ~12 extra passes
+  + ~20 copies. NEXT LEVER: collapse the per-stage constants patch/copies
+  (per-kernel uniforms could alias one buffer with dynamic offsets, or stage
+  kernels could read dt/time from the control buffer) and fuse the
+  reset/accept control passes. The audit-every-step safety contract stays.
+- TRAP (headless only): a single autonomous submission with many steps
+  deadlocks inside `CommandEncoder::finish` on Metal — deferred pass encoding
+  allocates from the queue's ~64 command-buffer pool while earlier
+  submissions are still unreclaimed (no polling during encode). The GUI's
+  3 ms batch-time controller keeps batches far below the ceiling; headless
+  drivers must chunk batches and poll between submissions.

@@ -4330,10 +4330,36 @@ impl CFDApp {
         self.sync_worker_params();
     }
 
+    /// Recommended structured compute backend for the CURRENT time scheme.
+    ///
+    /// The implicit coupled saddle solve is host-side either way (the GPU
+    /// path reads the banded matrix back every outer iteration), so the
+    /// CPU-transpiled backend wins there. The explicit RK4 program is fully
+    /// GPU-resident with no per-step readbacks: the structured GPU runs it at
+    /// ~0.4 ms/step at 120x40 versus ~6 ms/step for the single-threaded CPU
+    /// bridge — leaving the coupled-era CPU default in place silently made
+    /// the structured RK4 case slower than the unstructured GPU one. The
+    /// backend radio remains manually selectable after this default applies.
+    fn structured_backend_default(&self) -> BackendChoice {
+        if self.time_scheme == GpuTimeScheme::RK4 {
+            BackendChoice::Gpu
+        } else {
+            BackendChoice::CpuTranspiled
+        }
+    }
+
     fn update_gpu_time_scheme(&mut self) {
         // RK4 selects a different, matrix-free solver program; rebuilding on
         // every time-scheme change keeps transitions to/from the implicit
         // Euler/BDF2 paths unambiguous for both mesh families.
+        //
+        // The structured backend default is scheme-aware (see
+        // structured_backend_default): re-apply it so picking RK4 lands on
+        // the GPU program and picking an implicit scheme returns to the
+        // host-side coupled solver.
+        if self.mesh_mode == MeshMode::Structured2D {
+            self.backend = self.structured_backend_default();
+        }
         self.init_solver();
     }
 
@@ -4684,9 +4710,10 @@ impl eframe::App for CFDApp {
                             )
                             .on_hover_text(
                                 "Dense Cartesian grid with NO connectivity indirection; \
-                                 immersed (Brinkman) obstacles instead of cut cells. Defaults \
-                                 to the CPU-transpiled backend (fastest for the host-side \
-                                 banded coupled solve; the GPU backend is still selectable). \
+                                 immersed (Brinkman) obstacles instead of cut cells. The \
+                                 backend default is scheme-aware: CPU-transpiled for the \
+                                 implicit coupled solve (host-side banded solver), GPU for \
+                                 explicit RK4 (fully GPU-resident); still selectable. \
                                  A lid-driven cavity / uniform-gas box demo. Hides the \
                                  unstructured meshers, mesh grading, moving mesh (ALE), and \
                                  the nozzle geometry.",
@@ -4706,7 +4733,6 @@ impl eframe::App for CFDApp {
                                 // GPU-direct renderer via the state-upload bridge. The
                                 // GPU radio remains available for manual selection.
                                 self.enable_moving_mesh = false;
-                                self.backend = BackendChoice::CpuTranspiled;
                                 if !self.model_id.ends_with("_structured") {
                                     self.model_id = "incompressible_momentum_structured";
                                 }
@@ -4722,6 +4748,11 @@ impl eframe::App for CFDApp {
                                 };
                             }
                             self.apply_model_defaults();
+                            if self.mesh_mode == MeshMode::Structured2D {
+                                // Scheme-aware backend default (after
+                                // apply_model_defaults has set the scheme).
+                                self.backend = self.structured_backend_default();
+                            }
                             self.init_solver();
                         }
                     });

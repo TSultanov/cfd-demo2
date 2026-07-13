@@ -856,6 +856,18 @@ fn gpu_structured_compressible_channel_ibm_runs() {
                 _ => n(),
             });
         }
+        // The bc_expr kernel recomputes inlet rho_u from the primitive-u BC
+        // channels (slots 4/5), so a conserved-only row leaves the inlet dead.
+        if s >= 6 {
+            v.extend(match edge {
+                Edge::Left => [d(u0 as f32), d(0.0)],
+                Edge::Right => [n(), n()],
+                _ => [d(0.0), d(0.0)],
+            });
+        }
+        while v.len() < s {
+            v.push(n());
+        }
         (bt, v)
     });
 
@@ -1410,6 +1422,10 @@ fn gpu_structured_thermal_channel_ibm_cylinder_runs() {
     if s.field_offset("precond_mask").is_some() {
         s.set_named_field("precond_mask", |_, _| 1.0);
     }
+    // The generated bc_expr kernel overwrites the inlet u BC channel with the
+    // `inlet_velocity` runtime constant (soft-start support), so the BC-table
+    // value alone no longer drives the inlet.
+    s.set_inlet_ramp(u_in as f32, 0.0);
 
     for _ in 0..40 {
         s.step();
@@ -1626,6 +1642,8 @@ fn cpu_structured_transpiled_thermal_matches_interpreter() {
         if s.field_offset("precond_mask").is_some() {
             s.set_named_field("precond_mask", |_, _| 1.0);
         }
+        // bc_expr overwrites the inlet u BC channel with this runtime constant.
+        s.set_inlet_ramp(0.05, 0.0);
         for _ in 0..8 {
             s.step();
         }

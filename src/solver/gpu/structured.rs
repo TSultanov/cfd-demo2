@@ -1980,6 +1980,304 @@ impl StructuredAutonomousControl {
     }
 }
 
+// ===========================================================================
+// Selective conserved-field filter (explicit RK4, density-based compressible).
+// ===========================================================================
+
+/// Hand-written WGSL for the dimension-split selective low-pass filter over
+/// the conserved fields (`rho`, `rho_u`, `rho_e`) of the density-based
+/// structured compressible family. Per direction, per component:
+///
+/// `q_i <- q_i - sigma * D_i`, `D_i = w0*q_i + sum_{j=1..N} wj*(q_{i-j}+q_{i+j})`
+///
+/// with the binomial weight sets (transfer `1 - sigma*sin^(2N)(k*h/2)`):
+/// N=4 `[70,-56,28,-8,1]/256`, N=3 `[20,-15,6,-1]/64`, N=2 `[6,-4,1]/16`.
+/// `N` per cell/direction is the largest in `{4,3,2}` whose full `i-N..i+N`
+/// stencil stays inside the grid AND clear of solid cells (`ibm_penalty_U < 0`,
+/// the [`append_ibm_velocity_projection`] convention); clearance < 2 or a solid
+/// centre cell is identity. The evaluation order is pinned pairwise-symmetric
+/// (highest ring first, `w0*q0` last) so the hand-written CPU implementation
+/// (`cpu::structured`) computes the identical f32 sequence.
+///
+/// Two entry points ping-pong through `filter_scratch`: `filter_x` reads
+/// `state` and writes the scratch (copying every non-filtered component
+/// through bit-exactly), `filter_y` reads the scratch back into `state`.
+/// Both flatten a possibly 2D-split dispatch via `launch_index`, so they run
+/// under the autonomous route's cells indirect-args slot (halted batch =>
+/// zeroed args => no filtering of a rolled-back state).
+fn structured_conserved_filter_wgsl(
+    stride: usize,
+    rho: usize,
+    rho_u: usize,
+    rho_e: usize,
+    penalty: Option<usize>,
+) -> String {
+    let solid_body = match penalty {
+        Some(offset) => format!("return src.data[cell * {stride}u + {offset}u] < 0.0;"),
+        None => "return false;".to_string(),
+    };
+    format!(
+        r#"
+struct Grid {{ nx: u32, ny: u32, dx: f32, dy: f32 }};
+struct FilterParams {{ sigma: f32, _pad0: f32, _pad1: f32, _pad2: f32 }};
+struct F32Buffer {{ data: array<f32> }};
+@group(0) @binding(0) var<uniform> grid: Grid;
+@group(0) @binding(1) var<uniform> params: FilterParams;
+@group(0) @binding(2) var<storage, read> src: F32Buffer;
+@group(0) @binding(3) var<storage, read_write> dst: F32Buffer;
+
+// Flatten the 2D-split dispatch (rows of `workgroups.x` groups, capped at the
+// device's 65,535 workgroups-per-dimension limit) back to a linear cell index.
+fn launch_index(gid: vec3<u32>, workgroups: vec3<u32>) -> u32 {{
+    return gid.y * (workgroups.x * 64u) + gid.x;
+}}
+
+fn is_solid(cell: u32) -> bool {{
+    {solid_body}
+}}
+
+// The filtered value of component `comp` of `cell` along stride `step`
+// (1 = x, nx = y) with stencil half-width `clearance` (2, 3 or 4). All
+// binomial weights are exact binary fractions; the pinned pairwise order
+// (highest ring first, centre last) matches the CPU implementation exactly.
+fn filtered_component(cell: u32, comp: u32, step: u32, clearance: u32) -> f32 {{
+    let q0 = src.data[cell * {stride}u + comp];
+    let s1 = src.data[(cell - step) * {stride}u + comp]
+        + src.data[(cell + step) * {stride}u + comp];
+    let s2 = src.data[(cell - 2u * step) * {stride}u + comp]
+        + src.data[(cell + 2u * step) * {stride}u + comp];
+    var d = 0.0;
+    if (clearance >= 4u) {{
+        let s3 = src.data[(cell - 3u * step) * {stride}u + comp]
+            + src.data[(cell + 3u * step) * {stride}u + comp];
+        let s4 = src.data[(cell - 4u * step) * {stride}u + comp]
+            + src.data[(cell + 4u * step) * {stride}u + comp];
+        d = 0.00390625 * s4;
+        d = d - 0.03125 * s3;
+        d = d + 0.109375 * s2;
+        d = d - 0.21875 * s1;
+        d = d + 0.2734375 * q0;
+    }} else if (clearance == 3u) {{
+        let s3 = src.data[(cell - 3u * step) * {stride}u + comp]
+            + src.data[(cell + 3u * step) * {stride}u + comp];
+        d = -0.015625 * s3;
+        d = d + 0.09375 * s2;
+        d = d - 0.234375 * s1;
+        d = d + 0.3125 * q0;
+    }} else {{
+        d = 0.0625 * s2;
+        d = d - 0.25 * s1;
+        d = d + 0.375 * q0;
+    }}
+    return q0 - params.sigma * d;
+}}
+
+// One directional pass for `cell` at 1D position `pos` of `count` cells with
+// neighbour stride `step`. Copies the complete state row through, then
+// overwrites the four conserved components with their filtered values when the
+// cell is fluid and has clearance >= 2.
+fn apply_pass(cell: u32, pos: u32, count: u32, step: u32) {{
+    let base = cell * {stride}u;
+    for (var slot = 0u; slot < {stride}u; slot = slot + 1u) {{
+        dst.data[base + slot] = src.data[base + slot];
+    }}
+    if (is_solid(cell)) {{ return; }}
+    let room = min(pos, count - 1u - pos);
+    let limit = min(room, 4u);
+    var clearance = 0u;
+    for (var ring = 1u; ring <= limit; ring = ring + 1u) {{
+        if (is_solid(cell - ring * step) || is_solid(cell + ring * step)) {{ break; }}
+        clearance = ring;
+    }}
+    if (clearance < 2u) {{ return; }}
+    dst.data[base + {rho}u] = filtered_component(cell, {rho}u, step, clearance);
+    dst.data[base + {rho_u}u] = filtered_component(cell, {rho_u}u, step, clearance);
+    dst.data[base + {rho_u_y}u] = filtered_component(cell, {rho_u_y}u, step, clearance);
+    dst.data[base + {rho_e}u] = filtered_component(cell, {rho_e}u, step, clearance);
+}}
+
+@compute @workgroup_size(64)
+fn filter_x(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(num_workgroups) workgroups: vec3<u32>,
+) {{
+    let cell = launch_index(gid, workgroups);
+    if (cell >= grid.nx * grid.ny) {{ return; }}
+    apply_pass(cell, cell % grid.nx, grid.nx, 1u);
+}}
+
+@compute @workgroup_size(64)
+fn filter_y(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(num_workgroups) workgroups: vec3<u32>,
+) {{
+    let cell = launch_index(gid, workgroups);
+    if (cell >= grid.nx * grid.ny) {{ return; }}
+    apply_pass(cell, cell / grid.nx, grid.ny, grid.nx);
+}}
+"#,
+        rho_u_y = rho_u + 1,
+    )
+}
+
+/// GPU resources for the selective conserved-field filter: the ping-pong
+/// scratch (`n * state_stride`), the `sigma` uniform, and the two directional
+/// pipelines with their pre-built bind groups (`x`: state -> scratch, `y`:
+/// scratch -> state). Built only for explicit-RK4 models whose state layout
+/// carries all of `rho`/`rho_u`/`rho_e`; `sigma == 0.0` is a host-side skip at
+/// every dispatch site.
+struct StructuredConservedFilter {
+    /// Host cache of the runtime filter strength; the uniform holds the same
+    /// value. Every dispatch site skips encoding when this is exactly 0.0.
+    sigma: f32,
+    params: wgpu::Buffer,
+    _scratch: wgpu::Buffer,
+    pipeline_x: wgpu::ComputePipeline,
+    pipeline_y: wgpu::ComputePipeline,
+    bg_x: wgpu::BindGroup,
+    bg_y: wgpu::BindGroup,
+    max_workgroups_per_dim: u32,
+}
+
+impl StructuredConservedFilter {
+    fn new(
+        device: &wgpu::Device,
+        grid_buf: &wgpu::Buffer,
+        state_buf: &wgpu::Buffer,
+        n: usize,
+        state_stride: usize,
+        layout: &crate::solver::model::backend::state_layout::StateLayout,
+    ) -> Option<Self> {
+        let rho = layout.offset_for("rho")? as usize;
+        let rho_u = layout.offset_for("rho_u")? as usize;
+        let rho_e = layout.offset_for("rho_e")? as usize;
+        let penalty = layout.offset_for("ibm_penalty_U").map(|o| o as usize);
+        let wgsl = structured_conserved_filter_wgsl(state_stride, rho, rho_u, rho_e, penalty);
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("structured:conserved-filter"),
+            source: wgpu::ShaderSource::Wgsl(wgsl.into()),
+        });
+        let buffer_entry = |binding, ty| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::COMPUTE,
+            ty: wgpu::BindingType::Buffer {
+                ty,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let bind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("structured:conserved-filter-layout"),
+            entries: &[
+                buffer_entry(0, wgpu::BufferBindingType::Uniform),
+                buffer_entry(1, wgpu::BufferBindingType::Uniform),
+                buffer_entry(2, wgpu::BufferBindingType::Storage { read_only: true }),
+                buffer_entry(3, wgpu::BufferBindingType::Storage { read_only: false }),
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("structured:conserved-filter-pipeline-layout"),
+            bind_group_layouts: &[Some(&bind_layout)],
+            immediate_size: 0,
+        });
+        let pipeline = |entry: &str| {
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some(entry),
+                layout: Some(&pipeline_layout),
+                module: &module,
+                entry_point: Some(entry),
+                compilation_options: Default::default(),
+                cache: None,
+            })
+        };
+        let params = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("structured:conserved-filter-params"),
+            contents: bytemuck::cast_slice(&[0.0_f32; 4]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let scratch = storage_buffer(device, "filter_scratch", n * state_stride);
+        let bind_group = |label: &str, src: &wgpu::Buffer, dst: &wgpu::Buffer| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout: &bind_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: grid_buf.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: params.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: src.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: dst.as_entire_binding(),
+                    },
+                ],
+            })
+        };
+        let bg_x = bind_group("structured:conserved-filter-x", state_buf, &scratch);
+        let bg_y = bind_group("structured:conserved-filter-y", &scratch, state_buf);
+        Some(Self {
+            sigma: 0.0,
+            params,
+            _scratch: scratch,
+            pipeline_x: pipeline("filter_x"),
+            pipeline_y: pipeline("filter_y"),
+            bg_x,
+            bg_y,
+            max_workgroups_per_dim: device.limits().max_compute_workgroups_per_dimension,
+        })
+    }
+
+    /// Encode both directional passes with a direct per-cell dispatch (the
+    /// plot/host routes). One compute pass: each dispatch owns its usage
+    /// scope, so `filter_y` sees `filter_x`'s scratch writes.
+    fn encode(&self, encoder: &mut wgpu::CommandEncoder, cells: u32) {
+        let groups = cells.div_ceil(WG).max(1);
+        let groups_x = groups.min(self.max_workgroups_per_dim);
+        let groups_y = groups.div_ceil(self.max_workgroups_per_dim);
+        assert!(
+            groups_y <= self.max_workgroups_per_dim,
+            "structured filter dispatch requires more than a 2D workgroup grid: groups={groups}, max={}",
+            self.max_workgroups_per_dim
+        );
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("structured:conserved-filter"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&self.pipeline_x);
+        pass.set_bind_group(0, &self.bg_x, &[]);
+        pass.dispatch_workgroups(groups_x, groups_y, 1);
+        pass.set_pipeline(&self.pipeline_y);
+        pass.set_bind_group(0, &self.bg_y, &[]);
+        pass.dispatch_workgroups(groups_x, groups_y, 1);
+        crate::count_dispatch!("Structured Kernel", "conserved_filter");
+    }
+
+    /// Encode both directional passes through the autonomous route's per-cell
+    /// indirect-args slot. A halted batch zeroes those args, so a rolled-back
+    /// accepted state is never filtered again.
+    fn encode_indirect(&self, encoder: &mut wgpu::CommandEncoder, indirect_args: &wgpu::Buffer) {
+        let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("structured:conserved-filter"),
+            timestamp_writes: None,
+        });
+        pass.set_pipeline(&self.pipeline_x);
+        pass.set_bind_group(0, &self.bg_x, &[]);
+        pass.dispatch_workgroups_indirect(indirect_args, 0);
+        pass.set_pipeline(&self.pipeline_y);
+        pass.set_bind_group(0, &self.bg_y, &[]);
+        pass.dispatch_workgroups_indirect(indirect_args, 0);
+        crate::count_dispatch!("Structured Kernel", "conserved_filter");
+    }
+}
+
 /// Lower every `Structured2D` codegen kernel of `model` to `(id, wgsl, bindings,
 /// dispatch)`. Mirrors `cpu::lowering::model_kernel_programs` but at the WGSL
 /// level and without the `cpu` feature (walks the model modules directly).
@@ -2127,6 +2425,10 @@ pub struct StructuredGpuSolver {
     /// Convergence telemetry from the last [`step`](Self::step) (GUI readout;
     /// parity with the CPU `StructuredModelSolver`).
     last_stats: crate::solver::banded_schur::StructuredStepStats,
+    /// Selective conserved-field low-pass filter (explicit RK4, density-based
+    /// compressible family only; `None` otherwise). Runs once per logical RK4
+    /// step when its runtime `sigma` is nonzero.
+    filter: Option<StructuredConservedFilter>,
     /// GPU-resident health/adaptive controller for bounded autonomous explicit
     /// batches. `None` for implicit program families.
     autonomous: Option<StructuredAutonomousControl>,
@@ -2376,6 +2678,21 @@ impl StructuredGpuSolver {
             k.write_constants(&ctx.queue, &constants);
         }
 
+        // Selective conserved-field filter: explicit RK4 + a density-based
+        // conserved layout only. Other families build no buffers/pipelines.
+        let filter = (stepping == SteppingMode::Explicit)
+            .then(|| {
+                StructuredConservedFilter::new(
+                    dev,
+                    &grid_buf,
+                    &buffers["state"],
+                    n,
+                    state_stride,
+                    &model.state_layout,
+                )
+            })
+            .flatten();
+
         let autonomous = (stepping == SteppingMode::Explicit).then(|| {
             StructuredAutonomousControl::new(
                 dev,
@@ -2421,6 +2738,7 @@ impl StructuredGpuSolver {
             model_id: model.id,
             time: 0.0,
             last_stats: crate::solver::banded_schur::StructuredStepStats::default(),
+            filter,
             autonomous,
             autonomous_initialized: false,
             autonomous_test_nan_after: u32::MAX,
@@ -2555,6 +2873,23 @@ impl StructuredGpuSolver {
     fn write_kernel_constants(&self) {
         for k in self.kernels.values() {
             k.write_constants(&self.ctx.queue, &self.constants);
+        }
+    }
+
+    /// Runtime strength of the selective conserved-field low-pass filter
+    /// applied once per logical explicit-RK4 step (see
+    /// [`structured_conserved_filter_wgsl`]). `0.0` (the default) skips the
+    /// pass entirely at every dispatch site, so it is trivially bit-inert.
+    /// Takes effect immediately (uniform write, no rebuild). A no-op on
+    /// models without the conserved `rho`/`rho_u`/`rho_e` layout.
+    pub fn set_filter_sigma(&mut self, sigma: f32) {
+        if let Some(filter) = self.filter.as_mut() {
+            filter.sigma = sigma;
+            self.ctx.queue.write_buffer(
+                &filter.params,
+                0,
+                bytemuck::cast_slice(&[sigma, 0.0_f32, 0.0, 0.0]),
+            );
         }
     }
 
@@ -2840,6 +3175,20 @@ impl StructuredGpuSolver {
             }
         }
 
+        // Selective conserved-field filter, once per logical step after RK
+        // stage 4 (host-side skip at sigma == 0.0 keeps the default bit-inert).
+        if let Some(filter) = self.filter.as_ref().filter(|f| f.sigma != 0.0) {
+            let mut enc = self
+                .ctx
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("structured:conserved-filter"),
+                });
+            filter.encode(&mut enc, self.n as u32);
+            self.ctx.queue.submit(Some(enc.finish()));
+            crate::count_submission!("Structured", "conserved_filter");
+        }
+
         self.dt_old = self.dt;
         self.step_count = self.step_count.saturating_add(1);
         self.time = base_time + self.dt;
@@ -2934,6 +3283,9 @@ impl StructuredGpuSolver {
                 usage: wgpu::BufferUsages::COPY_SRC,
             });
         let state_len_bytes = (self.n * self.state_stride * 4) as u64;
+        // Selective conserved-field filter: encoded after stage 4 of every
+        // logical step; host-side skip at sigma == 0.0 (bit-inert default).
+        let step_filter = self.filter.as_ref().filter(|f| f.sigma != 0.0);
         let mut encoder = self
             .ctx
             .device
@@ -2969,6 +3321,9 @@ impl StructuredGpuSolver {
                     );
                 }
                 self.encode_dispatch_ids(&mut encoder, &stage.schedule, "structured:rk4-stage");
+            }
+            if let Some(filter) = step_filter {
+                filter.encode(&mut encoder, self.n as u32);
             }
         }
 
@@ -3159,6 +3514,13 @@ impl StructuredGpuSolver {
         );
 
         let state_threads = (self.n * self.state_stride) as u32;
+        // Selective conserved-field filter: dispatched through the SAME
+        // per-cell indirect-args slot as the stage kernels, so a halted batch
+        // (zeroed args) never filters a rolled-back accepted state. Encoded
+        // after stage 4 and BEFORE the audit, so acceptance judges the
+        // filtered candidate; rollback restores `state` (the only buffer
+        // `filter_y` writes) from the accepted prefix.
+        let step_filter = self.filter.as_ref().filter(|f| f.sigma != 0.0);
         for _ in 0..steps {
             control.encode_common(
                 &mut encoder,
@@ -3197,6 +3559,9 @@ impl StructuredGpuSolver {
                     &control.indirect_args,
                     "structured:autonomous-rk4-stage",
                 );
+            }
+            if let Some(filter) = step_filter {
+                filter.encode_indirect(&mut encoder, &control.indirect_args);
             }
             control.encode_common(
                 &mut encoder,

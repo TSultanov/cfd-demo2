@@ -258,13 +258,112 @@ fn main() {
         }
         return;
     }
+    if std::env::var_os("PROBE_MACH3_LOCATE").is_some() {
+        // Sample just before the step-3541 failure and locate the cell with
+        // the minimum internal energy / density.
+        let smoke = gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+            model_id: "compressible",
+            fluid: "Air",
+            geometry: "obstacle",
+            mesh_kind: "cutcell",
+            backend: "gpu",
+            adaptive: true,
+            presentation: "plot",
+            moving_mesh: false,
+            cell_size: 0.005,
+            steps: 3500,
+            requested_dt: None,
+            advection_scheme: None,
+            inlet_velocity: Some(1000.0),
+            inlet_pressure: None,
+        })
+        .expect("pre-failure state");
+        let rho_field = smoke.density.as_ref().expect("rho");
+        let mut worst = (f64::INFINITY, 0usize);
+        for (cell, _) in smoke.cell_centers.iter().enumerate() {
+            let rho = f64::from(rho_field[cell]);
+            if rho < worst.0 {
+                worst = (rho, cell);
+            }
+        }
+        let (x, y) = smoke.cell_centers[worst.1];
+        let d_cyl = (x - 1.0_f64).hypot(y - 0.51) - 0.1;
+        println!(
+            "mach3-locate t={:.4e}: min rho' {:.4e} at cell {} (x={x:.4}, y={y:.4}, wall_dist={d_cyl:.4})",
+            smoke.final_time, worst.0, worst.1
+        );
+        let (ux, uy) = smoke.velocity[worst.1];
+        println!(
+            "  cell state: u=({ux:.1},{uy:.1}) p'={:.4e} T={:.1}",
+            smoke.pressure[worst.1],
+            smoke.temperature.as_ref().map_or(0.0, |t| t[worst.1]),
+        );
+        return;
+    }
+    if std::env::var_os("PROBE_MACH3").is_some() {
+        // Stress test: obstacle, cell 0.005, inlet 1000 m/s (Mach ~2.9 bow
+        // shock). GUI halts with 1 invalid cell at t ~ 1e-3.
+        for steps in [1000usize, 3000, 6000] {
+            let smoke = match gui_explicit_rk4_smoke(GuiExplicitRk4Case {
+                model_id: "compressible",
+                fluid: "Air",
+                geometry: "obstacle",
+                mesh_kind: "cutcell",
+                backend: "gpu",
+                adaptive: true,
+                presentation: "plot",
+                moving_mesh: false,
+                cell_size: 0.005,
+                steps,
+                requested_dt: None,
+                advection_scheme: None,
+                inlet_velocity: Some(1000.0),
+                inlet_pressure: None,
+            }) {
+                Ok(smoke) => smoke,
+                Err(error) => {
+                    println!("mach3 {steps} steps: FAILED: {error}");
+                    continue;
+                }
+            };
+            let (cx, cy, r) = (1.0, 0.51, 0.1);
+            let mut wake = (f64::INFINITY, f64::INFINITY);
+            let mut global = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY);
+            let mut max_speed = 0.0_f64;
+            for (cell, &(x, y)) in smoke.cell_centers.iter().enumerate() {
+                let p_val = f64::from(smoke.pressure[cell]);
+                let rho = smoke.density.as_ref().map_or(0.0, |r| f64::from(r[cell]));
+                global.0 = global.0.min(p_val);
+                global.1 = global.1.max(p_val);
+                global.2 = global.2.min(rho);
+                let (ux, uy) = smoke.velocity[cell];
+                max_speed = max_speed.max(f64::from(ux).hypot(f64::from(uy)));
+                let d = (x - cx).hypot(y - cy);
+                if d < r + 0.1 && x > cx {
+                    wake.0 = wake.0.min(p_val);
+                    wake.1 = wake.1.min(rho);
+                }
+            }
+            println!(
+                "mach3 {steps} steps t={:.4e} dt=[{:.3e},{:.3e}]: max|u|={max_speed:.1} p'=[{:.3e},{:.3e}] rho'_min={:.3e} wake_p'_min={:.3e} wake_rho'_min={:.3e}",
+                smoke.final_time, smoke.min_dt, smoke.max_dt,
+                global.0, global.1, global.2, wake.0, wake.1
+            );
+        }
+        return;
+    }
     if std::env::var_os("PROBE_NOZZLE_REGIMES").is_some() {
         // Nozzle start / expansion regimes vs reservoir pressure (area ratio 2,
         // exit-Mach ~2.2 branch: p_exit/p0 ~ 0.094; shock-at-exit back-pressure
         // bound ~0.51 p0; underexpanded exit needs p0 > ~1.08 MPa abs).
+        if std::env::var_os("PROBE_STRUCTURED_ONLY").is_some() {
+            run_nozzle_fine_dt("compressible_structured", "structured", 20000, 2.5e5, 0.005, None);
+            return;
+        }
         for p_in in [1.0e5_f32, 2.5e5, 1.2e6] {
             run_nozzle_fine_dt("compressible", "fitted", 20000, p_in, 0.005, None);
         }
+        run_nozzle_fine_dt("compressible_structured", "structured", 20000, 2.5e5, 0.005, None);
         return;
     }
     if std::env::var_os("PROBE_NOZZLE_LOCAL").is_some() {

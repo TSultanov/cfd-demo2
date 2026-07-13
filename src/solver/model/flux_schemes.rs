@@ -113,7 +113,52 @@ fn derive_central_upwind(
         }
     };
 
+    // POSITIVITY GUARD: cells whose ABSOLUTE pressure or density sit inside
+    // the near-vacuum band reconstruct with a proportionally shortened slope,
+    // reaching first-order upwind at the band floor. The band is 10%..20% of
+    // the GAUGE references (the quiescent ambient state), so the guard is
+    // exactly inert (`scale == 1.0`) for every cell above 20% of ambient —
+    // including all acoustic/MMS regimes — and inert everywhere when gauge
+    // storage is off (zero references make the ratios huge). Second-order
+    // MUSCL undershoot in strong expansions (a Mach-3 bluff-body lee side, an
+    // over-expanding nozzle transient) otherwise drives face states through
+    // vacuum: one cell crosses p <= 0 and the health audit halts the run.
+    let positivity_scale = |side: FaceSide| -> S {
+        let p_abs = S::Add(
+            Box::new(S::state(side, decl.pressure_field)),
+            Box::new(S::constant("eos_gauge_p_ref")),
+        );
+        let rho_abs = S::Add(
+            Box::new(S::state(side, rho_name)),
+            Box::new(S::constant("eos_gauge_rho_ref")),
+        );
+        let band = |value: S, reference: &str| -> S {
+            let floor = S::Max(
+                Box::new(S::Mul(
+                    Box::new(S::lit(0.1)),
+                    Box::new(S::constant(reference)),
+                )),
+                Box::new(S::lit(1.0e-30)),
+            );
+            S::Div(Box::new(value), Box::new(floor))
+        };
+        let ratio = S::Min(
+            Box::new(band(p_abs, "eos_gauge_p_ref")),
+            Box::new(band(rho_abs, "eos_gauge_rho_ref")),
+        );
+        // clamp(ratio - 1, 0, 1): 1.0 at 2x the floor and above (bitwise
+        // inert: the slope is multiplied by exactly 1.0), 0 at the floor.
+        S::Min(
+            Box::new(S::Max(
+                Box::new(S::Sub(Box::new(ratio), Box::new(S::lit(1.0)))),
+                Box::new(S::lit(0.0)),
+            )),
+            Box::new(S::lit(1.0)),
+        )
+    };
+
     let reconstruct_scalar = |side: FaceSide, phi_cell: S, phi_other: S, grad: V| -> S {
+        let grad = V::MulScalar(Box::new(grad), Box::new(positivity_scale(side)));
         match reconstruction {
             Scheme::Upwind => phi_cell,
 

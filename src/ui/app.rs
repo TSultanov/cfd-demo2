@@ -7864,6 +7864,16 @@ fn setup_structured_bcs(
                 kind: 2,
                 value: 0.0,
             };
+            // TRUE ZeroGradient (kind 0): the ghost extrapolates the owner and
+            // the table VALUE is ignored by every kernel — safe for channels
+            // the bc_expr closure overwrites (kind 2 would misread those
+            // writes as prescribed GRADIENTS). This matches the unstructured
+            // model's outlet declarations (GpuBcKind::ZeroGradient), giving
+            // the same quasi-non-reflective, extrapolating outlet.
+            let z = || StructBc {
+                kind: 0,
+                value: 0.0,
+            };
             // Coupled channel order: rho, rho_u_x, rho_u_y, rho_e, u_x, u_y,
             // p, T. The u CHANNELS ARE LOAD-BEARING at the inlet: the model's
             // bc_expr kernel recomputes the dependent inlet entries every
@@ -7901,27 +7911,22 @@ fn setup_structured_bcs(
                         d(t0),
                     ],
                 ),
-                // Outlet: the gauge back-pressure anchor lives in channel 6
-                // (read by the closure to rebuild ghost rho_e/T, exactly like
-                // the unstructured driver's Outlet `p` Dirichlet); all other
-                // channels are closure-extrapolated from the interior and
-                // consumed as kind-1 values. All-Neumann here leaves the
-                // subsonic channel without any absolute-pressure anchor: the
-                // density-following inlet momentum (`rho_u = rho_abs*u_in`)
-                // pumps mass in a positive feedback and the mean pressure
-                // grows without bound until the health check halts the run.
+                // Outlet: TRUE ZeroGradient extrapolation on every state
+                // channel, matching the unstructured model (whose outlet
+                // declarations are GpuBcKind::ZeroGradient — its ghost builder
+                // ignores the closure values entirely). Consuming the
+                // closure's p-anchored ghost energy as a kind-1 value instead
+                // makes the outlet a pressure-release surface: an outgoing
+                // compression reflects as an expansion with DOUBLED velocity
+                // (a strong visible bounce of the startup wave). Channel 6
+                // still carries the gauge back-pressure as the closure input
+                // (nothing consumes its ghost). Kind 2 with value 0 would also
+                // extrapolate, but the closure REWRITES these channel values
+                // every stage and kind 2 misreads them as prescribed
+                // gradients — the historical boundary heat-source runaway.
                 StructEdge::Right => (
                     2,
-                    vec![
-                        d(0.0),
-                        d(0.0),
-                        d(0.0),
-                        d(e0),
-                        d(0.0),
-                        d(0.0),
-                        d(outlet_p),
-                        d(t0),
-                    ],
+                    vec![z(), z(), z(), z(), z(), z(), d(outlet_p), z()],
                 ),
                 // No-slip wall: momentum and velocity pinned to 0,
                 // rho/rho_e/p/T zero-gradient.

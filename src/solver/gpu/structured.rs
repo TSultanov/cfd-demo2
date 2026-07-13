@@ -379,6 +379,10 @@ pub struct StructuredAutonomousStatus {
 struct StructuredAutonomousControl {
     control: wgpu::Buffer,
     params: wgpu::Buffer,
+    /// Device cap on workgroups per dispatch dimension; control-kernel
+    /// dispatches split into (x, y) rows above it, exactly like the stage
+    /// kernels' indirect args, and the WGSL flattens via `launch_index`.
+    max_workgroups_per_dim: u32,
     _grad_p: wgpu::Buffer,
     _rho_work: wgpu::Buffer,
     _dp_work: wgpu::Buffer,
@@ -1085,6 +1089,12 @@ struct IndirectArgs {{ x: u32, y: u32, z: u32 }};
 @group(0) @binding(14) var<storage, read_write> indirect_args: IndirectArgs;
 
 fn finite_f32(v: f32) -> bool {{ return v == v && abs(v) <= 3.402823e38; }}
+// Flatten the 2D-split dispatch (rows of `workgroups.x` groups, capped at the
+// device's 65,535 workgroups-per-dimension limit) back to a linear thread
+// index. Un-split dispatches have gid.y == 0, so this reduces to gid.x.
+fn launch_index(gid: vec3<u32>, workgroups: vec3<u32>) -> u32 {{
+    return gid.y * (workgroups.x * 64u) + gid.x;
+}}
 fn clock_parts() -> Clock {{
     return Clock(control.time_seconds, control.time_fraction_hi, control.time_fraction_lo);
 }}
@@ -1261,8 +1271,11 @@ fn reset_metrics(@builtin(global_invocation_id) gid: vec3<u32>) {{
 }}
 
 @compute @workgroup_size(64)
-fn history(@builtin(global_invocation_id) gid: vec3<u32>) {{
-    let index = gid.x;
+fn history(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(num_workgroups) workgroups: vec3<u32>,
+) {{
+    let index = launch_index(gid, workgroups);
     if (index >= arrayLength(&state.data) || atomicLoad(&control.halted) != 0u) {{ return; }}
     accepted_state.data[index] = state.data[index];
     accepted_history.data[index] = state_old.data[index];
@@ -1272,15 +1285,21 @@ fn history(@builtin(global_invocation_id) gid: vec3<u32>) {{
 }}
 
 @compute @workgroup_size(64)
-fn pressure_gradient(@builtin(global_invocation_id) gid: vec3<u32>) {{
-    let cell = gid.x;
+fn pressure_gradient(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(num_workgroups) workgroups: vec3<u32>,
+) {{
+    let cell = launch_index(gid, workgroups);
     if (cell >= grid.nx * grid.ny || atomicLoad(&control.halted) != 0u) {{ return; }}
 {gradient_body}
 }}
 
 @compute @workgroup_size(64)
-fn sample_state(@builtin(global_invocation_id) gid: vec3<u32>) {{
-    let cell = gid.x;
+fn sample_state(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(num_workgroups) workgroups: vec3<u32>,
+) {{
+    let cell = launch_index(gid, workgroups);
     if (cell >= grid.nx * grid.ny || atomicLoad(&control.halted) != 0u) {{ return; }}
     if (cell == 0u && params.inject_nan_after != 0xffffffffu
         && accepted_total_at_least_u32(params.inject_nan_after)) {{
@@ -1293,8 +1312,11 @@ fn sample_state(@builtin(global_invocation_id) gid: vec3<u32>) {{
 }}
 
 @compute @workgroup_size(64)
-fn sample_rhie_chow(@builtin(global_invocation_id) gid: vec3<u32>) {{
-    let cell = gid.x;
+fn sample_rhie_chow(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(num_workgroups) workgroups: vec3<u32>,
+) {{
+    let cell = launch_index(gid, workgroups);
     if (cell >= grid.nx * grid.ny || atomicLoad(&control.halted) != 0u) {{ return; }}
 {rc_body}
 }}
@@ -1409,8 +1431,11 @@ fn clock_random_probe(@builtin(global_invocation_id) gid: vec3<u32>) {{
 }}
 
 @compute @workgroup_size(64)
-fn rollback(@builtin(global_invocation_id) gid: vec3<u32>) {{
-    let index = gid.x;
+fn rollback(
+    @builtin(global_invocation_id) gid: vec3<u32>,
+    @builtin(num_workgroups) workgroups: vec3<u32>,
+) {{
+    let index = launch_index(gid, workgroups);
     if (index >= arrayLength(&state.data) || atomicLoad(&control.halted) == 0u) {{ return; }}
     state.data[index] = accepted_state.data[index];
     state_old.data[index] = accepted_history.data[index];
@@ -1887,6 +1912,7 @@ impl StructuredAutonomousControl {
         Self {
             control,
             params,
+            max_workgroups_per_dim: max_x,
             _grad_p: grad_p,
             _rho_work: rho_work,
             _dp_work: dp_work,
@@ -1927,7 +1953,18 @@ impl StructuredAutonomousControl {
         });
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &self.common_bg, &[]);
-        pass.dispatch_workgroups(threads.div_ceil(WG).max(1), 1, 1);
+        // Same 2D split as the stage kernels' indirect args: the state-word
+        // kernels (history/rollback) exceed 65,535 workgroups from ~190k cells
+        // (n * state_stride threads); the WGSL flattens via `launch_index`.
+        let groups = threads.div_ceil(WG).max(1);
+        let groups_x = groups.min(self.max_workgroups_per_dim);
+        let groups_y = groups.div_ceil(self.max_workgroups_per_dim);
+        assert!(
+            groups_y <= self.max_workgroups_per_dim,
+            "structured autonomous dispatch requires more than a 2D workgroup grid: groups={groups}, max={}",
+            self.max_workgroups_per_dim
+        );
+        pass.dispatch_workgroups(groups_x, groups_y, 1);
     }
 
     fn encode_sample(&self, encoder: &mut wgpu::CommandEncoder, cells: u32, adaptive: bool) {

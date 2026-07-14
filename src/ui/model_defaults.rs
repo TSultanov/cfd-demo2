@@ -129,6 +129,32 @@ impl ModelGuiDefaults {
     }
 }
 
+/// The default numerics for the density-based compressible family on the
+/// STRUCTURED EXPLICIT path: the dissipation-free KEP flux paired with the
+/// selective filter at sigma 0.2 (validated end-to-end by
+/// `tests/kep_filter_obstacle_test.rs`; Taylor–Green decays at the physical
+/// viscous rate where the central-upwind default ran ~5.9x hot).
+///
+/// `None` everywhere else, deliberately:
+/// - implicit stepping (the family's BDF2 pseudo-transient default) relies on
+///   the flux dissipation the KEP scheme removes — unvalidated;
+/// - unstructured meshes have NO filter pass, so the neutrally-stable grid
+///   Nyquist mode of a central flux is unprotected there;
+/// - the nozzle demo carries supersonic content (a hanging throat shock even
+///   in the unstarted default) and KEP has no shock capturing.
+pub fn structured_explicit_compressible_scheme_default(
+    model_id: &str,
+    geometry_is_nozzle: bool,
+    structured: bool,
+    time_scheme: GpuTimeScheme,
+) -> Option<(Scheme, f32)> {
+    (matches!(model_id, "compressible" | "compressible_structured")
+        && structured
+        && !geometry_is_nozzle
+        && time_scheme == GpuTimeScheme::RK4)
+        .then_some((Scheme::Kep, 0.2))
+}
+
 /// Incompressible momentum (coupled SIMPLE) defaults.
 ///
 /// Three levers chosen so the default flow is both stable and sheds a Kármán vortex
@@ -492,6 +518,54 @@ mod tests {
         assert!(
             (8.0e-6..8.6e-6).contains(&psi),
             "nozzle psi {psi:.3e} must be real Air 1/c^2 ≈ 8.3e-6 (no exaggeration)"
+        );
+    }
+
+    #[test]
+    fn structured_explicit_compressible_defaults_to_kep_with_filter() {
+        let rk4 = GpuTimeScheme::RK4;
+        // The validated regime: density-based compressible, structured,
+        // explicit RK4, non-nozzle geometry.
+        for model in ["compressible", "compressible_structured"] {
+            assert_eq!(
+                structured_explicit_compressible_scheme_default(model, false, true, rk4),
+                Some((Scheme::Kep, 0.2)),
+                "{model} structured explicit must default to KEP + filter"
+            );
+        }
+        // Outside the regime the rule must stay silent: implicit stepping,
+        // unstructured (no filter pass), the supersonic nozzle (no shock
+        // capturing in KEP), and every other model family.
+        assert_eq!(
+            structured_explicit_compressible_scheme_default(
+                "compressible_structured",
+                false,
+                true,
+                GpuTimeScheme::BDF2
+            ),
+            None
+        );
+        assert_eq!(
+            structured_explicit_compressible_scheme_default("compressible", false, false, rk4),
+            None
+        );
+        assert_eq!(
+            structured_explicit_compressible_scheme_default(
+                "compressible_structured",
+                true,
+                true,
+                rk4
+            ),
+            None
+        );
+        assert_eq!(
+            structured_explicit_compressible_scheme_default(
+                "allmach_thermal_structured",
+                false,
+                true,
+                rk4
+            ),
+            None
         );
     }
 }

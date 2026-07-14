@@ -123,8 +123,12 @@ fn kep_with_filter_holds_the_gui_obstacle_channel() {
         return;
     }
 
-    let reference = run_obstacle(None, None); // GUI default central-upwind (vanLeer)
-    let kep = run_obstacle(Some(Scheme::Kep), Some(0.2));
+    // The un-overridden case resolves through the GUI's structured-explicit
+    // compressible DEFAULT — which is now the KEP flux + selective filter
+    // (sigma 0.2) — so this run gates both the numerics AND the default
+    // resolution. The reference pins the historical central-upwind numerics.
+    let reference = run_obstacle(Some(Scheme::SecondOrderUpwindVanLeer), Some(0.0));
+    let kep = run_obstacle(None, None);
     let m_ref = metrics(&reference);
     let m_kep = metrics(&kep);
     eprintln!(

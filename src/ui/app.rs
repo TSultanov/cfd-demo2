@@ -2283,6 +2283,9 @@ impl CFDApp {
             app.time_scheme = GpuTimeScheme::RK4;
             app.adaptive_dt = true;
             app.dual_time = false;
+            // RK4 was selected after the preset applied: layer the
+            // structured-explicit compressible default (KEP + filter).
+            app.apply_structured_explicit_scheme_default();
             if app.mesh_mode == MeshMode::Structured2D {
                 app.backend = app.structured_backend_default();
             } else {
@@ -2417,6 +2420,42 @@ impl CFDApp {
         self.allmach_precond_uref_min = d.allmach_precond_uref_min;
         self.pressure_inlet = d.pressure_inlet;
         self.inlet_pressure = d.inlet_pressure;
+        // The per-model preset can't see the mesh mode: layer the
+        // structured-explicit compressible default (KEP + selective filter)
+        // on top. (The preset time scheme is implicit for this family, so
+        // this only fires when the caller subsequently selects RK4 — the
+        // transition handlers re-apply it.)
+        self.filter_sigma = 0.0;
+        self.apply_structured_explicit_scheme_default();
+    }
+
+    /// Layer the STRUCTURED EXPLICIT compressible default numerics (the
+    /// dissipation-free KEP flux + selective filter, see
+    /// `model_defaults::structured_explicit_compressible_scheme_default`) on
+    /// top of the per-model preset, and restore the preset scheme when a
+    /// transition LEAVES the validated regime while a flux-family scheme is
+    /// selected (KEP under implicit stepping, or on an unstructured mesh with
+    /// no filter pass, is unvalidated).
+    fn apply_structured_explicit_scheme_default(&mut self) {
+        match crate::ui::model_defaults::structured_explicit_compressible_scheme_default(
+            self.model_id,
+            self.selected_geometry == GeometryType::Nozzle,
+            self.mesh_mode == MeshMode::Structured2D,
+            self.time_scheme,
+        ) {
+            Some((scheme, sigma)) => {
+                self.selected_scheme = scheme;
+                self.filter_sigma = sigma;
+            }
+            None => {
+                if matches!(self.selected_scheme, Scheme::Kep | Scheme::Slau2) {
+                    self.selected_scheme =
+                        crate::ui::model_defaults::gui_defaults_for(self.model_id)
+                            .advection_scheme;
+                    self.filter_sigma = 0.0;
+                }
+            }
+        }
     }
 
     fn current_trace_runtime_params(&self) -> tracefmt::TraceRuntimeParams {
@@ -4422,6 +4461,10 @@ impl CFDApp {
         if self.mesh_mode == MeshMode::Structured2D {
             self.backend = self.structured_backend_default();
         }
+        // Entering/leaving explicit RK4 flips the structured compressible
+        // scheme default (KEP + filter inside the validated regime, the
+        // preset central-upwind outside it).
+        self.apply_structured_explicit_scheme_default();
         self.init_solver();
     }
 
@@ -10296,6 +10339,24 @@ pub fn gui_explicit_rk4_smoke(
             ));
         }
         params.filter_sigma = filter_sigma;
+    }
+    // Mirror the GUI's structured-explicit compressible default (this harness
+    // is RK4 by construction): an un-overridden case resolves to the KEP flux
+    // + selective filter exactly like the app's scheme radios would.
+    if case.advection_scheme.is_none() {
+        if let Some((scheme, sigma)) =
+            crate::ui::model_defaults::structured_explicit_compressible_scheme_default(
+                case.model_id,
+                case.geometry == "nozzle",
+                structured,
+                crate::solver::TimeScheme::RK4,
+            )
+        {
+            params.advection_scheme = scheme;
+            if case.filter_sigma.is_none() {
+                params.filter_sigma = sigma;
+            }
+        }
     }
 
     let model = if structured {

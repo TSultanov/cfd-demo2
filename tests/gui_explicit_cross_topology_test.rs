@@ -23,6 +23,7 @@
     feature = "ui"
 ))]
 
+use cfd2::solver::scheme::Scheme;
 use cfd2::ui::app::{
     gui_explicit_rk4_gpu_available, gui_explicit_rk4_smoke, GuiExplicitRk4Case,
     GuiExplicitRk4Smoke,
@@ -39,7 +40,13 @@ fn run_case(
     dt: f32,
 ) -> GuiExplicitRk4Smoke {
     gui_explicit_rk4_smoke(GuiExplicitRk4Case {
-        filter_sigma: None,
+        // This gate compares TOPOLOGIES under the same discretization: pin
+        // the central-upwind (vanLeer) numerics on both sides so the
+        // calibrated envelopes stay meaningful. The structured explicit
+        // compressible DEFAULT resolves to KEP + selective filter since the
+        // default flip — that combination is gated end-to-end by
+        // tests/kep_filter_obstacle_test.rs.
+        filter_sigma: Some(0.0),
         model_id,
         fluid: "Air",
         geometry,
@@ -51,7 +58,7 @@ fn run_case(
         cell_size: CELL_SIZE,
         steps: STEPS,
         requested_dt: Some(dt),
-        advection_scheme: None,
+        advection_scheme: Some(Scheme::SecondOrderUpwindVanLeer),
         inlet_velocity: None,
         inlet_pressure: None,
     })
